@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rockola · pantalla</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Paleta gruvbox, como la TUI */
+  :root {
+    --bg: #282828; --bg1: #32302f; --bg2: #3c3836; --line: #504945;
+    --fg: #ebdbb2; --dim: #a89984; --acc: #fabd2f; --ok: #b8bb26; --warn: #fe8019; --red: #fb4934;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); overflow: hidden;
+         font: 400 clamp(13px, 1.45vw, 30px)/1.35 "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace; }
+  .app { height: 100%; display: grid; grid-template-rows: auto auto 1fr auto; }
+
+  .bar-top, .bar-bottom { display: flex; gap: 2ch; padding: 0 1ch; background: var(--bg2); white-space: nowrap; overflow: hidden; }
+  .bar-top .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; }
+  .bar-top .url { font-weight: 700; text-decoration: underline; }
+  .bar-top .clock { margin-left: auto; color: var(--dim); }
+  .dim { color: var(--dim); }
+
+  /* Paneles con título incrustado en el borde, estilo TUI */
+  .panel { position: relative; border: 2px solid var(--line); margin: 1.2em 1ch 0; padding: 1em 2ch; min-width: 0; }
+  .panel > .ttl { position: absolute; top: -0.75em; left: 1.5ch; background: var(--bg); padding: 0 1ch;
+                  color: var(--dim); font-weight: 700; }
+
+  .top { display: grid; grid-template-columns: auto 1fr auto; gap: 3ch; align-items: start; }
+  canvas#art { width: 13em; height: 13em; image-rendering: pixelated; background: var(--bg1); display: block; }
+  .info { min-width: 0; }
+  .status { font-weight: 700; color: var(--ok); }
+  .status.paused, .status.loading { color: var(--acc); }
+  .title { font-size: 1.9em; font-weight: 700; line-height: 1.15; margin-top: .5em;
+           overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .artist { font-size: 1.25em; margin-top: .2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .by { margin-top: 1em; }
+  .by b { color: var(--acc); }
+  .progress { margin-top: 1em; white-space: pre; overflow: hidden; }
+  .progress .on { color: var(--acc); }
+  .progress .off { color: var(--line); }
+  .vol { margin-top: .6em; white-space: pre; }
+  .vol .on { color: var(--acc); }
+
+  .qr { text-align: center; }
+  .qr img { width: 11em; height: 11em; display: block; image-rendering: pixelated; }
+  .qr .cap { font-weight: 700; margin-bottom: .4em; }
+
+  .idle { display: none; }
+  .is-idle .idle { display: block; }
+  .is-idle .playing-only { display: none; }
+  .idle .big { font-size: 1.9em; font-weight: 700; margin-top: .5em; }
+  .idle .url { font-size: 1.4em; font-weight: 700; color: var(--acc); text-decoration: underline; margin: .4em 0; }
+
+  .queue { overflow: hidden; display: flex; flex-direction: column; margin-bottom: .6em; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th { text-align: left; color: var(--bg); background: var(--dim); font-weight: 700; padding: 0 1ch; }
+  td { padding: 0 1ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  tr:nth-child(even) td { background: var(--bg1); }
+  td.n, th.n { width: 4ch; text-align: right; color: var(--dim); }
+  td.d, th.d { width: 7ch; text-align: right; }
+  th.by, td.by { width: 16ch; }
+  td.by { color: var(--acc); }
+  .empty-q { color: var(--dim); padding: .4em 1ch; }
+
+  .bar-bottom .notice { color: var(--warn); overflow: hidden; text-overflow: ellipsis; }
+  .bar-bottom .conn { color: var(--red); font-weight: 700; }
+
+  @media (max-aspect-ratio: 1/1) {   /* pantalla vertical o celular */
+    body { font-size: clamp(12px, 2.6vw, 28px); overflow: auto; }
+    .top { grid-template-columns: 1fr; }
+    .qr { display: none; }
+    canvas#art { width: 100%; height: auto; aspect-ratio: 1; max-width: 22em; }
+  }
+</style>
+</head>
+<body>
+<div class="app is-idle" id="app">
+  <div class="bar-top">
+    <span class="logo">♫ ROCKOLA</span>
+    <span><span class="dim">pedí tu tema en</span> <span class="url" id="url">…</span></span>
+    <span class="clock" id="clock"></span>
+  </div>
+
+  <div class="panel top">
+    <span class="ttl" id="panelTitle">SONANDO</span>
+    <canvas id="art" width="32" height="32"></canvas>
+    <div class="info">
+      <div class="playing-only">
+        <div class="status" id="status">▶ SONANDO AHORA</div>
+        <div class="title" id="title"></div>
+        <div class="artist" id="artist"></div>
+        <div class="by"><span class="dim" id="byLbl">pedida por</span> <b id="by"></b></div>
+        <div class="progress" id="progress"></div>
+        <div class="vol" id="vol"></div>
+      </div>
+      <div class="idle">
+        <div class="big">NADA SONANDO</div>
+        <div class="dim" style="margin-top:1em">Escaneá el QR o entrá a</div>
+        <div class="url" id="idleUrl">…</div>
+        <div class="dim">y pedí un tema.</div>
+      </div>
+    </div>
+    <div class="qr">
+      <div class="cap">Pedí tu tema</div>
+      <img src="/api/qr.svg" alt="QR con el link de la rockola" onerror="this.parentElement.style.display='none'">
+    </div>
+  </div>
+
+  <div class="panel queue">
+    <span class="ttl" id="queueTitle">PRÓXIMAS</span>
+    <table>
+      <thead><tr><th class="n">#</th><th>Canción</th><th>Artista</th><th class="d">Dur.</th><th class="by">Pidió</th></tr></thead>
+      <tbody id="queue"></tbody>
+    </table>
+    <div class="empty-q" id="emptyQ">La cola está vacía.</div>
+  </div>
+
+  <div class="bar-bottom">
+    <span class="conn" id="conn" hidden>⚠ sin conexión · reintentando…</span>
+    <span class="notice" id="notice"></span>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const dos = n => String(n).padStart(2, "0");
+const fmt = s => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}:${dos(m)}:${dos(s % 60)}` : `${m}:${dos(s % 60)}`;
+};
+let state = null, receivedAt = 0, lastNotice = null, artFor = null;
+
+// ---- reloj
+setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }), 1000);
+
+// ---- ancho de un carácter, para dibujar la barra con caracteres que entren justo
+function charsThatFit(el) {
+  const probe = document.createElement("span");
+  probe.textContent = "━".repeat(20);
+  probe.style.visibility = "hidden"; probe.style.position = "absolute";
+  el.append(probe);
+  const w = probe.getBoundingClientRect().width / 20;
+  probe.remove();
+  return Math.max(10, Math.floor(el.clientWidth / w));
+}
+
+// ---- tapa del disco pixelada (32x32, como la TUI)
+function drawArt(url) {
+  const c = $("#art"), ctx = c.getContext("2d");
+  if (!url) {  // degradé de relleno
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const k = (x + y) / 64;
+      ctx.fillStyle = `rgb(${60 + 120 * k},${40 + 40 * k},${90 + 80 * (1 - k)})`; ctx.fillRect(x, y, 1, 1);
+    }
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    if (artFor !== url) return;
+    const s = Math.min(img.width, img.height);  // recorte cuadrado centrado
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 32, 32);
+  };
+  img.src = url;
+}
+
+// ---- dibujo
+function render() {
+  const s = state; if (!s) return;
+  const app = $("#app");
+  app.classList.toggle("is-idle", !s.now);
+  $("#panelTitle").textContent = s.now ? "SONANDO" : "ROCKOLA";
+
+  if (s.now) {
+    const st = $("#status");
+    if (s.loading) { st.textContent = "⏳ CARGANDO…"; st.className = "status loading"; }
+    else if (s.progress.playing) { st.textContent = "▶ SONANDO AHORA"; st.className = "status"; }
+    else { st.textContent = "⏸ EN PAUSA"; st.className = "status paused"; }
+    $("#title").textContent = s.now.title;
+    $("#artist").textContent = s.now.artist;
+    $("#byLbl").textContent = s.now.azar ? "" : "pedida por";
+    $("#by").textContent = s.now.azar ? "🔀 al azar" : s.now.by;
+    if (artFor !== s.now.thumb) { artFor = s.now.thumb; drawArt(s.now.thumb); }
+    if (s.volume != null) {
+      const n = 20, v = Math.min(n, Math.round(n * s.volume / 130));
+      $("#vol").innerHTML = "";
+      $("#vol").append(span("dim", "vol "), span("on", "▮".repeat(v)), span("dim", "▯".repeat(n - v) + ` ${s.volume}%`));
+    } else $("#vol").textContent = "";
+    tick();
+  } else if (artFor !== null) { artFor = null; drawArt(null); }
+
+  const q = s.queue || [];
+  const total = q.reduce((a, i) => a + (i.duration || 0), 0);
+  $("#queueTitle").textContent = q.length ? `PRÓXIMAS · ${q.length} · ${fmt(total)}` : "PRÓXIMAS";
+  $("#emptyQ").hidden = q.length > 0;
+  $("#queue").replaceChildren(...q.map((it, i) => {
+    const tr = document.createElement("tr");
+    for (const [cls, txt] of [["n", i + 1], ["", it.title], ["", it.artist], ["d", fmt(it.duration)], ["by", it.by]]) {
+      const td = document.createElement("td"); td.className = cls; td.textContent = txt; tr.append(td);
+    }
+    return tr;
+  }));
+
+  if (s.notice && lastNotice !== null && s.notice.id !== lastNotice) $("#notice").textContent = "⚠ " + s.notice.text;
+  lastNotice = s.notice ? s.notice.id : 0;
+}
+function span(cls, txt) { const e = document.createElement("span"); e.className = cls; e.textContent = txt; return e; }
+
+function tick() {
+  const s = state; if (!s || !s.now) return;
+  const p = s.progress, d = p.d || s.now.duration || 0;
+  let t = p.t + (p.playing ? (performance.now() - receivedAt) / 1000 : 0);
+  if (d) t = Math.min(t, d);
+  const times = `  ${fmt(t)} / ${fmt(d)}`;
+  const el = $("#progress");
+  const cols = charsThatFit(el) - times.length;
+  const on = d ? Math.round(cols * t / d) : 0;
+  el.replaceChildren(span("on", "━".repeat(on)), span("off", "─".repeat(Math.max(0, cols - on))), document.createTextNode(times));
+}
+setInterval(tick, 500);
+addEventListener("resize", render);
+
+// ---- datos
+fetch("/api/info").then(r => r.json()).then(i => { $("#url").textContent = i.url; $("#idleUrl").textContent = i.url; }).catch(() => {});
+
+(async function loop() {
+  let version = null;
+  for (;;) {
+    try {
+      // ?sala=ventas: la de otra sala (sin nada: la principal, la del parlante)
+      const sala = new URLSearchParams(location.search).get("sala");
+      const qs = [sala && `sala=${encodeURIComponent(sala)}`, version != null && `since=${version}`].filter(Boolean).join("&");
+      const r = await fetch("/api/state" + (qs ? `?${qs}` : ""));
+      if (!r.ok) throw new Error(r.status);
+      state = await r.json(); receivedAt = performance.now(); version = state.version;
+      $("#conn").hidden = true;
+      render();
+    } catch {
+      $("#conn").hidden = false; version = null;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+})();
+drawArt(null);
+</script>
+</body>
+</html>

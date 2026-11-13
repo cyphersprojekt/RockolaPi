@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rockola · reproductor</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Misma estética que /pantalla y la TUI (paleta gruvbox) */
+  :root {
+    --bg: #282828; --bg1: #32302f; --bg2: #3c3836; --line: #504945;
+    --fg: #ebdbb2; --dim: #a89984; --acc: #fabd2f; --ok: #b8bb26; --red: #fb4934;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--fg);
+         font: 15px/1.45 "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  .dim { color: var(--dim); }
+  .top { display: flex; align-items: center; gap: 2ch; flex-wrap: wrap; padding: .4em 14px; background: var(--bg2); }
+  .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; }
+  .top .url { font-weight: 700; text-decoration: underline; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 14px 4em;
+         display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 2.5ch; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .panel { position: relative; border: 2px solid var(--line); margin-top: 1.7em; padding: 1em 1.5ch .9em; min-width: 0; }
+  .panel > .ttl { position: absolute; top: -.8em; left: 1.2ch; background: var(--bg); padding: 0 1ch;
+                  color: var(--dim); font-weight: 700; white-space: nowrap; }
+  .video { aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--line); }
+  .video iframe { width: 100%; height: 100%; display: block; }
+  .now { margin-top: .8em; }
+  .titulo { font-weight: 700; font-size: 1.15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { color: var(--dim); font-size: .87em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quien { color: var(--acc); }
+  .controles { display: flex; gap: 1ch; margin-top: .8em; }
+  button { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+           padding: .3em 1ch; cursor: pointer; white-space: nowrap; border-radius: 0; }
+  button:hover { border-color: var(--acc); color: var(--acc); }
+  button.primario { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
+  button.primario:hover { color: var(--bg); filter: brightness(1.1); }
+  .hint { color: var(--dim); font-size: .87em; margin: .9em 0 0; }
+  .fila { display: flex; align-items: center; gap: 1.2ch; padding: .4em 0; }
+  .fila + .fila { border-top: 1px dashed var(--line); }
+  .fila .pos { width: 2.5ch; text-align: right; color: var(--dim); flex: none; }
+  .fila .info { flex: 1; min-width: 0; }
+  .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fila button { padding: .2em .8ch; }
+  .vacio { color: var(--dim); }
+  #start { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; text-align: center;
+           background: rgba(40, 40, 40, .94); padding: 16px; }
+  #start .caja { border: 2px solid var(--line); padding: 1.5em 3ch; max-width: 46ch; }
+  #start .cursor { animation: titila 1s steps(1) infinite; color: var(--acc); }
+  @keyframes titila { 50% { opacity: 0; } }
+  #start button { margin-top: 1em; font-size: 1.1em; padding: .5em 2ch; }
+  #toast { position: fixed; left: 0; right: 0; bottom: 0; padding: .55em 14px; background: var(--bg2);
+           border-top: 2px solid var(--red); color: var(--red); transform: translateY(110%); transition: transform .2s; }
+  #toast.show { transform: none; }
+</style>
+</head>
+<body>
+<div id="start">
+  <div class="caja">
+    <div>El navegador necesita un toque antes de dejar sonar música.</div>
+    <button id="startBtn" class="primario">▶ arrancar la rockola</button>
+    <div class="dim" style="margin-top:.8em">esperando<span class="cursor">▌</span></div>
+  </div>
+</div>
+
+<div class="top">
+  <span class="logo">♫ ROCKOLA · REPRODUCTOR</span>
+  <span><span class="dim">pedí tu tema en</span> <span class="url" id="url">…</span></span>
+</div>
+
+<main>
+  <section class="panel">
+    <span class="ttl">SONANDO</span>
+    <div class="video"><div id="yt"></div></div>
+    <div class="now" id="now"></div>
+    <div class="controles">
+      <button id="pauseBtn" class="primario">⏯ pausa</button>
+      <button id="skipBtn">⏭ saltar</button>
+    </div>
+    <p class="hint">Si una canción no arranca sola, tocá play una vez en el video.
+      Con YouTube Premium logueado en este navegador, no hay publicidad.</p>
+  </section>
+  <section class="panel">
+    <span class="ttl" id="queueTitle">PRÓXIMAS</span>
+    <div id="queue"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
+  return e;
+}
+const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = "⚠ " + msg; t.className = "show";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 4000);
+}
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+  return data;
+}
+
+api("/api/info").then(i => $("#url").textContent = i.url).catch(() => {});
+
+// ---------- reproductor de YouTube ----------
+let player, ready = false, started = false, currentId = null, last = null;
+
+const tag = document.createElement("script");
+tag.src = "https://www.youtube.com/iframe_api";
+document.head.append(tag);
+
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player("yt", {
+    width: "100%", height: "100%",
+    playerVars: { playsinline: 1, rel: 0, origin: location.origin },
+    events: {
+      onReady: () => { ready = true; if (last) handle(last); },
+      onStateChange: e => {
+        if (e.data === YT.PlayerState.ENDED && currentId) next(currentId);
+        if (e.data === YT.PlayerState.PLAYING || e.data === YT.PlayerState.PAUSED) reportProgress();
+      },
+      onError: e => {
+        const why = { 2: "id inválido", 5: "error del reproductor", 100: "no existe o es privada",
+                      101: "no permite reproducirse fuera de YouTube", 150: "no permite reproducirse fuera de YouTube" };
+        toast(`Salteada: “${last?.now?.title ?? "?"}” ${why[e.data] ?? "(error " + e.data + ")"}`);
+        if (currentId) next(currentId);
+      },
+    },
+  });
+};
+
+function play(item, startSeconds = 0) {
+  if (item.id === currentId) return;
+  currentId = item.id;
+  player.loadVideoById({ videoId: item.videoId, startSeconds: Math.floor(startSeconds) });
+  document.title = `▶ ${item.title}`;
+}
+function stop() {
+  currentId = null;
+  if (ready) player.stopVideo();
+  document.title = "Rockola · reproductor";
+}
+
+// Decide qué hacer con cada estado nuevo que llega del servidor.
+function handle(s) {
+  // Si el servidor está en modo mpv, la música ya suena ahí: no reproducir también acá.
+  if (s.mode === "mpv") { location.href = "/pantalla"; return; }
+  last = s;
+  render(s);
+  if (!started || !ready) return;
+  if (s.now) {
+    // Si recargaste la página a mitad de canción, retoma donde iba.
+    if (s.now.id !== currentId) play(s.now, currentId === null ? s.progress.t : 0);
+  } else if (s.queue.length) {
+    next(null);
+  } else if (currentId) {
+    stop();
+  }
+}
+
+async function next(finishedId) {
+  try { handle(await api("/api/next", { finished: finishedId })); }
+  catch (err) { toast(err.message); }
+}
+
+function reportProgress() {
+  if (!ready || !currentId) return;
+  api("/api/progress", {
+    t: player.getCurrentTime() || 0,
+    d: player.getDuration() || 0,
+    // "buffering" cuenta como sonando, para que no parpadee "en pausa"
+    playing: [YT.PlayerState.PLAYING, YT.PlayerState.BUFFERING].includes(player.getPlayerState()),
+  }).catch(() => {});
+}
+setInterval(reportProgress, 3000);
+
+// ---------- UI ----------
+function render(s) {
+  $("#now").replaceChildren(...(s.now
+    ? [el("div", { class: "titulo", title: s.now.title }, s.now.title),
+       el("div", { class: "sub" }, `${s.now.artist} · pedida por `, el("span", { class: "quien" }, s.now.by))]
+    : [el("div", { class: "vacio" }, s.queue.length ? "cargando…" : "Nada en la cola. Esperando pedidos…")]));
+
+  const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
+  $("#queueTitle").textContent = s.queue.length ? `PRÓXIMAS · ${s.queue.length} · ${fmt(total)}` : "PRÓXIMAS";
+  $("#queue").replaceChildren(...(s.queue.length ? s.queue.map((it, i) =>
+    el("div", { class: "fila" },
+      el("span", { class: "pos" }, i + 1),
+      el("div", { class: "info" },
+        el("div", { class: "t", title: it.title }, it.title),
+        el("div", { class: "sub" }, `${it.artist} · ${fmt(it.duration)} · `, el("span", { class: "quien" }, it.by))),
+      i > 0 && el("button", { title: "Que suene después de la actual",
+                              onclick: () => api("/api/first", { id: it.id }).then(handle, e => toast(e.message)) }, "⤒"),
+      el("button", { title: "Quitar de la cola",
+                     onclick: () => api("/api/remove", { id: it.id }).then(handle, e => toast(e.message)) }, "✕"))
+  ) : [el("div", { class: "vacio" }, "La cola está vacía.")]));
+}
+
+$("#pauseBtn").onclick = () => {
+  if (!ready || !currentId) return;
+  player.getPlayerState() === YT.PlayerState.PLAYING ? player.pauseVideo() : player.playVideo();
+};
+$("#skipBtn").onclick = () => currentId && next(currentId);
+
+$("#startBtn").onclick = () => {
+  started = true;
+  $("#start").remove();
+  if (last) handle(last);
+};
+
+// Long-poll: el servidor responde apenas cambia algo (no depende de timers,
+// así que funciona aunque la pestaña esté en segundo plano).
+(async function loop() {
+  let version = null;
+  for (;;) {
+    try {
+      const s = await api("/api/state" + (version != null ? `?since=${version}` : ""));
+      version = s.version;
+      handle(s);
+    } catch {
+      await new Promise(r => setTimeout(r, 3000));
+      version = null;
+    }
+  }
+})();
+</script>
+</body>
+</html>

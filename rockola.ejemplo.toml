@@ -1,0 +1,79 @@
+# Configuración de la rockola.
+# iniciar.sh copia este archivo a rockola.toml la primera vez (con un PIN al azar).
+# Después de cambiar algo, reiniciá el servidor.
+
+# PIN para controlar la música desde la web (pausa, volumen, saltear, ordenar la cola).
+# En la página, tocá "Controlar" y escribilo. Vacío = sólo se controla desde esta máquina.
+pin = "CAMBIAR"
+
+# Puerto de la página web.
+puerto = 8000
+
+# Canciones pendientes que puede tener cada persona en la cola.
+max_por_persona = 3
+
+# Duración máxima de una canción, en segundos (0 = sin límite).
+duracion_maxima = 600
+
+# Volumen inicial (0 a 130).
+volumen = 80
+
+# true: iguala el volumen entre canciones (algunas vienen mucho más fuertes que otras).
+normalizar = false
+
+# Dónde suena la música: "mpv" (en esta máquina) o "navegador" (pestaña /player).
+# Vacío = mpv si está instalado.
+modo = ""
+
+# IP que aparece en el link y el QR. Vacío = detectarla sola.
+# Ponela si aparece la de otra red (VPN, cable vs. wifi, etc.).
+ip = ""
+
+# Canciones guardadas (modo mpv). Lo que suena queda guardado: si lo vuelven a pedir suena
+# al instante, y con el modo aleatorio (🔀) suenan al azar cuando la cola se vacía.
+# Es el espacio máximo, en GB, para todas las salas juntas: al pasarlo se borran las que hace
+# más tiempo que no suenan. Igual siempre se dejan 2 GB libres en el disco, así que no sirve
+# de nada pasarse de lo que hay libre (mirá con df -h). 0 = no guardar nada.
+guardar_gb = 16
+
+# Dónde se guardan. Vacío = ~/.cache/rockola
+carpeta = ""
+
+# Al prender la Raspberry, o al reiniciar la rockola (p. ej. después de actualizarla), si en 10
+# segundos nadie pidió nada, el modo aleatorio (🔀) se prende solo y arranca a sonar: así hay
+# música sin que nadie toque nada. Si hay un parlante Bluetooth (pi/bluetooth.sh), espera a que
+# se conecte. No pasa en el reinicio diario de las 6 de la mañana, ni si la arrancás a mano
+# (./iniciar.sh en una terminal): sólo con el servicio de la Raspberry.
+# false = queda como estaba la última vez, y en silencio hasta que pidan algo o toquen ⏯.
+azar_al_prender = true
+
+# Mientras suena una canción, se bajan de a una las que vienen en la cola: al terminar (o con
+# ⏭) la que sigue ya está lista. 0 = toda la cola; un número, sólo esas próximas (con 1, sólo la
+# siguiente). Limitalo si YouTube empieza a frenar las descargas.
+predescargar = 0
+
+# Opciones extra para mpv (casi nunca hace falta). Ejemplo:
+# mpv_args = ["--audio-device=pipewire"]
+mpv_args = []
+
+# ---------------------------------------------------------------------------------------
+# Botones físicos en el GPIO de la Raspberry:  [ − ]  [ ⏮ ]  [ ⏯ ]  [ ⏭ ]  [ + ]
+# Cada botón va entre su pin y una tierra (GND), sin nada más. Conexiones: docs/botones.md
+[controles]
+activado = true
+
+# Pines en numeración BCM. Cada botón usa dos pines pegados: su señal y una tierra para él
+# solo (así se cablea con dupont hembra-hembra, sin soldar). 0 = no hay ese botón.
+vol_menos = 25     # pin 22, tierra en el 20
+anterior = 11      # pin 23, tierra en el 25
+play = 5           # pin 29, tierra en el 30
+siguiente = 13     # pin 33, tierra en el 34
+vol_mas = 26       # pin 37, tierra en el 39
+
+# Cuánto sube o baja el volumen cada toque (mantenido, sigue subiendo/bajando).
+paso_volumen = 5
+
+# Doble toque en − = anterior, doble toque en + = siguiente (sirve si se rompe ⏮ o ⏭).
+# Es el tiempo máximo entre los dos toques, en segundos. Para saber si viene el segundo,
+# el toque simple tarda eso en cambiar el volumen. 0 = sin doble toque.
+doble_toque = 0.4

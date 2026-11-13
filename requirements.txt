@@ -1,0 +1,5 @@
+ytmusicapi         # búsqueda en YouTube Music
+yt-dlp[default]    # descarga del audio (modo mpv)
+textual            # la TUI
+pillow             # tapa del disco en la TUI
+qrcode             # QR para pedir temas

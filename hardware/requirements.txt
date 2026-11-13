@@ -1,0 +1,3 @@
+manifold3d   # geometría (las mismas operaciones que usa OpenSCAD)
+numpy
+matplotlib   # sólo para --vista

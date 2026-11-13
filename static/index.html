@@ -1,0 +1,1699 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#3c3836">
+<title>Rockola</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Misma estética que /pantalla y la TUI (paleta gruvbox) */
+  :root {
+    --bg: #282828; --bg1: #32302f; --bg2: #3c3836; --line: #504945;
+    --fg: #ebdbb2; --dim: #a89984; --acc: #fabd2f; --ok: #b8bb26; --warn: #fe8019; --red: #fb4934;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--fg);
+         font: 15px/1.45 "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  :root { --ancho: 760px; --margen: 12px; }
+  main { max-width: var(--ancho); margin: 0 auto; padding: 0 var(--margen) 5em; }
+  .dim { color: var(--dim); }
+
+  /* En el celular, una columna y en este orden. En la compu, tres: a la izquierda la letra y el
+     chat; en el medio lo que suena y lo que viene; a la derecha, para pedir (buscar y las
+     guardadas). En una pantalla mediana no entran tres: la letra y el chat van en una franja
+     arriba de las otras dos, uno al lado del otro. */
+  .columnas { display: flex; flex-direction: column; }
+  .col { display: contents; }
+  #panelSonando { order: 1; } #panelLetra { order: 2; } #panelPedir { order: 3; } #panelCola { order: 4; }
+  #panelChat { order: 5; } #panelHistorial { order: 6; } #biblioPanel { order: 7; }
+  .letra { height: 9em; }
+  .chat { height: 12em; }
+  @media (min-width: 1000px) {
+    :root { --ancho: 1600px; --margen: 24px; }
+    .columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 3ch;
+                align-items: start; }
+    .col { display: block; }
+    .col-letra { grid-column: 1 / -1;   /* la franja de arriba: letra | chat */
+                 display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 3ch; }
+    .letra { height: 6.6em; }
+    .chat { height: 4.1em; }
+  }
+  @media (min-width: 1250px) {
+    :root { --ancho: 1800px; }
+    .columnas { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr) minmax(0, 6fr); }
+    .col-letra { grid-column: auto; display: block; }
+    .letra { height: 45vh; }
+    .chat { height: 14em; }
+  }
+  /* En la compu (ancha y no muy baja) la página entra justa en la ventana, sin scroll: las dos
+     columnas terminan a la misma altura y cada lista muestra las filas que le entran (si hay
+     más, se paginan). Cuántas entran lo cuenta el JS: ver fijo() y pintarLista(). */
+  @media (min-width: 1000px) and (min-height: 600px) {
+    html, body { height: 100%; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+    main { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; padding-bottom: 1.2em; }
+    .columnas { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
+    .col { display: flex; flex-direction: column; min-height: 0; }
+    .col > .panel { flex: none; }
+    #panelCola, #panelPedir, #panelHistorial, #biblioPanel { display: flex; flex-direction: column; }
+    /* la cola y los resultados ocupan lo que necesitan (mientras haya lugar)... */
+    #panelCola, #panelPedir { flex: 0 1 auto; min-height: 0; }
+    /* ...y lo que queda es para lo que sonó y las guardadas, que llegan hasta abajo */
+    #panelHistorial { flex: 1 1 0; min-height: 8em; }
+    #biblioPanel { flex: 1 1 0; min-height: 16em; }
+    #queue, #results, #history, #guardadas { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    #history, #guardadas { flex: 1 1 0; }
+    .filas { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+    /* en las que llegan hasta abajo, las filas ocupan todo el alto: el paginado queda pegado al
+       fondo, tenga la página las filas que tenga (en la cola y los resultados lo hace el JS) */
+    #history > .filas, #guardadas > .filas { flex: 1 1 0; }
+    /* la franja de arriba: la letra y el chat, del mismo alto */
+    .col-letra { display: flex; flex-direction: row; column-gap: 3ch; }
+    .col-letra > .panel { flex: 1 1 0; min-width: 0; }
+  }
+  /* con tres columnas, la letra y el chat ocupan toda la de la izquierda, hasta abajo */
+  @media (min-width: 1250px) and (min-height: 600px) {
+    .columnas { grid-template-rows: minmax(0, 1fr); }
+    .col-letra { flex-direction: column; }
+    #panelLetra { flex: 3 1 0; min-height: 0; display: flex; flex-direction: column; }
+    .letra { flex: 1 1 0; height: auto; min-height: 0; }
+    #panelChat { flex: 2 1 0; min-height: 10em; display: flex; flex-direction: column; }
+    .chat { flex: 1 1 0; height: auto; min-height: 0; }
+  }
+
+  /* chat de la sala */
+  .chat { overflow-y: auto; overflow-wrap: anywhere; }
+  .msg { padding: .1em 0; }
+  .msg .hora { color: var(--dim); font-size: .87em; }
+  .chatform { margin-top: .6em; }
+
+  /* barra de arriba (su contenido alineado con el de abajo) */
+  .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 1ch; flex-wrap: wrap;
+         padding: .4em max(var(--margen), calc((100% - var(--ancho)) / 2 + var(--margen)));
+         background: var(--bg2); }
+  .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; margin-right: auto; }
+  .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
+  .name input { width: 13ch; }
+  .salas select { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+                  padding: .3em .5ch; border-radius: 0; max-width: 20ch; }
+  .salas select:focus { border-color: var(--acc); outline: none; }
+
+  /* paneles con el título en el borde, como en la terminal */
+  .panel { position: relative; border: 2px solid var(--line); margin-top: 1.7em; padding: 1em 1.5ch .8em; }
+  .panel > .ttl { position: absolute; top: -.8em; left: 1.2ch; background: var(--bg); padding: 0 1ch;
+                  color: var(--dim); font-weight: 700; white-space: nowrap; max-width: calc(100% - 2.4ch);
+                  overflow: hidden; text-overflow: ellipsis; }
+
+  input { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+          padding: .35em 1ch; outline: none; min-width: 0; border-radius: 0; }
+  input:focus { border-color: var(--acc); }
+  input::placeholder { color: var(--dim); }
+  button { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+           padding: .3em 1ch; cursor: pointer; white-space: nowrap; border-radius: 0; }
+  button:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
+  button.primario { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
+  button.primario:hover:not(:disabled) { color: var(--bg); filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.on { color: var(--acc); border-color: var(--acc); }
+
+  /* sonando */
+  .now { display: flex; gap: 2ch; align-items: flex-start; }
+  /* la tapa, con medio vinilo asomando por detrás: gira mientras suena (una vuelta cada 3 s) y en el centro
+     lleva la misma tapa, como etiqueta */
+  .disco { position: relative; flex: none; width: 9.6em; height: 6.5em; }
+  .disco .tapa { position: relative; z-index: 1; display: block; width: 6.5em; height: 6.5em;
+                 image-rendering: pixelated; background: var(--bg1); box-shadow: 4px 0 8px rgba(0, 0, 0, .55); }
+  .vinilo { position: absolute; top: .2em; left: 3.45em; width: 6.1em; height: 6.1em; border-radius: 50%;
+            background:
+              conic-gradient(from 20deg, transparent 0 8%, rgba(235, 219, 178, .14) 13%, transparent 19% 50%,
+                             rgba(235, 219, 178, .09) 62%, transparent 69%),
+              repeating-radial-gradient(circle, #1d2021 0 1.5px, #2b2a28 1.5px 2.5px);
+            box-shadow: 0 0 0 1px #111, 1px 2px 6px rgba(0, 0, 0, .5);
+            animation: girar 3s linear infinite paused; }
+  .now.girando .vinilo { animation-play-state: running; }
+  .vinilo .etiqueta { position: absolute; inset: 31%; border-radius: 50%; overflow: hidden;
+                      box-shadow: 0 0 0 2px #1d2021; }
+  .vinilo .etiqueta canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+  .vinilo .etiqueta::after { content: ""; position: absolute; inset: 44%; border-radius: 50%; background: var(--bg); }
+  @keyframes girar { to { transform: rotate(1turn); } }
+
+  /* letra: la del renglón de ahora se va poniendo amarilla palabra por palabra; la lista se
+     mueve sola para que ese renglón quede en el medio (el alto está arriba, con las columnas) */
+  .letra { position: relative; overflow: hidden; font-size: 1.05em; }
+  .letra.sincro { mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
+  .letra.libre { overflow-y: auto; }   /* sin tiempos: para leerla a mano */
+  .renglones { text-align: center; transition: transform .6s ease; }
+  .letra.sincro .renglones { padding: 2.5em 0; }   /* que el primero y el último puedan quedar en el medio */
+  .renglon { padding: .18em 1ch; color: var(--dim); line-height: 1.35; }
+  .renglon.paso { color: #d79921; }                /* ya cantado: amarillo apagado */
+  .renglon.ahora { color: var(--fg); font-weight: 700; }
+  .renglon .ya { color: var(--acc); }
+  .renglon .va { color: transparent; -webkit-background-clip: text; background-clip: text;
+                 background-image: linear-gradient(90deg, var(--acc) var(--p, 0%), var(--fg) var(--p, 0%)); }
+  @media (prefers-reduced-motion: reduce) { .renglones { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .vinilo { animation: none; } }
+  @media (max-width: 480px) { .disco { font-size: .8em; } }
+  .now .info { flex: 1; min-width: 0; }
+  .estado { font-weight: 700; color: var(--ok); }
+  .estado.pausa, .estado.carga { color: var(--acc); }
+  .titulo { font-size: 1.2em; font-weight: 700; line-height: 1.25; margin-top: .25em;
+            overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .barra { white-space: pre; overflow: hidden; margin-top: .5em; }
+  .barra .on { color: var(--acc); }
+  .barra .off { color: var(--line); }
+  .vacio { color: var(--dim); padding: .3em 0; }
+
+  /* controles con PIN */
+  .controles { display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; margin-top: .9em;
+               padding-top: .8em; border-top: 1px dashed var(--line); }
+  .vol { display: flex; align-items: center; gap: 1ch; flex: 1; min-width: 230px; }
+  .vol input[type=range] { flex: 1; padding: 0; border: 0; background: none; accent-color: var(--acc); height: 26px; }
+  .vol output { width: 4.5ch; text-align: right; color: var(--dim); }
+  .biblio { flex-basis: 100%; font-size: .87em; }
+  form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
+  form.pin input { width: 11ch; letter-spacing: .2em; }
+
+  /* buscar */
+  form.buscar { display: flex; gap: 1ch; }
+  form.buscar input { flex: 1; }
+  .prompt { color: var(--acc); font-weight: 700; align-self: center; }
+
+  /* listas */
+  .fila { display: flex; align-items: center; gap: 1.2ch; padding: .4em 0; }
+  .fila + .fila { border-top: 1px dashed var(--line); }
+  .fila img { width: 2.8em; height: 2.8em; object-fit: cover; flex: none; background: var(--bg1);
+              border: 1px solid var(--line); }
+  .fila .pos { width: 2.5ch; text-align: right; color: var(--dim); flex: none; }
+  .fila .info { flex: 1; min-width: 0; }
+  .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { color: var(--dim); font-size: .87em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quien { color: var(--acc); }
+  .mia { color: var(--ok); font-weight: 700; }
+  .acts { display: flex; gap: .6ch; flex: none; }
+  .acts button { padding: .2em .8ch; }
+  .hint { color: var(--dim); margin-top: .7em; }
+  .fila.playlist .t { color: var(--acc); font-weight: 700; }
+  .herr { display: flex; justify-content: flex-end; margin-bottom: .3em; }
+  .listas { margin-bottom: .5em; padding-bottom: .5em; border-bottom: 1px dashed var(--line); }
+  .listas .fila { padding: .2em 0; }
+  .listas .fila + .fila { border-top: 0; }
+  .guardada { color: var(--ok); }
+  /* las que esperan para bajarse (⬇), arriba de las guardadas: se pueden cancelar */
+  .pendientes { margin-bottom: .6em; padding-bottom: .5em; border-bottom: 1px dashed var(--line);
+                max-height: 10.5em; overflow-y: auto; flex: none; }
+  .pendientes .fila { padding: .15em 0; }
+  .pendientes .fila + .fila { border-top: 0; }
+  .pendientes .cabeza { border-bottom: 0; color: var(--dim); }
+  @media (max-width: 599px) { .largo { display: none; } }   /* "⬇ guardar" → "⬇" en el celular */
+  .vistas { display: flex; align-items: center; gap: 1ch; flex-wrap: wrap; margin-bottom: .6em; }
+
+  /* paginado: « ‹ 4 [5] 6 › » */
+  .paginas { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5ch;
+             margin-top: .5em; padding-top: .6em; border-top: 1px dashed var(--line); }
+  .paginas button, .paginas .actual { min-width: 4ch; padding: .2em .8ch; text-align: center; }
+  .paginas .actual { border: 1px solid var(--acc); background: var(--acc); color: var(--bg); font-weight: 700; }
+
+  /* guardadas por álbum: se toca uno y en lugar de la lista aparecen sus temas */
+  .fila.album { cursor: pointer; }
+  .fila.album:hover .t, .fila.album:focus-visible .t { color: var(--acc); }
+  .fila.album:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
+  .flecha { color: var(--dim); flex: none; }
+  .cabeza { border-bottom: 1px solid var(--line); }
+  #guardadas { position: relative; }
+  .sonda { position: absolute; top: 0; left: 0; right: 0; visibility: hidden; pointer-events: none; }
+
+  /* avisos: barra de abajo */
+  #toast { position: fixed; left: 0; right: 0; bottom: 0; padding: .55em 12px; background: var(--bg2);
+           border-top: 2px solid var(--ok); transform: translateY(110%); transition: transform .2s; }
+  #toast.show { transform: none; }
+  #toast.err { border-top-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="logo">♫ ROCKOLA</span>
+  <label class="salas" id="salaBox" hidden><span class="largo">sala:</span>
+    <select id="salaSel" aria-label="Sala" title="🔊 suena en el parlante · 📻 se escucha con la radio"></select></label>
+  <button id="radioBtn" type="button" aria-pressed="false" hidden
+          title="Escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻<span class="largo"> radio</span></button>
+  <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
+  <button id="lockBtn" type="button" title="Controlar la música (pide PIN)">🔒 controlar</button>
+</div>
+<main>
+  <div id="pinPanel" class="panel" hidden>
+    <span class="ttl">PIN</span>
+    <form id="pinForm" class="pin">
+      <span class="dim" id="pinTexto">Para controlar la música (está en rockola.toml):</span>
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required>
+      <button class="primario">entrar</button>
+      <button type="button" id="pinCancel">cancelar</button>
+    </form>
+  </div>
+
+  <div id="salaPanel" class="panel" hidden>
+    <span class="ttl">NUEVA SALA</span>
+    <form id="salaForm" class="pin">
+      <span class="dim">Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio,
+        cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).</span>
+      <input id="salaNombre" maxlength="30" placeholder="nombre: Ventas" autocomplete="off" required aria-label="Nombre de la sala">
+      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN" minlength="4" maxlength="30"
+             required aria-label="PIN de la sala (4 o más)">
+      <button class="primario">crear</button>
+      <button type="button" id="salaCancel">cancelar</button>
+    </form>
+  </div>
+
+  <div class="columnas">
+  <div class="col col-letra">
+  <section class="panel" id="panelLetra">
+    <span class="ttl" id="letraTitulo">LETRA</span>
+    <div id="letra" class="letra"><div class="vacio">conectando…</div></div>
+  </section>
+  <section class="panel" id="panelChat">
+    <span class="ttl" id="chatTitulo">CHAT</span>
+    <div id="chat" class="chat" role="log" aria-label="Mensajes de la sala"><div class="vacio">conectando…</div></div>
+    <form id="chatForm" class="buscar chatform">
+      <span class="prompt">&gt;</span>
+      <input id="chatInput" maxlength="300" placeholder="escribile a la sala…" autocomplete="off" enterkeyhint="send"
+             aria-label="Mensaje para la sala">
+    </form>
+  </section>
+  </div>
+
+  <div class="col">
+  <section class="panel" id="panelSonando">
+    <span class="ttl" id="nowTitle">SONANDO</span>
+    <div id="now" class="now"><div class="vacio">conectando…</div></div>
+    <div id="salaHint" class="hint" hidden></div>
+    <div id="controls" class="controles" hidden>
+      <button id="prevBtn" type="button" title="Anterior (o desde el principio)">⏮</button>
+      <button id="playBtn" class="primario" type="button">⏸ pausa</button>
+      <button id="skipBtn" type="button" title="Siguiente">⏭</button>
+      <button id="shufBtn" type="button" aria-pressed="false"
+              title="Aleatorio: cuando la cola se vacía, suenan canciones guardadas al azar">🔀 al azar</button>
+      <div class="vol" id="volBox">
+        <button type="button" id="volDown" aria-label="Bajar volumen">−</button>
+        <input type="range" id="vol" min="0" max="130" step="1" aria-label="Volumen">
+        <button type="button" id="volUp" aria-label="Subir volumen">+</button>
+        <output id="volOut">–</output>
+      </div>
+      <button id="borrarSalaBtn" type="button" hidden
+              title="Borrar esta sala: se pierden su cola y su chat (las canciones bajadas quedan)">🗑 borrar sala</button>
+      <div class="dim biblio" id="biblio"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="panelCola">
+    <span class="ttl" id="queueTitle">PRÓXIMAS</span>
+    <div id="queue"></div>
+  </section>
+
+  <section class="panel" id="panelHistorial">
+    <span class="ttl">SONARON RECIÉN</span>
+    <div id="history"></div>
+  </section>
+  </div>
+
+  <div class="col">
+  <section class="panel" id="panelPedir">
+    <span class="ttl">PEDIR UN TEMA</span>
+    <form class="buscar" id="search">
+      <span class="prompt">&gt;</span>
+      <input id="q" placeholder="canción, artista o link de YouTube" autocomplete="off" enterkeyhint="search"
+             aria-label="Buscar en las guardadas y en YouTube">
+    </form>
+    <div id="results"></div>
+  </section>
+
+  <section class="panel" id="biblioPanel" hidden>
+    <span class="ttl" id="biblioTitle">GUARDADAS</span>
+    <div id="pendientes" class="pendientes" hidden></div>
+    <div class="vistas">
+      <span class="dim">ver:</span>
+      <button type="button" data-vista="albumes" aria-pressed="true">💿 por álbum</button>
+      <button type="button" data-vista="recientes" aria-pressed="false">🕘 recientes</button>
+    </div>
+    <div id="guardadas"></div>
+  </section>
+  </div>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+// crypto.randomUUID no existe en http:// (no es "contexto seguro"), así que armamos uno a mano.
+const client = store.get("client") || Math.random().toString(36).slice(2) + Date.now().toString(36);
+store.set("client", client);
+
+// La sala: la del link (?sala=ventas) o la última que se eligió en este dispositivo. Cambiar de
+// sala recarga la página (ver irASala): así no queda nada de la otra.
+const PRINCIPAL = "principal";
+const sala = new URLSearchParams(location.search).get("sala") || store.get("sala") || PRINCIPAL;
+store.set("sala", sala);
+if (sala !== PRINCIPAL && !location.search.includes("sala=")) history.replaceState(null, "", `?sala=${encodeURIComponent(sala)}`);
+const conSala = path => `${path}${path.includes("?") ? "&" : "?"}sala=${encodeURIComponent(sala)}`;
+
+function irASala(id, aviso) {
+  if (aviso) store.set("aviso", JSON.stringify(aviso));   // para mostrarlo ya en la otra
+  store.set("sala", id);
+  if (radio.on) avisarRadio(false);
+  location.search = id === PRINCIPAL ? "" : `?sala=${encodeURIComponent(id)}`;
+}
+
+const nameInput = $("#name");
+nameInput.value = store.get("name") || "";
+nameInput.addEventListener("input", () => store.set("name", nameInput.value.trim()));
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
+  return e;
+}
+const dos = n => String(n).padStart(2, "0");
+const fmt = s => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}:${dos(m)}:${dos(s % 60)}` : `${m}:${dos(s % 60)}`;
+};
+
+let toastTimer;
+function toast(msg, err = false) {
+  const t = $("#toast");
+  t.textContent = (err ? "⚠ " : "✓ ") + msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 3500);
+}
+
+// ---------- tapa del disco pixelada (como en /pantalla) ----------
+// Se dibuja en la tapa y en la etiqueta del vinilo que asoma detrás.
+let artFor;
+function dibujarTapa(lienzos, url) {
+  const ctxs = [...lienzos].map(c => c.getContext("2d")).filter(Boolean);
+  if (!ctxs.length) return;
+  if (!url) {
+    for (const ctx of ctxs) for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const k = (x + y) / 64;
+      ctx.fillStyle = `rgb(${60 + 120 * k},${40 + 40 * k},${90 + 80 * (1 - k)})`; ctx.fillRect(x, y, 1, 1);
+    }
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    if (artFor !== url) return;
+    const s = Math.min(img.width, img.height);
+    for (const ctx of ctxs) {
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 32, 32);
+    }
+  };
+  img.src = url;
+}
+
+// Barra de progreso hecha con caracteres, del ancho justo
+function columnas(e) {
+  const probe = document.createElement("span");
+  probe.textContent = "━".repeat(20);
+  probe.style.visibility = "hidden"; probe.style.position = "absolute";
+  e.append(probe);
+  const w = probe.getBoundingClientRect().width / 20;
+  probe.remove();
+  return w ? Math.max(10, Math.floor(e.clientWidth / w)) : 30;
+}
+
+// ---------- control con PIN ----------
+// Un PIN por sala (el de la sala, o el de la rockola, que vale en todas). Si en esta sala no hay
+// uno recordado, se prueba el de la principal. "" = acá no (lo dejaron de usar, o no anduvo).
+const pins = (() => { try { return JSON.parse(store.get("pins") || "{}") || {}; } catch { return {}; } })();
+if (!(PRINCIPAL in pins) && store.get("pin")) pins[PRINCIPAL] = store.get("pin");   // de antes de las salas
+store.del("pin");
+let pin = sala in pins ? pins[sala] : pins[PRINCIPAL] || "";
+let admin = false;
+function recordarPin(p) { pins[sala] = p; store.set("pins", JSON.stringify(pins)); }
+
+// Todos los pedidos van con la sala (en la dirección, o en el cuerpo).
+async function api(path, body) {
+  const headers = { "Content-Type": "application/json" };
+  if (pin) headers["X-Pin"] = pin;
+  const r = await fetch(body === undefined ? conSala(path) : path,
+                        body === undefined ? {} : { method: "POST", headers, body: JSON.stringify({ sala, ...body }) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 403 && admin && path !== "/api/remove") salirDeControl();  // cambiaron el PIN
+    throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status });
+  }
+  return data;
+}
+
+function pintarControl() {
+  $("#lockBtn").textContent = admin ? "🔓 controlando" : "🔒 controlar";
+  $("#lockBtn").classList.toggle("on", admin);
+  $("#controls").hidden = !admin;
+  if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
+  reacomodar();
+}
+
+// `solo`: al abrir la página, con el que estaba recordado (si es el de la principal probado en
+// otra sala y no anda, no se avisa).
+async function entrarAControl(p, solo = false) {
+  const propio = pins[sala] === p;
+  pin = p;
+  try {
+    await api("/api/admin", {});
+    admin = true; recordarPin(p);
+    $("#pinPanel").hidden = true; $("#pinInput").value = "";
+    toast("Listo: ya podés controlar la música");
+  } catch (err) {
+    admin = false; pin = ""; recordarPin("");
+    if (p && (!solo || propio)) toast(err.message.includes("PIN") ? "PIN incorrecto" : err.message, true);
+  }
+  pintarControl();
+}
+
+function salirDeControl() {
+  admin = false; pin = ""; recordarPin("");
+  pintarControl();
+}
+
+function pedirPin() {
+  $("#pinPanel").hidden = false; reacomodar();
+  $("#pinPanel").scrollIntoView({ block: "nearest" });
+  $("#pinInput").focus();
+}
+$("#lockBtn").onclick = () => {
+  if (admin) { if (confirm("¿Dejar de controlar la música desde este dispositivo?")) salirDeControl(); return; }
+  if ($("#pinPanel").hidden) pedirPin(); else { $("#pinPanel").hidden = true; reacomodar(); }
+};
+$("#pinCancel").onclick = () => { $("#pinPanel").hidden = true; reacomodar(); };
+$("#pinForm").addEventListener("submit", e => { e.preventDefault(); entrarAControl($("#pinInput").value.trim()); });
+
+async function control(path, body = {}) {
+  try { render(await api(path, body)); }
+  catch (err) { toast(err.message, true); }
+}
+$("#playBtn").onclick = () => control("/api/pause");
+$("#prevBtn").onclick = () => control("/api/prev");
+$("#skipBtn").onclick = () => current && control("/api/next", { finished: current.id });
+$("#shufBtn").onclick = async () => {
+  const on = !last?.shuffle;
+  await control("/api/shuffle", { on });
+  if (on && last?.shuffle && !last.library?.songs)
+    toast(`Prendido. Todavía no hay canciones guardadas${(last.rooms || []).length > 1 ? " en esta sala" : ""}: se van guardando a medida que suenan.`);
+};
+
+const gb = b => (b / 1024 ** 3).toLocaleString("es", { maximumFractionDigits: b < 10 * 1024 ** 3 ? 1 : 0 });
+const tamano = b => b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${gb(b)} GB`;
+const quien = it => it.azar ? el("span", { class: "quien" }, "🔀 al azar")
+                            : ["pedida por ", el("span", { class: "quien" }, it.by)];
+
+// Volumen: mientras arrastrás manda cambios cada tanto; al soltar, el valor final.
+const vol = $("#vol");
+let arrastrando = false, ultimoEnvio = 0;
+function mostrarVol(v) { $("#volOut").textContent = `${Math.round(v)}%`; }
+function enviarVol(v) { ultimoEnvio = performance.now(); control("/api/volume", { value: Number(v) }); }
+vol.addEventListener("input", () => {
+  arrastrando = true; mostrarVol(vol.value);
+  if (performance.now() - ultimoEnvio > 250) enviarVol(vol.value);
+});
+vol.addEventListener("change", () => { arrastrando = false; enviarVol(vol.value); });
+$("#volDown").onclick = () => control("/api/volume", { delta: -5 });
+$("#volUp").onclick = () => control("/api/volume", { delta: 5 });
+
+// `marca`: algo para mostrar antes del artista (p. ej. "💾 guardada").
+function fila(song, { pos, imagen = false, extra, action, marca } = {}) {
+  return el("div", { class: "fila" },
+    pos != null && el("span", { class: "pos" }, pos),
+    imagen && el("img", { src: song.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: song.title }, song.title),
+      el("div", { class: "sub" }, marca, marca && " · ",
+         [song.artist, song.duration ? fmt(song.duration) : null].filter(Boolean).join(" · ")),
+      extra),
+    action);
+}
+
+// ---------- listas que entran en la pantalla ----------
+// En la compu la página no se desplaza (ver el CSS): cada lista muestra las filas que le
+// entran y, si hay más, se pagina. En el celular se ven todas (o de a `porPagina`).
+const modoFijo = matchMedia("(min-width: 1000px) and (min-height: 600px)");
+const fijo = () => modoFijo.matches;
+
+// Cuántas de las filas puestas en `filas` se ven enteras: las que terminan antes del fondo de la
+// caja. Se mide dónde termina cada una, en vez de calcularlo: así da bien aunque la pantalla esté
+// escalada (al 125 %, el borde de 1 px entre filas mide 0,8) o las filas midan fracciones de píxel.
+function cuantasEntran(filas) {
+  const fondo = filas.getBoundingClientRect().bottom + 0.5;   // medio píxel de tolerancia
+  let n = 0;
+  for (const f of filas.children) {
+    if (f.getBoundingClientRect().bottom > fondo) break;
+    n++;
+  }
+  return Math.max(1, n);
+}
+
+// Pinta `items` en `caja`, debajo de lo que venga en `arriba`, de a una página. `pag` recuerda
+// en qué página está; `alCambiar` vuelve a pintar cuando tocan otra. Sin `paginar`, sólo las
+// primeras que entran (para "sonaron recién").
+function pintarLista(caja, items, filaDe, { arriba = [], vacio, pag, porPagina = Infinity, paginar = true,
+                                            nombre, alCambiar } = {}) {
+  const filas = el("div", { class: "filas" });
+  caja.replaceChildren(...arriba, filas);
+  if (!items.length) { if (vacio) filas.append(el("div", { class: "vacio" }, vacio)); return; }
+  let n = Math.min(porPagina, items.length), alto = 0;
+  if (fijo()) {
+    // Primero todas, así la lista ocupa el lugar que le toca; ahí se mide cuántas entran.
+    filas.append(...items.slice(0, 100).map(filaDe));
+    n = Math.min(items.length, cuantasEntran(filas));
+    if (n < items.length && paginar) {
+      caja.append(paginador(0, 2, () => {}, ""));   // provisorio, para descontar lo que ocupa
+      n = cuantasEntran(filas);
+      alto = filas.getBoundingClientRect().height;   // el lugar para las filas, con el paginado abajo
+      caja.lastChild.remove();
+    }
+  }
+  if (!paginar || n >= items.length) { filas.replaceChildren(...items.slice(0, n).map(filaDe)); return; }
+  const paginas = Math.ceil(items.length / n);
+  if (pag.n && pag.n !== n) pag.pagina = Math.floor(pag.pagina * pag.n / n);   // otra ventana: misma primera fila
+  pag.n = n;
+  pag.pagina = Math.max(0, Math.min(pag.pagina, paginas - 1));
+  const desde = pag.pagina * n;
+  filas.replaceChildren(...items.slice(desde, desde + n).map((it, i) => filaDe(it, desde + i)));
+  // Aunque esta página tenga menos filas, la lista no se achica: el paginado queda en su lugar.
+  if (alto) filas.style.minHeight = `${alto}px`;
+  caja.append(paginador(pag.pagina, paginas, p => { pag.pagina = p; alCambiar(); subirA(caja); }, nombre));
+}
+
+// Cambió el lugar disponible (la ventana, el PIN, cargó la letra): volver a contar las filas.
+function reacomodar() {
+  if (last) render(last);
+  centrarLetra();       // otro alto: el renglón de ahora, otra vez en el medio
+  pintarResultados();   // y de paso reajusta las guardadas
+}
+let reacomodo = 0;
+addEventListener("resize", () => { cancelAnimationFrame(reacomodo); reacomodo = requestAnimationFrame(reacomodar); });
+document.fonts?.ready.then(reacomodar);
+
+function accionesCola(it, i) {
+  if (admin) {
+    return el("div", { class: "acts" },
+      i > 0 && el("button", { title: "Que suene a continuación", "aria-label": "Mover al principio",
+                              onclick: () => control("/api/move", { id: it.id, to: 0 }) }, "⤒"),
+      i > 0 && el("button", { title: "Subir un lugar", "aria-label": "Subir un lugar",
+                              onclick: () => control("/api/move", { id: it.id, to: i - 1 }) }, "↑"),
+      el("button", { title: "Quitar de la cola", "aria-label": "Quitar",
+                     onclick: () => removeSong(it.id) }, "✕"));
+  }
+  return it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar");
+}
+
+// ---------- estado ----------
+let current = null, progress = null, progressAt = 0, last = null;
+let queuedIds = new Set();
+// Por dónde va la rockola ahora, en segundos: el servidor lo dice con cada estado y, entre uno y
+// otro, se adelanta lo que pasó.
+const posicion = () => progress.t + (progress.playing ? (performance.now() - progressAt) / 1000 : 0);
+const pagCola = { pagina: 0 };
+
+function render(s) {
+  last = s;
+  current = s.now; progress = s.progress; progressAt = performance.now();
+  queuedIds = new Set([...s.queue.map(i => i.videoId), s.now?.videoId].filter(Boolean));
+  const sinParlante = !!s.room && !s.room.main;   // se escucha sólo con 📻 radio
+  pintarSalas(s);
+
+  const now = $("#now");
+  if (s.now) {
+    const [txt, cls] = s.loading ? ["⏳ CARGANDO…", "estado carga"]
+      : s.progress.playing ? ["▶ SONANDO AHORA", "estado"]
+      : s.waiting ? ["📻 EN ESPERA: NADIE ESCUCHA", "estado pausa"] : ["⏸ EN PAUSA", "estado pausa"];
+    // El disco no sale nunca de la página mientras suena algo: si se saca y se vuelve a poner, el
+    // navegador reinicia la animación y el vinilo salta (p. ej. con cada cambio de volumen).
+    // Sólo se cambia lo de al lado.
+    let disco = now.querySelector(":scope > .disco");
+    if (!disco) {
+      disco = el("div", { class: "disco", "aria-hidden": "true" },
+        el("canvas", { class: "tapa", width: 32, height: 32 }),
+        el("div", { class: "vinilo" }, el("div", { class: "etiqueta" }, el("canvas", { width: 32, height: 32 }))));
+      now.replaceChildren(disco);
+      artFor = undefined;   // lienzos nuevos (p. ej. después de perder la conexión): dibujar la tapa
+    }
+    const info = el("div", { class: "info" },
+      el("div", { class: cls }, txt),
+      el("div", { class: "titulo", title: s.now.title }, s.now.title),
+      el("div", { class: "sub" }, s.now.artist),
+      el("div", { class: "sub" }, quien(s.now)),
+      el("div", { class: "barra", id: "bar" }));
+    const vieja = now.querySelector(":scope > .info");
+    if (vieja) vieja.replaceWith(info); else now.append(info);
+    if (artFor !== s.now.thumb) { artFor = s.now.thumb; dibujarTapa(disco.querySelectorAll("canvas"), s.now.thumb); }
+  } else {
+    artFor = undefined;
+    now.replaceChildren(el("div", { class: "vacio" }, "Nada sonando. ¡Pedí un tema!"));
+  }
+  now.classList.toggle("girando", !!s.now && !s.loading && !!s.progress.playing);   // pausado o cargando: quieto
+  tickProgress();
+  seguirLetra(s);
+  $("#radioBtn").hidden = s.mode !== "mpv";   // en modo navegador no hay un archivo que pasar
+  if (radio.on && s.mode !== "mpv") apagarRadio(); else sintonizar();
+  $("#nowTitle").textContent = "SONANDO" + (s.listeners ? ` · 📻 ${s.listeners} ${s.listeners === 1 ? "escucha" : "escuchan"}` : "");
+  const pista = !sinParlante ? ""
+    : s.waiting ? "Nadie la está escuchando: sigue cuando alguien prende 📻 radio."
+    : !radio.on ? "Esta sala no tiene parlante: tocá 📻 radio para escucharla acá." : "";
+  $("#salaHint").textContent = pista; $("#salaHint").hidden = !pista;
+  document.title = sinParlante ? `Rockola · ${s.room.name}` : "Rockola";
+  $("#pinTexto").textContent = sinParlante ? `PIN de la sala ${s.room.name} (o el de la rockola):`
+                                           : "Para controlar la música (está en rockola.toml):";
+  pintarChat(s);
+
+  // Controles (sólo con PIN). En modo navegador, pausa y volumen están en /player. Sin parlante,
+  // no hay volumen (cada uno el suyo) y la pausa es de la sala.
+  const conMpv = s.mode === "mpv";
+  $("#playBtn").hidden = !conMpv;
+  $("#volBox").hidden = !conMpv || s.volume == null;
+  $("#borrarSalaBtn").hidden = !sinParlante;
+  $("#playBtn").textContent = s.now && (sinParlante ? !s.paused : s.progress.playing) ? "⏸ pausa" : "▶ seguir";
+  const alAzar = s.shuffle && s.library?.songs > 0;   // ▶ sin nada sonando arranca una al azar
+  $("#playBtn").disabled = !s.now && !alAzar;
+  $("#skipBtn").disabled = !s.now;
+  $("#shufBtn").hidden = !conMpv;
+  $("#shufBtn").classList.toggle("on", !!s.shuffle);
+  $("#shufBtn").setAttribute("aria-pressed", String(!!s.shuffle));
+  const lib = s.library;
+  $("#biblio").hidden = !lib;
+  const variasSalas = (s.rooms || []).length > 1;   // el lugar es uno solo, para todas
+  if (lib) $("#biblio").textContent = !lib.limit ? "No se guardan canciones (guardar_gb = 0 en rockola.toml)."
+    : `${lib.songs} ${lib.songs === 1 ? "canción guardada" : "canciones guardadas"}${variasSalas ? " en esta sala" : ""}`
+      + ` · ${tamano(lib.bytes)} de ${gb(lib.limit)} GB${variasSalas ? " entre todas las salas" : ""}`
+      + (s.shuffle ? " · con la cola vacía suenan al azar" : "");
+  $("#biblioPanel").hidden = !lib?.limit;
+  if (lib?.limit) {
+    const bajando = (s.saving || []).filter(g => !g.error).length;
+    $("#biblioTitle").textContent = `GUARDADAS · ${lib.songs}` + (variasSalas ? "" : ` · ${tamano(lib.bytes)}`)
+      + (bajando ? ` · ⬇ ${bajando} bajando` : "");
+    if (lib.v !== biblio.v) refrescarGuardadas(biblio.v == null ? 0 : 1500);
+  }
+  if (!arrastrando && s.volume != null) { vol.value = s.volume; mostrarVol(s.volume); }
+
+  const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
+  $("#queueTitle").textContent = s.queue.length ? `PRÓXIMAS · ${s.queue.length} · ${fmt(total)}` : "PRÓXIMAS";
+  pintarLista($("#queue"), s.queue, (it, i) => fila(it, {
+    pos: i + 1,
+    extra: el("div", { class: "sub" }, "pedida por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by),
+              it.playlist && ` · ♫ ${it.playlist.title}`),
+    action: accionesCola(it, i),
+  }), { arriba: [...herramientasCola(s.queue), ...listasEnCola(s.queue)], vacio: "La cola está vacía.",
+        pag: pagCola, nombre: "Páginas de la cola", alCambiar: () => render(last) });
+
+  // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo.
+  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it)) }),
+              { vacio: "Todavía nada.", paginar: false });
+
+  // Actualizar botones de resultados ya agregados
+  document.querySelectorAll("[data-vid]").forEach(b => {
+    if (queuedIds.has(b.dataset.vid)) { b.disabled = true; b.textContent = "en cola"; b.className = ""; }
+  });
+  pintarPendientes(s);
+  seguirGuardando(s);
+}
+
+// Con el PIN y dos o más en la cola: 🔀 mezclar (una vez; lo que pidan después va al final).
+function herramientasCola(queue) {
+  if (!admin || queue.length < 2) return [];
+  return [el("div", { class: "herr" },
+    el("button", { type: "button", title: "Poner la cola en otro orden, al azar (lo que pidan después va al final)",
+                   onclick: () => control("/api/shuffle-queue") }, "🔀 mezclar"))];
+}
+
+// Con el PIN: arriba de la cola, cada playlist cargada con un botón para sacarla entera.
+function listasEnCola(queue) {
+  if (!admin) return [];
+  const listas = new Map();
+  for (const it of queue) {
+    if (!it.playlist) continue;
+    const l = listas.get(it.playlist.id) || { ...it.playlist, n: 0, d: 0 };
+    l.n++; l.d += it.duration || 0;
+    listas.set(it.playlist.id, l);
+  }
+  if (!listas.size) return [];
+  return [el("div", { class: "listas" }, [...listas.values()].map(l => el("div", { class: "fila" },
+    el("div", { class: "info" },
+      el("div", { class: "t", title: l.title }, `♫ ${l.title}`),
+      el("div", { class: "sub" }, `${l.n} ${l.n === 1 ? "tema" : "temas"} en la cola · ${fmt(l.d)}`)),
+    el("button", { title: "Quitar de la cola todos los temas de esta playlist",
+                   onclick: () => confirm(`¿Quitar de la cola los ${l.n} temas de «${l.title}»?`)
+                                  && control("/api/remove-playlist", { playlist: l.id }) }, "✕ quitar todos"))))];
+}
+
+function tickProgress() {
+  const bar = document.getElementById("bar");
+  if (!bar || !current || !progress) return;
+  const d = progress.d || current.duration || 0;
+  const t = Math.min(d, posicion());
+  const tiempos = `  ${fmt(t)} / ${fmt(d)}`;
+  const n = Math.max(5, columnas(bar) - tiempos.length);
+  const on = d ? Math.round(n * t / d) : 0;
+  bar.replaceChildren(el("span", { class: "on" }, "━".repeat(on)), el("span", { class: "off" }, "─".repeat(n - on)), tiempos);
+}
+setInterval(tickProgress, 1000);
+addEventListener("resize", tickProgress);
+
+// ---------- 📻 radio ----------
+// Para escuchar con auriculares, cada uno en su compu, lo que suena en la rockola. No transmite el
+// audio de la Raspberry: baja el mismo archivo que está tocando mpv y lo hace sonar a la par,
+// siguiendo al estado (por dónde va, pausa, ⏭, ⏮). Así suena con la calidad original, sin demora
+// (la letra queda en sincro) y cada uno con su volumen, aunque al parlante lo tengan bajo o en 0.
+// Sólo en modo mpv: en modo navegador no hay archivo (suena el reproductor de YouTube).
+const TOLERANCIA = 0.5;   // segundos que puede irse de la rockola antes de saltar adonde va
+const audio = new Audio();
+audio.preload = "auto";
+// vid: la canción cargada (undefined: ninguna todavía); listo: ya se puede saltar adonde va;
+// adelanto: lo que tardó en saltar la última vez (se salta eso más adelante, para caer justo).
+const radio = { on: false, vid: undefined, listo: false, fallo: false, errores: 0, reintentar: 0,
+                adelanto: 0, saltoEn: 0 };
+
+function pintarRadio() {
+  const b = $("#radioBtn");
+  b.classList.toggle("on", radio.on);
+  b.setAttribute("aria-pressed", String(radio.on));
+  b.lastElementChild.textContent = radio.on ? " escuchando" : " radio";
+}
+
+// Que el audio de acá vaya con la rockola: la misma canción, en el mismo segundo, sonando o en pausa.
+function sintonizar() {
+  if (!radio.on) return;
+  const s = last, vid = s?.mode === "mpv" && s.now && !s.loading ? s.now.videoId : null;
+  if (vid !== radio.vid) {   // otra canción, o ya no suena nada
+    radio.vid = vid; radio.errores = 0;
+    cargarAudio();
+    contarAlSistema(vid && s.now);
+  } else if (radio.fallo && performance.now() > radio.reintentar) cargarAudio();   // probar de nuevo
+  if (!vid || !radio.listo) return;
+  const t = posicion(), suena = !!s.progress.playing, dura = audio.duration || Infinity;
+  if (!audio.seeking && t < dura && Math.abs(audio.currentTime - t) > TOLERANCIA) {
+    radio.saltoEn = performance.now();
+    audio.currentTime = t + (suena ? radio.adelanto : 0);
+  }
+  // Si acá terminó un poco antes que en la rockola, esperar a la que sigue (play() la empezaría de nuevo).
+  if (suena && audio.paused && !audio.ended) audio.play().catch(noArranca);
+  else if (!suena && !audio.paused) audio.pause();
+}
+
+function cargarAudio() {
+  radio.listo = radio.fallo = false;
+  if (radio.vid) audio.src = `/api/audio/${encodeURIComponent(radio.vid)}`;
+  else { audio.pause(); audio.removeAttribute("src"); audio.load(); }   // nada sonando: soltar la de antes
+}
+
+audio.addEventListener("loadedmetadata", () => { radio.listo = true; radio.errores = 0; sintonizar(); });
+audio.addEventListener("seeked", () => {
+  if (radio.saltoEn) radio.adelanto = Math.min(1, (performance.now() - radio.saltoEn) / 1000);
+  radio.saltoEn = 0;
+});
+audio.addEventListener("error", () => {
+  if (!radio.on || !radio.vid) return;   // (soltar el archivo también cuenta como error)
+  radio.listo = false; radio.fallo = true;
+  radio.reintentar = performance.now() + 3000 * Math.min(++radio.errores, 5);   // cada vez espera más (hasta 15 s)
+  if (radio.errores === 3) toast("No puedo hacer sonar la radio en este navegador. Probá con Chrome o Firefox.", true);
+});
+setInterval(sintonizar, 1000);
+
+function prenderRadio() {
+  radio.on = true; radio.vid = undefined;
+  pintarRadio();
+  sintonizar();
+  // Que arranque dentro del clic: si no, hay navegadores que después no la dejan sonar sola.
+  if (radio.vid) audio.play().catch(noArranca);
+  avisarRadio(true);
+}
+
+function apagarRadio() {
+  radio.on = false; radio.vid = undefined;
+  audio.pause(); audio.removeAttribute("src"); audio.load();
+  contarAlSistema(null);
+  pintarRadio();
+  avisarRadio(false);
+}
+
+// Que el servidor sepa quién escucha: una sala sin parlante suena mientras alguien la escucha (si
+// no, queda en espera). Además, mientras está prendida, cada pedido de estado lo dice (loop()).
+// `keepalive`: que llegue aunque se esté cerrando la página.
+function avisarRadio(on) {
+  fetch("/api/radio", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sala, client, on }) })
+    .then(r => r.ok && r.json()).then(s => s && render(s)).catch(() => {});
+}
+addEventListener("pagehide", () => { if (radio.on) avisarRadio(false); });
+
+function noArranca(err) {
+  if (err?.name !== "NotAllowedError" || !radio.on) return;   // (AbortError: la cambiaron mientras arrancaba)
+  apagarRadio();
+  toast("El navegador no dejó que suene: tocá 📻 de nuevo", true);
+}
+
+$("#radioBtn").onclick = () => {
+  if (radio.on) return apagarRadio();
+  prenderRadio();
+  const otra = last?.room && !last.room.main && last.room.name;   // una sala sin parlante
+  toast(otra ? (last.now ? `📻 Escuchando la sala ${otra}` : `📻 Radio prendida: cuando pidan algo en ${otra}, lo escuchás acá`)
+    : radio.vid && last?.progress.playing ? "📻 Escuchando acá lo que suena en la rockola"
+    : "📻 Radio prendida: cuando suene algo, lo escuchás acá");
+};
+
+// En los controles de música de la compu (y de los auriculares): qué suena, y ⏯ apaga o prende la radio.
+function contarAlSistema(now) {
+  if (!("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = now ? new MediaMetadata({
+      title: now.title, artist: now.artist, album: now.album || "Rockola",
+      artwork: now.thumb ? [{ src: now.thumb }] : [] }) : null;
+  } catch {}
+}
+for (const [accion, fn] of [["play", () => radio.on || prenderRadio()], ["pause", apagarRadio], ["stop", apagarRadio]]) {
+  try { navigator.mediaSession?.setActionHandler(accion, fn); } catch {}
+}
+
+// ---------- salas ----------
+// La principal suena en el parlante (🔊); las otras se escuchan sólo con la radio (📻). Se elige
+// arriba; "＋ nueva sala…" abre el formulario.
+let firmaSalas = "";
+function pintarSalas(s) {
+  $("#salaBox").hidden = s.mode !== "mpv";   // (en modo navegador no hay salas)
+  const firma = JSON.stringify(s.rooms);
+  if (s.mode !== "mpv" || firma === firmaSalas) return;
+  firmaSalas = firma;
+  $("#salaSel").replaceChildren(
+    ...s.rooms.map(r => el("option", { value: r.id }, `${r.main ? "🔊" : "📻"} ${r.name}`)),
+    el("option", { value: "+" }, "＋ nueva sala…"));
+  $("#salaSel").value = sala;
+}
+$("#salaSel").onchange = () => {
+  const v = $("#salaSel").value;
+  if (v !== "+") return irASala(v);
+  $("#salaSel").value = sala;
+  $("#salaPanel").hidden = false; reacomodar();
+  $("#salaPanel").scrollIntoView({ block: "nearest" });
+  $("#salaNombre").focus();
+};
+$("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; reacomodar(); };
+$("#salaForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const boton = e.submitter, nombre = $("#salaNombre").value.trim(), clave = $("#salaPin").value.trim();
+  if (boton) boton.disabled = true;
+  try {
+    const { room } = await api("/api/rooms", { name: nombre, pin: clave });
+    pins[room.id] = clave; store.set("pins", JSON.stringify(pins));   // quien la crea, la controla
+    irASala(room.id, [`Listo: creé la sala ${room.name}. Pasales el link (o que la elijan arriba).`, false]);
+  } catch (err) {
+    if (boton) boton.disabled = false;
+    toast(err.message, true);
+  }
+});
+
+$("#borrarSalaBtn").onclick = async () => {
+  const nombre = last?.room?.name;
+  if (!confirm(`¿Borrar la sala ${nombre}? Se pierden su cola y su chat. Las canciones bajadas quedan (otra sala las puede volver a guardar).`)) return;
+  try {
+    await api("/api/room-delete", {});
+    irASala(PRINCIPAL, [`Borré la sala ${nombre}`, false]);
+  } catch (err) { toast(err.message, true); }
+};
+
+// ---------- chat de la sala ----------
+// Los últimos mensajes llegan con el estado. Viven en la memoria del servidor: al reiniciar la
+// rockola (p. ej. en el reinicio de las 6) se borran.
+let firmaChat = null;
+const hora = t => new Date(t * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+
+function pintarChat(s, alFondo = false) {
+  const msgs = s.chat || [];
+  const firma = msgs.map(m => m.id).join();
+  if (firma === firmaChat && !alFondo) return;   // (si no, se movería mientras lo leen)
+  const caja = $("#chat");
+  const abajo = firmaChat === null || caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40;
+  firmaChat = firma;
+  caja.replaceChildren(...(msgs.length ? msgs.map(m => el("div", { class: "msg" },
+      el("span", { class: "hora" }, hora(m.at)), " ",
+      el("span", { class: m.mine ? "mia" : "quien" }, m.by), ": ", m.text))
+    : [el("div", { class: "vacio" }, "Nadie escribió todavía. Lo que escribas lo ven todos los de esta sala.")]));
+  if (abajo || alFondo) caja.scrollTop = caja.scrollHeight;   // si estaba abajo, que siga abajo
+}
+
+let enviandoChat = false;
+$("#chatForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = $("#chatInput").value.trim(), by = nameInput.value.trim();
+  if (!text || enviandoChat) return;
+  if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return; }
+  enviandoChat = true;
+  try {
+    const s = await api("/api/chat", { client, by, text });
+    $("#chatInput").value = "";
+    render(s); pintarChat(s, true);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    enviandoChat = false;
+  }
+});
+
+// ---------- letra ----------
+// La de la que suena, de YouTube Music (o, si no la tiene o no trae tiempos, de LRCLIB). Si trae
+// el tiempo de cada renglón (cuándo empieza y cuándo termina; en LRCLIB, sólo cuándo empieza: el
+// fin es el del siguiente), se va poniendo amarilla mientras se canta: las palabras no traen tiempo
+// propio, así que el del renglón se reparte entre ellas según su largo. La lista se mueve sola
+// para que el renglón de ahora quede en el medio. Si no trae tiempos, queda para leerla.
+const letras = new Map();   // videoId -> la promesa de su letra (de las últimas que sonaron)
+let letra = null, letraDe, renglonActual = -2, letraAnim = 0;
+
+// Con cada estado: si cambió el tema, traer su letra; si no, seguir (o frenar, si pausaron).
+function seguirLetra(s) {
+  const vid = s.now?.videoId || null;
+  if (vid !== letraDe) { letraDe = vid; cargarLetra(vid); }
+  else moverLetra();
+}
+
+async function cargarLetra(vid) {
+  cancelAnimationFrame(letraAnim);
+  letra = null;
+  if (!vid) return pintarLetra("Nada sonando.");
+  pintarLetra("buscando la letra…");
+  if (!letras.has(vid)) {
+    if (letras.size >= 30) letras.delete(letras.keys().next().value);
+    letras.set(vid, api(`/api/lyrics?videoId=${encodeURIComponent(vid)}`));
+  }
+  try {
+    const datos = await letras.get(vid);
+    if (letraDe !== vid) return;   // mientras llegaba, empezó otra
+    if (!datos.lines.length) return pintarLetra(datos.instrumental ? "🎼 Es instrumental: no tiene letra."
+                                                : "No encontré la letra de este tema (ni en YouTube Music ni en LRCLIB).");
+    letra = { ...datos, renglones: armarRenglones(datos) };
+    pintarLetra();
+  } catch {
+    letras.delete(vid);   // la próxima vez que suene, probar de nuevo
+    if (letraDe === vid) pintarLetra("⚠ No pude traer la letra.");
+  }
+}
+
+function armarRenglones({ synced, lines }) {
+  return lines.map((r, i) => {
+    const div = el("div", { class: "renglon" });
+    if (!synced) { div.append(r.text || " "); return { el: div }; }
+    const fin = r.f > r.t ? r.f : (lines[i + 1]?.t ?? r.t + 3);
+    const textos = r.text.split(/\s+/).filter(Boolean);
+    const largo = textos.reduce((a, w) => a + w.length + 1, 0);
+    let t = r.t;
+    const palabras = textos.map((w, k) => {
+      const p = { el: el("span", {}, w), t0: t, t1: t + (fin - r.t) * (w.length + 1) / largo, estado: "" };
+      t = p.t1;
+      if (k) div.append(" ");
+      div.append(p.el);
+      return p;
+    });
+    if (!palabras.length) div.append("♪");   // renglón vacío: un solo, un silencio
+    return { el: div, t: r.t, palabras };
+  });
+}
+
+function pintarLetra(aviso) {
+  const caja = $("#letra");
+  $("#letraTitulo").textContent = letra?.source ? `LETRA · ${letra.source}` : "LETRA";
+  caja.classList.toggle("sincro", !!letra?.synced);
+  caja.classList.toggle("libre", !!letra && !letra.synced);
+  caja.scrollTop = 0;
+  if (!letra) return caja.replaceChildren(el("div", { class: "vacio" }, aviso));
+  caja.replaceChildren(el("div", { class: "renglones" }, letra.renglones.map(r => r.el)));
+  renglonActual = -2;
+  moverLetra();
+}
+
+// Mientras suena, se marca en cada cuadro de la pantalla (requestAnimationFrame); en pausa, quieta.
+function moverLetra() {
+  cancelAnimationFrame(letraAnim);
+  if (!letra?.synced || !progress) return;
+  marcarLetra(posicion());
+  if (progress.playing && !last?.loading) letraAnim = requestAnimationFrame(moverLetra);
+}
+
+function marcarLetra(t) {
+  const R = letra.renglones;
+  let i = -1;
+  while (i + 1 < R.length && R[i + 1].t <= t) i++;   // el último renglón que ya empezó
+  if (i !== renglonActual) {
+    R.forEach((r, k) => { r.el.classList.toggle("paso", k < i); r.el.classList.toggle("ahora", k === i); });
+    for (const p of R[renglonActual]?.palabras || []) { p.estado = ""; p.el.className = ""; }
+    renglonActual = i;
+    centrarLetra();
+  }
+  for (const p of R[i]?.palabras || []) {
+    const estado = t >= p.t1 ? "ya" : t >= p.t0 ? "va" : "";
+    if (estado !== p.estado) { p.estado = estado; p.el.className = estado; }
+    if (estado === "va") p.el.style.setProperty("--p", `${(100 * (t - p.t0) / (p.t1 - p.t0)).toFixed(1)}%`);
+  }
+}
+
+function centrarLetra() {
+  const caja = $("#letra"), lista = caja.firstElementChild;
+  const r = letra?.synced && letra.renglones[Math.max(0, renglonActual)]?.el;
+  if (!r || !lista) return;
+  const y = Math.max(0, r.offsetTop + r.offsetHeight / 2 - caja.clientHeight / 2);
+  lista.style.transform = `translateY(${-y}px)`;
+}
+
+// Long-poll: el servidor responde apenas cambia algo (o a los 25 s).
+async function loop() {
+  let version = null;
+  for (;;) {
+    try {
+      const s = await api(`/api/state?client=${client}` + (version != null ? `&since=${version}` : "")
+                          + (radio.on ? "&radio=1" : ""));
+      version = s.version;
+      render(s);
+    } catch (err) {
+      if (err.status === 404 && sala !== PRINCIPAL) return irASala(PRINCIPAL, ["Esa sala ya no existe: te llevé a la principal", true]);
+      $("#now").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));
+      await new Promise(r => setTimeout(r, 3000));
+      version = null;
+    }
+  }
+}
+
+// ---------- buscar ----------
+// Un solo buscador, sin botón. Mientras escribís aparecen las guardadas que coinciden (al toque,
+// sin ir a internet); cuando dejás de escribir un ratito (ESPERA_YOUTUBE), además lo que hay en
+// YouTube: sus álbumes (para ⬇ guardarlos enteros) y sus temas. Primero las guardadas. Enter
+// busca en YouTube sin esperar.
+const MAX_SUGERIDAS = 10;
+const ESPERA_YOUTUBE = 600;   // ms sin escribir antes de buscar en YouTube
+let sugeridas = { q: "", items: [], total: 0 }, sugeridasPedido = 0, sugerirTimer = null;
+let busqueda = null, busquedaPedido = 0;   // la última de YouTube: null, { q, aviso } o { q, res, discos }
+let buscandoYT = null, youtubeTimer = null;   // el texto que se va a buscar (o se está buscando) en YouTube
+const pagResultados = { pagina: 0 };
+// Link de una playlist: se carga entera a la cola (con el PIN).
+let playlistVista = null;   // { q, info } o { q, error }
+
+const textoBuscado = () => $("#q").value.trim();
+const hayBiblio = () => !!last?.library?.limit;
+const esLink = q => /^https?:\/\/|youtu\.?be|[?&](v|list)=/i.test(q);
+
+// Las guardadas que coinciden con lo que está escrito.
+async function sugerir() {
+  const q = textoBuscado();
+  if (sugeridas.q !== q) pagResultados.pagina = 0;
+  const pedido = ++sugeridasPedido;
+  if (q.length < 2 || esLink(q) || !hayBiblio()) {
+    sugeridas = { q, items: [], total: 0 };
+    return pintarResultados();
+  }
+  try {
+    const r = await api(`/api/library?vista=recientes&q=${encodeURIComponent(q)}&desde=0&n=${MAX_SUGERIDAS}`);
+    if (pedido !== sugeridasPedido) return;   // ya escribieron otra cosa
+    sugeridas = { q, items: r.songs, total: r.total, buscadas: true };
+  } catch {
+    if (pedido !== sugeridasPedido) return;
+    sugeridas = { q, items: [], total: 0 };
+  }
+  pintarResultados();
+}
+$("#q").addEventListener("input", () => {
+  const q = textoBuscado();
+  clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
+  if (!q) return limpiarBusqueda();   // borraron todo: chau resultados
+  sugerirTimer = setTimeout(sugerir, 150);
+  // Lo de YouTube del texto anterior queda a la vista (con "buscando…") hasta que llegue lo nuevo.
+  buscandoYT = q.length >= 2 && busqueda?.q !== q ? q : null;
+  if (buscandoYT) youtubeTimer = setTimeout(() => buscarEnYouTube(q), ESPERA_YOUTUBE);
+  else ++busquedaPedido;   // si había una búsqueda en camino para otro texto, que no aparezca
+  pintarResultados();
+});
+
+function pintarResultados() {
+  const box = $("#results"), q = textoBuscado();
+  const deAca = sugeridas.q === q ? sugeridas : { items: [] };
+  // Lo de YouTube, si es de este texto o si está por llegar lo nuevo (para que la lista no salte).
+  const yt = busqueda && (busqueda.q === q || buscandoYT) ? busqueda : null;
+  const pl = yt ? playlistVista : null;
+  if (!q || (!deAca.buscadas && !yt && !buscandoYT)) { box.replaceChildren(); reajustarGuardadas(); return; }
+  const locales = deAca.items, estan = new Set(locales.map(s => s.videoId));
+  const deYT = (yt?.res || []).filter(s => !estan.has(s.videoId));   // las guardadas no se repiten
+  const discos = yt?.discos || [];
+  const partes = [];
+  if (deAca.buscadas) {
+    const n = locales.length;
+    partes.push(!n ? "💾 ninguna guardada" : deAca.total > n ? `💾 ${n} de ${deAca.total} guardadas`
+                                                             : `💾 ${n} ${n === 1 ? "guardada" : "guardadas"}`);
+  }
+  if (buscandoYT) partes.push("buscando en YouTube…");
+  else if (yt?.aviso) partes.push(yt.aviso);
+  else if (yt) {
+    if (discos.length) partes.push(`💿 ${discos.length} ${discos.length === 1 ? "álbum" : "álbumes"}`);
+    partes.push(deYT.length ? `▶ ${deYT.length} en YouTube` : yt.res.length || discos.length ? "nada más en YouTube" : "nada en YouTube");
+  }
+  const nada = yt?.res && !buscandoYT && !locales.length && !deYT.length && !discos.length && !pl;
+  const arriba = [...(pl ? [tarjetaPlaylist()] : []),
+                  el("div", { class: "hint" }, nada ? "No encontré nada con eso." : partes.join(" · "))];
+  pintarLista(box, [...locales.map(s => ({ ...s, saved: true })), ...discos, ...deYT],
+              it => it.browseId ? filaDisco(it) : filaResultado(it),
+              { arriba, pag: pagResultados, nombre: "Páginas de los resultados", alCambiar: pintarResultados });
+  reajustarGuardadas();   // debajo quedó más (o menos) lugar
+}
+
+function filaResultado(song) {
+  const guardada = song.saved || yaGuardadas.has(song.videoId);
+  return fila(song, {
+    imagen: true,
+    marca: guardada && el("span", { class: "guardada", title: "Ya está guardada: suena sin esperar la descarga" }, "💾 guardada"),
+    action: el("div", { class: "acts" }, !guardada && botonGuardar(song), botonAhora(song, limpiarBusqueda),
+                botonAgregar(song, limpiarBusqueda)),
+  });
+}
+
+// ---------- guardar un álbum entero (⬇) ----------
+// Desde la búsqueda (un álbum de YouTube, { browseId, title, saved }) o desde las guardadas (uno
+// abierto, { key, album, artist, songs }: lo completa, como "Bocanada" con 2 de 15). Baja los temas
+// que faltan, sin ponerlos en la cola. Cada uno que se baja va en state.saving con su álbum
+// (el browseId); el de las guardadas, el servidor lo busca por nombre y artista.
+const idDisco = a => a.browseId || albumDeGuardadas.get(a.key) || `guardadas:${a.key}`;
+const repintarDiscos = () => { pintarResultados(); if (albumAbierto) pintarGuardadas(); };
+
+function filaDisco(a) {
+  const listo = albumesListos.has(a.browseId) && ![...guardando.values()].some(g => g.album === a.browseId && !g.error);
+  const marca = listo ? el("span", { class: "guardada", title: "Están guardados todos sus temas" }, "💾 guardado")
+    : a.saved > 0 && el("span", { class: "guardada", title: `Hay ${a.saved} ${a.saved === 1 ? "tema" : "temas"} de este álbum entre las guardadas` },
+                       `💾 ${a.saved} ${a.saved === 1 ? "guardado" : "guardados"}`);
+  return el("div", { class: "fila disco-yt" },
+    el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: a.title }, "💿 " + a.title),
+      el("div", { class: "sub" }, marca, marca && " · ", [a.type, a.artist, a.year].filter(Boolean).join(" · "))),
+    el("div", { class: "acts" }, !listo && botonGuardarAlbum(a)));
+}
+
+function botonGuardarAlbum(a) {
+  if (!hayBiblio()) return null;
+  const id = idDisco(a);
+  const suyas = [...guardando.values()].filter(g => g.album === id);
+  const faltan = suyas.filter(g => !g.error).length, fallaron = suyas.length - faltan;
+  if (!faltan && !pidiendoAlbum.has(id) && albumesListos.has(id)) {
+    return el("span", { class: "guardada", title: "Están guardados todos sus temas" }, "💾 completo");
+  }
+  if (faltan || pidiendoAlbum.has(id)) {
+    return el("button", { type: "button", disabled: true,
+                          title: faltan ? `Bajándose para quedar en las guardadas: ${faltan === 1 ? "falta 1 tema" : `faltan ${faltan} temas`}` : "Bajándose" },
+              "⏳", el("span", { class: "largo" }, faltan ? ` faltan ${faltan}` : " bajando"));
+  }
+  const accion = fallaron ? "reintentar" : (a.saved ?? a.songs?.length) > 0 ? "completar" : "guardar";
+  return el("button", {
+    type: "button",
+    "aria-label": { reintentar: "Volver a intentar los temas que no se pudieron bajar",
+                    completar: "Guardar los temas que faltan del álbum, sin ponerlos en la cola",
+                    guardar: "Guardar el álbum entero, sin ponerlo en la cola" }[accion],
+    title: { reintentar: `${fallaron === 1 ? "Un tema no se pudo bajar" : `${fallaron} temas no se pudieron bajar`}. Tocá para probar de nuevo.`,
+             completar: "Bajar los temas que le faltan, para que quede entero en las guardadas (sin ponerlos en la cola)",
+             guardar: "Bajar todos sus temas para que queden en las guardadas, sin ponerlos en la cola" }[accion],
+    onclick: () => guardarAlbum(a),
+  }, fallaron ? "⚠" : "⬇", el("span", { class: "largo" }, " " + accion));
+}
+
+async function guardarAlbum(a) {
+  const id = idDisco(a), titulo = a.title || a.album;
+  pidiendoAlbum.add(id);   // buscar el álbum en YouTube tarda un poco: ⏳ mientras
+  repintarDiscos();
+  try {
+    const r = await api("/api/download-album", a.browseId ? { browseId: a.browseId, client }
+                                                          : { album: a.album, artist: a.artist, client });
+    if (a.key) albumDeGuardadas.set(a.key, r.browseId);
+    if (r.complete) albumesListos.add(r.browseId);
+    else {   // (si estaba marcado como entero, ya no: le faltaban)
+      albumesListos.delete(r.browseId);
+      misAlbumes.set(r.browseId, { title: titulo, visto: false, fallaron: new Set() });
+    }
+    toast(r.text);
+    render(r.state);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    pidiendoAlbum.delete(id);
+    repintarDiscos();
+  }
+}
+
+// ---------- guardar sin poner en la cola (⬇) ----------
+// El servidor las baja de a una; mientras, aparecen en state.saving (y si fallan, un rato con su error).
+let guardando = new Map();       // videoId -> { title, error }, según el servidor
+const yaGuardadas = new Set();   // las que terminaron de bajarse desde que se abrió la página
+const misGuardar = new Set();    // las que pidió este dispositivo: para avisarle cómo salió
+// Los álbumes (por browseId): los que pidió este dispositivo, para avisarle una vez cuando termina
+// (y no tema por tema), los que está pidiendo, los que quedaron enteros, y el browseId de los de
+// las guardadas que ya se completaron desde acá (por su key).
+const misAlbumes = new Map(), pidiendoAlbum = new Set(), albumesListos = new Set(), albumDeGuardadas = new Map();
+let firmaGuardar = "";
+
+function botonGuardar(song) {
+  if (!hayBiblio()) return null;   // en modo navegador (o con guardar_gb = 0) no se guarda nada
+  const g = guardando.get(song.videoId);
+  if (g && !g.error) {
+    return el("button", { type: "button", disabled: true, title: "Bajándose para quedar en las guardadas" },
+              "⏳", el("span", { class: "largo" }, " bajando"));
+  }
+  return el("button", {
+    type: "button", "aria-label": g ? "Volver a intentar guardarla" : "Guardarla sin ponerla en la cola",
+    title: g ? `No se pudo (${g.error}). Tocá para probar de nuevo.` : "Bajarla para que quede en las guardadas, sin ponerla en la cola",
+    onclick: ev => guardarCancion(song, ev.currentTarget),
+  }, g ? "⚠" : "⬇", el("span", { class: "largo" }, g ? " reintentar" : " guardar"));
+}
+
+async function guardarCancion(song, btn) {
+  btn.disabled = true;
+  try {
+    const r = await api("/api/download", { videoId: song.videoId, client });
+    if (r.done) {   // ya estaba bajada (por otra sala): queda guardada también en esta, al toque
+      yaGuardadas.add(song.videoId);
+      toast(`Quedó guardada: ${song.title}`);
+    } else {
+      misGuardar.add(song.videoId);
+      toast(`Bajando «${song.title}»: va a quedar en las guardadas (no se pone en la cola)`);
+    }
+    render(r.state);
+    pintarResultados();
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+  }
+}
+
+// Las que esperan para bajarse (⬇), arriba de las guardadas: la que se está bajando, las que
+// esperan y las que fallaron. ✕ cancela (las propias; con el PIN, cualquiera).
+let firmaPendientes = "";
+function pintarPendientes(s) {
+  const lista = s.saving || [], caja = $("#pendientes");
+  const firma = JSON.stringify([lista, admin]);
+  if (firma === firmaPendientes) return;
+  firmaPendientes = firma;
+  caja.hidden = !lista.length;
+  if (!lista.length) return caja.replaceChildren();
+  const puedo = g => admin || g.mine;
+  const cancelables = lista.filter(g => puedo(g) && !g.error).map(g => g.videoId);
+  const esperan = lista.filter(g => !g.error).length;
+  caja.replaceChildren(
+    el("div", { class: "fila cabeza" },
+      el("div", { class: "info" }, `⬇ Para guardar: ${esperan} ${esperan === 1 ? "espera" : "esperan"} bajarse`),
+      cancelables.length > 1 && el("button", { type: "button", title: "Cancelar todas las que podés cancelar",
+        onclick: () => confirm(`¿Cancelar ${cancelables.length} descargas?`) && cancelarGuardado(cancelables) }, "✕ todas")),
+    ...lista.map(g => el("div", { class: "fila" },
+      el("div", { class: "info" },
+        el("div", { class: "t", title: g.title }, g.title),
+        el("div", { class: "sub" }, g.error ? `⚠ no se pudo: ${g.error}` : g.active ? "⬇ bajándose ahora…" : "⏳ en espera",
+           g.artist && ` · ${g.artist}`, g.mine && " · ", g.mine && el("span", { class: "mia" }, "la pediste vos"))),
+      puedo(g) && el("button", { type: "button", "aria-label": `Cancelar ${g.title}`,
+        title: g.error ? "Sacarla de la lista" : g.active ? "Cancelar: termina de bajarse, pero no queda guardada" : "Cancelar: no se baja",
+        onclick: () => cancelarGuardado([g.videoId]) }, "✕"))));
+}
+
+async function cancelarGuardado(vids) {
+  try {
+    const r = await api("/api/download-cancel", { videoIds: vids, client });
+    // Que no las tome como guardadas (salieron de la lista sin error), ni avise "quedó guardado
+    // el álbum" (ni lo marque entero) si se cancelaron temas suyos.
+    for (const v of vids) {
+      misAlbumes.delete(guardando.get(v)?.album);
+      guardando.delete(v); misGuardar.delete(v);
+    }
+    toast(r.cancelled === 1 ? "Cancelada" : `Canceladas: ${r.cancelled}`);
+    render(r.state);
+  } catch (err) { toast(err.message, true); }
+}
+
+// Con cada estado: cuáles terminaron (y avisarle a quien las pidió) y, si cambió algo, repintar.
+function seguirGuardando(s) {
+  const ahora = new Map((s.saving || []).map(g => [g.videoId, g]));
+  for (const [vid, g] of guardando) {
+    if (g.error || ahora.has(vid)) continue;
+    yaGuardadas.add(vid);   // salió de la lista sin error: quedó guardada
+    if (misGuardar.delete(vid)) toast(`Quedó guardada: ${g.title}`);
+  }
+  for (const [vid, g] of ahora) {
+    if (g.error && misGuardar.delete(vid)) toast(`No se pudo guardar «${g.title}»: ${g.error}`, true);
+  }
+  for (const [bid, m] of misAlbumes) {
+    const suyas = [...ahora.values()].filter(g => g.album === bid);
+    for (const g of suyas) if (g.error) m.fallaron.add(g.videoId);
+    if (suyas.some(g => !g.error)) { m.visto = true; continue; }
+    if (!m.visto) continue;   // (un estado de antes de pedirlo)
+    misAlbumes.delete(bid);
+    const n = m.fallaron.size;
+    if (!n) albumesListos.add(bid);
+    toast(n ? `De «${m.title}» no se ${n === 1 ? "pudo bajar 1 tema" : `pudieron bajar ${n} temas`}: volvé a tocar su botón para reintentar`
+            : `Quedó guardado el álbum «${m.title}»`, n > 0);
+  }
+  guardando = ahora;
+  const firma = JSON.stringify(s.saving || []), biblioV = s.library?.v ?? null;
+  const otraBiblio = biblioV !== seguirGuardando.v;
+  if (firma === firmaGuardar && !otraBiblio) return;
+  firmaGuardar = firma; seguirGuardando.v = biblioV;
+  if (otraBiblio && sugeridas.buscadas) sugerir();   // capaz ahora hay más guardadas que coinciden
+  else pintarResultados();
+  if (albumAbierto && !otraBiblio) pintarGuardadas();   // su ⬇ (si cambió la biblio, se recarga sola)
+}
+
+function tarjetaPlaylist() {
+  const { q, info, error } = playlistVista;
+  if (error) return el("div", { class: "hint" }, "⚠ " + error);
+  const datos = [`${info.count} ${info.count === 1 ? "tema" : "temas"}`, info.duration && fmt(info.duration), info.author]
+    .filter(Boolean).join(" · ");
+  const boton = admin
+    ? el("button", { class: "primario", onclick: ev => cargarPlaylist(q, ev.currentTarget) }, "+ cargar toda")
+    : el("button", { title: "Cargar una playlist entera pide el PIN", onclick: pedirPin }, "🔒 con PIN");
+  return el("div", {},
+    el("div", { class: "fila playlist" },
+      el("img", { src: info.thumb, alt: "", loading: "lazy" }),
+      el("div", { class: "info" },
+        el("div", { class: "t", title: info.title }, "♫ " + info.title),
+        el("div", { class: "sub" }, datos)),
+      boton),
+    info.total > info.count && el("div", { class: "hint" },
+      `La playlist tiene ${info.total} temas: se cargan los que se pueden pedir (como mucho 200, sin repetidos ni muy largos).`));
+}
+
+async function cargarPlaylist(q, btn) {
+  btn.disabled = true; btn.textContent = "cargando…";
+  try {
+    const r = await api("/api/playlist", { q, by: nameInput.value.trim() });
+    btn.textContent = "cargada"; btn.className = "";
+    limpiarBusqueda();
+    toast(r.text);
+  } catch (err) {
+    btn.disabled = false; btn.textContent = "+ cargar toda";
+    toast(err.message, true);
+  }
+}
+
+// Enter: buscar en YouTube ya, sin esperar (si no se buscó ya eso mismo).
+$("#search").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = textoBuscado();
+  if (!q) return limpiarBusqueda();
+  clearTimeout(sugerirTimer);
+  if (sugeridas.q !== q) sugerir();   // las guardadas de este texto (llegan solas)
+  if (busqueda?.q !== q && ytEnCamino !== q) buscarEnYouTube(q);
+});
+
+let ytEnCamino = null;   // el texto del pedido a YouTube que está yendo (para no repetirlo con Enter)
+async function buscarEnYouTube(q) {
+  clearTimeout(youtubeTimer);
+  const pedido = ++busquedaPedido;
+  buscandoYT = ytEnCamino = q;
+  pintarResultados();
+  // Link de un tema dentro de una playlist (…watch?v=…&list=…): sin PIN, sólo interesa el tema.
+  const esPlaylist = /[?&]list=/.test(q) && (admin || !/[?&]v=/.test(q));
+  const pl = esPlaylist
+    ? api(`/api/playlist?q=${encodeURIComponent(q)}`).then(info => ({ q, info }), err => ({ q, error: err.message }))
+    : null;
+  // Los álbumes, a la par. Si eso falla, igual se ven los temas.
+  const discos = hayBiblio() && !esLink(q)
+    ? api(`/api/albums?q=${encodeURIComponent(q)}`).catch(() => []) : [];
+  try {
+    const res = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const lista = pl ? await pl : null;
+    const albumes = await discos;
+    if (pedido !== busquedaPedido) return;   // mientras tanto escribieron otra cosa o limpiaron
+    busqueda = { q, res, discos: albumes }; playlistVista = lista;
+  } catch (err) {
+    if (pedido !== busquedaPedido) return;
+    busqueda = { q, aviso: "⚠ " + err.message }; playlistVista = null;
+  } finally {
+    if (ytEnCamino === q) ytEnCamino = null;
+  }
+  buscandoYT = null; pagResultados.pagina = 0;
+  pintarResultados();
+}
+
+// Ya agregada (o cargada la playlist, o borraron el texto): campo y resultados vacíos.
+function limpiarBusqueda() {
+  ++busquedaPedido; ++sugeridasPedido;   // si había algo en camino, que no aparezca después
+  clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
+  $("#q").value = "";
+  busqueda = null; buscandoYT = null; playlistVista = null; sugeridas = { q: "", items: [], total: 0 };
+  pintarResultados();
+}
+
+// ▶ ahora (con el PIN): corta la que suena y pone esta (si estaba en la cola, sale de ahí).
+function botonAhora(song, alTocar) {
+  if (!admin) return null;
+  const suena = current?.videoId === song.videoId;
+  return el("button", {
+    type: "button", disabled: suena, "aria-label": `Reproducir ahora ${song.title}`,
+    title: suena ? "Ya está sonando" : "Reproducir ahora: corta la que está sonando y pone esta",
+    onclick: async ev => {
+      const by = nameInput.value.trim();
+      if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return; }
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        render(await api("/api/play-now", { videoId: song.videoId, by, client }));
+        toast(`▶ Suena ahora: ${song.title}`);
+        alTocar?.();
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, true);
+      }
+    },
+  }, "▶", el("span", { class: "largo" }, " ahora"));
+}
+
+function botonAgregar(song, alAgregar) {
+  const inQueue = queuedIds.has(song.videoId);
+  return el("button", {
+    "data-vid": song.videoId, disabled: inQueue, class: inQueue ? "" : "primario",
+    onclick: async ev => { if (await addSong(song, ev.currentTarget)) alAgregar?.(); },
+  }, inQueue ? "en cola" : "+ agregar");
+}
+
+async function addSong(song, btn) {
+  const by = nameInput.value.trim();
+  if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return false; }
+  btn.disabled = true;
+  try {
+    await api("/api/queue", { videoId: song.videoId, by, client });
+    btn.textContent = "en cola"; btn.className = "";
+    toast(`Agregada: ${song.title}`);
+    return true;
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+    return false;
+  }
+}
+
+// ---------- canciones guardadas (modo mpv) ----------
+// Por álbum (en orden alfabético) o recientes (la que sonó más recién primero), de a páginas:
+// en la compu, de las que entran en la pantalla; en el celular, de a 15 álbumes o 20 temas.
+// Tocando un álbum se ven sus temas en lugar de la lista. Se refresca sola cuando cambian,
+// sin moverse de la página.
+const POR_PAGINA = { albumes: 15, recientes: 20 };
+const TEMAS_POR_PAGINA = 20;   // los de un álbum, en el celular
+let vista = store.get("vista") === "recientes" ? "recientes" : "albumes";
+let biblio = { v: null, vista, total: 0, items: [], pagina: 0, n: 0 }, biblioPedido = 0, biblioTimer = null;
+let albumAbierto = null;          // el álbum del que se están viendo los temas
+const pagAlbum = { pagina: 0 };
+
+// « ‹ 1 2 3 › »: tres números alrededor de la página actual; « y » van a la primera y a la última.
+function paginador(actual, total, ir, nombre) {
+  const desde = Math.max(0, Math.min(actual - 1, total - 3));
+  const nums = [desde, desde + 1, desde + 2].filter(p => p < total);
+  const flecha = (texto, p, titulo, apagada) =>
+    el("button", { type: "button", title: titulo, "aria-label": titulo, disabled: apagada, onclick: () => ir(p) }, texto);
+  return el("nav", { class: "paginas", "aria-label": nombre },
+    flecha("«", 0, "Primera página", actual === 0),
+    flecha("‹", actual - 1, "Página anterior", actual === 0),
+    nums.map(p => p === actual
+      ? el("span", { class: "actual", "aria-current": "page" }, p + 1)
+      : el("button", { type: "button", "aria-label": `Página ${p + 1}`, onclick: () => ir(p) }, p + 1)),
+    flecha("›", actual + 1, "Página siguiente", actual >= total - 1),
+    flecha("»", total - 1, `Última página (la ${total})`, actual >= total - 1));
+}
+
+// Si cambiaste de página desde abajo, volver arriba de la lista (sin taparla con la barra).
+function subirA(e) {
+  const y = e.getBoundingClientRect().top - $(".top").offsetHeight - 24;
+  if (y < 0) scrollBy(0, y);
+}
+
+function pintarVista() {
+  document.querySelectorAll(".vistas button[data-vista]").forEach(b => {
+    const on = b.dataset.vista === vista;
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+  });
+}
+document.querySelectorAll(".vistas button[data-vista]").forEach(b => b.addEventListener("click", () => {
+  if (b.dataset.vista === vista) return;
+  vista = b.dataset.vista; store.set("vista", vista);
+  pintarVista(); cargarGuardadas();
+}));
+pintarVista();
+
+function refrescarGuardadas(demora) {
+  if (biblioTimer) return;   // ya hay uno en camino
+  biblioTimer = setTimeout(() => { biblioTimer = null; cargarGuardadas(); }, demora);
+}
+
+// Cuántas por página: en la compu, las que entran en el lugar de la lista (descontando el
+// paginado si hace falta, o sea si son más de `total`); en el celular, POR_PAGINA.
+function porPaginaGuardadas(total) {
+  if (!fijo()) return POR_PAGINA[vista];
+  const caja = $("#guardadas");
+  const muestra = () => fila({ title: "–", artist: "–", duration: 1 }, { imagen: true, action: el("button", {}, "+ agregar") });
+  const sonda = el("div", { class: "sonda" }, muestra(), muestra(), paginador(0, 2, () => {}, ""));   // invisibles
+  caja.append(sonda);
+  const [f1, f2, pg] = [...sonda.children].map(e => e.getBoundingClientRect());
+  sonda.remove();
+  // La primera fila mide f1; cada una de las que siguen, f2 (con el borde de arriba, mida lo
+  // que mida en esta pantalla); el paginado, desde el fondo de la última fila (con su margen).
+  const lugar = caja.getBoundingClientRect().height, paginado = pg.bottom - f2.bottom;
+  const cuantas = h => Math.max(1, Math.floor((h - f1.height + 0.5) / f2.height) + 1);
+  return total > cuantas(lugar) ? cuantas(lugar - paginado) : cuantas(lugar);
+}
+
+async function cargarGuardadas(pagina = biblio.pagina) {
+  const vi = vista;
+  const igual = vi === biblio.vista && biblio.v != null;
+  if (!igual) { pagina = 0; albumAbierto = null; }   // cambiaron de vista: a la primera página
+  const n = porPaginaGuardadas(igual ? biblio.total : Infinity);
+  if (igual && biblio.n && n !== biblio.n) pagina = Math.floor(pagina * biblio.n / n);   // misma primera fila
+  const pedido = ++biblioPedido;
+  try {
+    const r = await api(`/api/library?vista=${vi}&desde=${pagina * n}&n=${n}`);
+    if (pedido !== biblioPedido) return;   // llegó tarde: hubo otro pedido después
+    biblio = { v: r.v, vista: vi, total: r.total, items: vi === "albumes" ? r.albums : r.songs, pagina, n };
+    // Se borraron y esa página ya no existe, o con el total de verdad entran otras tantas: pedir de nuevo.
+    const ultima = Math.max(0, Math.ceil(r.total / n) - 1);
+    if (pagina > ultima || porPaginaGuardadas(r.total) !== n) return cargarGuardadas(Math.min(pagina, ultima));
+    if (albumAbierto) albumAbierto = biblio.items.find(a => a.key === albumAbierto.key) || albumAbierto;
+    pintarGuardadas();
+  } catch (err) {
+    if (pedido === biblioPedido) $("#guardadas").replaceChildren(el("div", { class: "hint" }, "⚠ " + err.message));
+  }
+}
+
+// Cambió el lugar para la lista (aparecieron resultados, otra ventana…): si ahora entran otras tantas, pedirlas.
+function reajustarGuardadas() {
+  if ($("#biblioPanel").hidden || biblio.v == null) return;
+  if (albumAbierto) pintarGuardadas();   // los temas del álbum se acomodan solos
+  else if (porPaginaGuardadas(biblio.total) !== biblio.n) cargarGuardadas();
+}
+
+async function irAPagina(p) {
+  await cargarGuardadas(p);
+  subirA($("#biblioPanel"));
+}
+
+function pintarGuardadas() {
+  if (albumAbierto) return pintarAlbum(albumAbierto);
+  const { items, total, vista: v, pagina, n } = biblio;
+  const paginas = Math.ceil(total / n);
+  $("#guardadas").replaceChildren(
+    el("div", { class: "filas" }, items.length
+      ? items.map(it => v === "albumes" ? filaAlbum(it) : fila(it, { imagen: true, action: accionesGuardada(it) }))
+      : el("div", { class: "vacio" }, "Todavía no hay. Quedan guardadas las que suenan acá y las que bajás con ⬇ desde el buscador.")),
+    ...(paginas > 1 ? [paginador(pagina, paginas, irAPagina, "Páginas de las guardadas")] : []));
+}
+
+const nombreAlbum = a => a.album || "Sin álbum";
+const datosAlbum = a => [a.album ? a.artist : "videos y temas sueltos",
+                         `${a.songs.length} ${a.songs.length === 1 ? "tema" : "temas"}`, fmt(a.duration)].filter(Boolean).join(" · ");
+
+// Un álbum en la lista: tapa, nombre, artista y cuántos temas. Al tocarlo, se ven sus temas.
+function filaAlbum(a) {
+  const abrir = () => {
+    albumAbierto = a; pagAlbum.pagina = 0;
+    pintarGuardadas(); subirA($("#biblioPanel"));
+    $("#guardadas .cabeza button")?.focus();
+  };
+  return el("div", { class: "fila album", role: "button", tabindex: 0, title: "Ver sus temas", onclick: abrir,
+                     onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } } },
+    el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: nombreAlbum(a) }, nombreAlbum(a)),
+      el("div", { class: "sub" }, datosAlbum(a))),
+    el("span", { class: "flecha", "aria-hidden": "true" }, "›"));
+}
+
+// Los temas de un álbum, con "‹ álbumes" para volver a la lista (en la misma página que estaba).
+function pintarAlbum(a) {
+  const volver = () => { albumAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  const cabeza = el("div", { class: "fila cabeza" },
+    el("button", { type: "button", title: "Volver a la lista de álbumes", onclick: volver }, "‹ álbumes"),
+    el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: nombreAlbum(a) }, nombreAlbum(a)),
+      el("div", { class: "sub" }, datosAlbum(a))),
+    a.album && el("div", { class: "acts" }, botonGuardarAlbum(a)));   // ⬇ completar (los sueltos, no)
+  pintarLista($("#guardadas"), a.songs, song => fila(song, { action: accionesGuardada(song) }),
+              { arriba: [cabeza], pag: pagAlbum, porPagina: TEMAS_POR_PAGINA,
+                nombre: `Páginas de los temas de ${nombreAlbum(a)}`, alCambiar: pintarGuardadas });
+}
+
+// Una guardada: + agregar y, con el PIN, 🗑 para borrarla de las guardadas de la sala.
+function accionesGuardada(song) {
+  return el("div", { class: "acts" },
+    admin && el("button", { type: "button", title: "Borrarla de las guardadas de esta sala",
+                            "aria-label": `Borrar ${song.title} de las guardadas`,
+                            onclick: ev => borrarGuardada(song, ev.currentTarget) }, "🗑"),
+    botonAhora(song), botonAgregar(song));
+}
+
+async function borrarGuardada(song, btn) {
+  if (!confirm(`¿Borrar «${song.title}» de las guardadas?`)) return;
+  btn.disabled = true;
+  try {
+    const r = await api("/api/library-remove", { videoId: song.videoId, client });
+    toast(r.text);
+    yaGuardadas.delete(song.videoId);
+    // Que se vaya de la lista ya (después se recarga sola, porque cambiaron las guardadas).
+    const otra = s => s.videoId !== song.videoId;
+    if (albumAbierto) {
+      albumAbierto = { ...albumAbierto, songs: albumAbierto.songs.filter(otra) };
+      albumAbierto.duration = albumAbierto.songs.reduce((a, s) => a + (s.duration || 0), 0);
+      if (!albumAbierto.songs.length) albumAbierto = null;   // era la última del álbum: a la lista
+    } else if (biblio.vista === "recientes") {
+      biblio = { ...biblio, items: biblio.items.filter(otra), total: biblio.total - 1 };
+    }
+    pintarGuardadas();
+    render(r.state);
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+  }
+}
+
+async function removeSong(id) {
+  try { render(await api("/api/remove", { id, client })); }
+  catch (err) { toast(err.message, true); }
+}
+
+// Recordar el PIN en este dispositivo; después, el aviso que dejó la página antes de cambiar de
+// sala (p. ej. "creé la sala…"), que si no lo taparía el de "ya podés controlar".
+(pin ? entrarAControl(pin, true) : Promise.resolve()).then(() => {
+  try {
+    const [texto, err] = JSON.parse(store.get("aviso") || "null") || [];
+    store.del("aviso");
+    if (texto) toast(texto, err);
+  } catch {}
+});
+loop();
+</script>
+</body>
+</html>
