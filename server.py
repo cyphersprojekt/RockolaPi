@@ -25,6 +25,7 @@ import re
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -39,6 +40,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from ytmusicapi import YTMusic
+
+from listas import MAX_TEMAS as MAX_TEMAS_LISTA, ErrorLista, Listas
 
 # ------------------------------------------------------------------ ajustes
 # Valores por defecto. Se cambian en rockola.toml (ver rockola.ejemplo.toml), no acá.
@@ -64,6 +67,8 @@ PLAYLIST_ID = re.compile(r"[?&]list=([A-Za-z0-9_-]{2,100})")
 ALBUM_ID = re.compile(r"^MPRE[A-Za-z0-9_-]{4,60}$")   # browseId de un álbum de YouTube Music
 MAX_PLAYLIST = 200        # temas que se cargan, como mucho, de una playlist
 MAX_ALBUMES = 4           # álbumes que aparecen, como mucho, al buscar
+DATOS_TEMA = ("videoId", "title", "artist", "duration", "thumb", "album")   # los de un tema, sin más
+MAX_SUELTOS = 20          # temas sueltos que se suman de una vez a una ♫ playlist
 RANGO = re.compile(r"bytes=(\d*)-(\d*)")   # el pedazo de un archivo que pide el navegador
 TIPOS_AUDIO = {".webm": "audio/webm", ".weba": "audio/webm", ".opus": "audio/ogg", ".ogg": "audio/ogg",
                ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".aac": "audio/aac"}
@@ -103,6 +108,8 @@ class Sala:
         self.owners = {}                   # item id -> client id (quién la pidió, para poder quitarla)
         self.chat = []                     # [{"id", "by", "text", "at", "client"}]
         self.oyentes = {}                  # client -> cuándo se lo vio con la 📻 radio prendida
+        self.reanudar = None               # {"id", "t", "pausada"}: la que sonaba antes de reiniciar,
+                                           # que tiene que seguir en ese segundo (ver retomar_colas)
         # Sólo las que no tienen parlante:
         self.pausada = False               # la pausaron (con el PIN)
         self.trabajo = None                # (item id, descarga) de la que suena
@@ -117,6 +124,8 @@ meta_cache = {}        # videoId -> metadatos (sólo se aceptan canciones conoci
 playlists = {}         # id -> (cuándo, datos): verla y después cargarla no la baja dos veces
 albumes = {}           # browseId -> (cuándo, datos): lo mismo con los álbumes
 director = None        # Director en modo mpv
+stats = None           # Estadisticas: lo que sonó, para el recap (/recap)
+listas = None          # Listas: las ♫ playlists que se arman en la rockola, de cada sala
 fallos_pin = {}        # ip -> (intentos fallidos, bloqueado hasta)
 
 _local = threading.local()
@@ -281,6 +290,10 @@ def borrar_sala(sala):
         state["saving"] = [g for g in state["saving"] if g["salas"] or g["error"]]
         bump()   # todas: que desaparezca de la lista (y las páginas que estaban en ella se enteren)
     print(f"  🚪 Sala borrada: {sala.nombre}", flush=True)
+    if stats:
+        stats.borrar_sala(sala.id)
+    if listas:
+        listas.borrar_sala(sala.id)
     if director:
         threading.Thread(target=director.descargas.quitar_sala, args=(sala.id,), daemon=True).start()
 
@@ -344,6 +357,142 @@ def set_radio(sala, body):
             escuchar(sala, client)
         elif sala.oyentes.pop(client, None) is not None:
             bump(sala)
+
+
+# ------------------------------------------------------- la cola, entre reinicios
+# Lo que suena (y en qué segundo), la cola, quién pidió cada una y lo que sonó recién, de cada
+# sala, quedan en colas.json: al volver a arrancar (p. ej. para aplicar un cambio) sigue donde
+# estaba. Se escribe un par de segundos después de cada cambio, cada 30 s mientras suena algo
+# (por si se corta la luz) y al apagar la rockola. El chat no: se borra.
+
+CLAVES_ITEM = ("id", "videoId", "title", "artist", "duration", "thumb", "album", "by", "playlist", "azar")
+MAX_COLA_GUARDADA = 2000
+lock_colas = threading.Lock()   # (escriben el hilo de bucle_colas y main, al apagar)
+colas_escritas = {"texto": None, "cerrado": False}
+
+
+def foto_de_colas():
+    """Con el lock tomado: lo que hay que guardar de cada sala para retomarla."""
+    fotos = {}
+    for s in salas.values():
+        en_cola = {i["id"] for i in s.queue}
+        fotos[s.id] = {
+            "now": s.now,
+            "t": round(progreso_ahora(s)["t"], 1) if s.now else 0,
+            # la principal la pausa mpv; las otras, su reloj (si nadie las escucha, no es pausa)
+            "pausa": bool(director and director.pausado) if s.principal else s.pausada,
+            "queue": s.queue,
+            "history": s.history,
+            "owners": {k: v for k, v in s.owners.items() if k in en_cola},
+        }
+    return {"salas": fotos}
+
+
+def guardar_colas(final=False):
+    """Escribe colas.json, si cambió algo desde la última vez. `final`: al apagar (después de esa,
+    ninguna más: lo que pase mientras se cierra no es como estaba)."""
+    with lock_colas:
+        if colas_escritas["cerrado"]:
+            return
+        colas_escritas["cerrado"] = final
+        with lock:
+            texto = json.dumps(foto_de_colas(), ensure_ascii=False)
+        if texto == colas_escritas["texto"]:
+            return
+        ruta = carpeta() / "colas.json"
+        try:
+            ruta.parent.mkdir(parents=True, exist_ok=True)
+            tmp = ruta.with_suffix(".tmp")
+            tmp.write_text(texto)
+            os.replace(tmp, ruta)
+            colas_escritas["texto"] = texto
+        except OSError as e:
+            print(f"  ⚠ no pude guardar {ruta}: {e}", flush=True)
+
+
+def bucle_colas(cada=30, junta=2):
+    """Guarda las colas un ratito después de cada cambio (así se juntan los que vienen seguidos,
+    como al cargar una playlist) y, mientras suena algo, cada `cada` segundos."""
+    visto = None
+    while True:
+        with changed:
+            changed.wait_for(lambda: state["version"] != visto, timeout=cada)
+            visto = state["version"]
+        time.sleep(junta)
+        try:
+            guardar_colas()
+        except Exception as e:   # no debería pasar: que no se muera el hilo
+            print(f"  ⚠ no pude guardar las colas: {e!r}", flush=True)
+
+
+def _item_guardado(i):
+    """Una canción leída de colas.json, sólo con lo que se usa, o None si no está bien."""
+    if not isinstance(i, dict) or not isinstance(i.get("id"), str) or not VIDEO_ID.match(str(i.get("videoId", ""))):
+        return None
+    try:
+        duracion = int(i.get("duration") or 0)
+    except (TypeError, ValueError):
+        return None
+    if duracion <= 0:
+        return None
+    item = {k: i[k] for k in CLAVES_ITEM if k in i}
+    item["duration"] = duracion
+    if not isinstance(item.get("playlist", {}), dict):
+        del item["playlist"]
+    return item
+
+
+def retomar_colas(en_pausa=False):
+    """Al arrancar: cada sala como estaba la última vez (lo que sonaba y en qué segundo, la cola,
+    lo que sonó recién). Con `en_pausa`, lo de la principal queda en pausa (ver main: a las 6 de la
+    mañana la oficina está vacía). Devuelve True si la principal tiene una que seguía sonando (que
+    no estaba en pausa)."""
+    ruta = carpeta() / "colas.json"
+    try:
+        guardadas = json.loads(ruta.read_text())["salas"]
+        if not isinstance(guardadas, dict):
+            raise TypeError("«salas» no es un diccionario")
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        print(f"  ⚠ no pude leer {ruta} ({e!r}): arranco con las colas vacías", flush=True)
+        return False
+    seguia, cuantas = False, 0
+    with lock:
+        for sid, d in guardadas.items():
+            s = salas.get(sid)
+            if s is None or not isinstance(d, dict):
+                continue   # una sala que ya no existe
+            canciones = lambda k: [i for i in map(_item_guardado, d.get(k) or []) if i] if isinstance(d.get(k), list) else []
+            s.queue = canciones("queue")[:MAX_COLA_GUARDADA]
+            s.history = canciones("history")[-30:]
+            en_cola = {i["id"] for i in s.queue}
+            duenos = d.get("owners") if isinstance(d.get("owners"), dict) else {}
+            s.owners = {k: str(v)[:64] for k, v in duenos.items() if k in en_cola}
+            now = _item_guardado(d.get("now"))
+            if now:
+                try:
+                    t = max(0.0, min(float(d.get("t") or 0), now["duration"]))
+                except (TypeError, ValueError):
+                    t = 0.0
+                pausa = bool(d.get("pausa"))
+                s.now = now
+                s.progress = {"t": t, "d": now["duration"], "playing": False}
+                if s.principal:
+                    s.reanudar = {"id": now["id"], "t": t, "pausada": pausa or en_pausa}
+                    seguia = not pausa
+                else:
+                    s.reanudar = {"id": now["id"], "t": t, "pausada": pausa}
+                    s.pausada = pausa
+            cuantas += len(s.queue) + bool(s.now)
+            for i in [s.now, *s.queue, *s.history]:   # (para sumarlas a una ♫ playlist sin preguntarle a YouTube)
+                if i and i.get("title"):
+                    _remember({k: i.get(k) or ("" if k != "duration" else 0) for k in DATOS_TEMA})
+            bump(s)
+    if cuantas:
+        print(f"  ⏯ Retomo donde estaba: {cuantas} {'canción' if cuantas == 1 else 'canciones'} entre lo que "
+              "sonaba y las colas", flush=True)
+    return seguia
 
 
 # ------------------------------------------------------------- YouTube Music
@@ -771,44 +920,114 @@ def playlist_info(q):
             "count": len(ok), "duration": sum(c["duration"] for c in ok), "total": pl["total"]}
 
 
-def add_playlist(sala, body):
-    """Carga a la cola, al final, todos los temas de una playlist. Devuelve un resumen."""
-    pl = get_playlist(_id_playlist(body.get("q")))
-    name = str(body.get("by", "")).strip()[:30] or "Playlist"
-    lista = {"id": uuid.uuid4().hex[:10], "title": pl["title"]}
+def _contar(n, uno, varios):
+    return f"{n} {uno if n == 1 else varios}"
+
+
+def _no_se_puede(vivo, largas):
+    """Por qué quedaron afuera las que no se pueden pedir, como en `coleccion`."""
+    minutos = MAX_DURATION // 60
+    return [(largas, f"dura más de {minutos} minutos", f"duran más de {minutos} minutos"),
+            (vivo, "no dice cuánto dura (¿en vivo?)", "no dicen cuánto duran (¿en vivo?)")]
+
+
+def _afuera(motivos):
+    quedaron = [_contar(n, uno, varios) for n, uno, varios in motivos if n > 0]
+    return f" Quedaron afuera: {', '.join(quedaron)}." if quedaron else ""
+
+
+def coleccion(sala, body):
+    """Una colección de temas entera, para cargarla a la cola o sumarla a una playlist, según
+    `from`: una playlist de la rockola (`list`, su id), un álbum de YouTube Music (`browseId`), uno de las
+    guardadas (`album`, `artist` y sus `videoIds`) o una playlist de YouTube (`q`, el link).
+    Devuelve {title, kind, songs, afuera}: `kind` es "album", "lista" o "youtube"; `afuera`, los
+    que no vinieron, como (cuántos, uno, varios)."""
+    de = body.get("from")
+    if de == "list":
+        titulo, temas = listas.temas(sala.id, str(body.get("list", "")))
+        return {"title": titulo, "kind": "lista", "songs": temas, "afuera": []}
+    if de == "album":
+        bid = str(body.get("browseId", ""))
+        if not ALBUM_ID.match(bid):
+            raise ApiError(400, "Álbum inválido")
+        al = get_album(bid)
+        return {"title": al["title"], "kind": "album", "songs": al["songs"],
+                "afuera": [(al["unavailable"], "no está disponible", "no están disponibles")]}
+    if de == "saved":
+        # Uno de las guardadas: entero y en el orden del disco, como está en YouTube Music (las
+        # guardadas están por orden alfabético, y capaz faltan temas). Si no lo encuentra, las guardadas.
+        nombre, artista = str(body.get("album") or "").strip()[:200], str(body.get("artist") or "")[:200]
+        if not nombre:
+            raise ApiError(400, "Álbum inválido")
+        try:
+            al = get_album(album_llamado(nombre, artista))
+            return {"title": al["title"], "kind": "album", "songs": al["songs"],
+                    "afuera": [(al["unavailable"], "no está disponible", "no están disponibles")]}
+        except Exception as e:   # (no está en YouTube Music, o YouTube no contesta)
+            print(f"  ⚠ no encontré «{nombre}» en YouTube Music ({e}): uso las guardadas", flush=True)
+        vids = [str(v) for v in (body.get("videoIds") or [])[:MAX_PLAYLIST] if VIDEO_ID.match(str(v))]
+        temas = [d for d in (director.descargas.datos(v) for v in vids) if d] if director else []
+        if not temas:
+            raise ApiError(404, f"No encontré los temas de «{nombre}»")
+        return {"title": nombre, "kind": "album", "songs": temas, "afuera": []}
+    if de == "youtube":
+        pl = get_playlist(_id_playlist(body.get("q")))
+        maximo = f"del máximo de {MAX_PLAYLIST} por playlist"
+        return {"title": pl["title"], "kind": "youtube", "songs": pl["songs"],
+                "afuera": [(pl["unavailable"], "no está disponible", "no están disponibles"),
+                           (pl["total"] - MAX_PLAYLIST, f"pasa {maximo}", f"pasan {maximo}")]}
+    raise ApiError(400, "No sé qué cargar")
+
+
+def cargar_entera(sala, body):
+    """+ a la cola / ▶ reproducir (con el PIN): todos los temas de una colección (ver `coleccion`),
+    en orden. Con `at` = "now" suena ya: corta la que está sonando (queda en "sonaron recién",
+    como con ⏭), el primero suena y los demás quedan primeros en la cola, antes de lo que ya
+    estaba (si alguno estaba en la cola, se mueve acá). Si no, van al final, sin los que ya
+    están en la cola. Sin dueño: no cuentan para el límite por persona de quien la cargó.
+    Devuelve un resumen para mostrar."""
+    col = coleccion(sala, body)
+    ahora = body.get("at") == "now"
+    name = str(body.get("by", "")).strip()[:30] or ("Álbum" if col["kind"] == "album" else "Playlist")
+    # (para la cola: cada tema dice de dónde vino, y con el PIN se saca entera de un toque)
+    lista = {"id": uuid.uuid4().hex[:10], "title": col["title"], "kind": col["kind"]}
     vivo = largas = repetidas = 0
     with lock:
-        ya = {i["videoId"] for i in sala.queue}
-        if sala.now:
-            ya.add(sala.now["videoId"])
-        nuevas = []
-        for c in pl["songs"]:
+        ya = set()
+        if not ahora:
+            ya = {i["videoId"] for i in sala.queue} | ({sala.now["videoId"]} if sala.now else set())
+        nuevas, vistos = [], set()
+        for c in col["songs"]:
             if not c["duration"]:
                 vivo += 1
             elif not _se_puede(c):
                 largas += 1
-            elif c["videoId"] in ya:
+            elif c["videoId"] in ya or c["videoId"] in vistos:
                 repetidas += 1
             else:
-                # Sin dueño: no cuentan para el límite por persona de quien la cargó.
-                nuevas.append(dict(c, id=uuid.uuid4().hex[:10], by=name, playlist=lista))
-        sala.queue.extend(nuevas)
-        if nuevas:
+                vistos.add(c["videoId"])
+                nuevas.append(dict({k: c.get(k) for k in DATOS_TEMA}, id=uuid.uuid4().hex[:10], by=name,
+                                   playlist=lista))
+        if nuevas and ahora:
+            movidas = {i["id"] for i in sala.queue if i["videoId"] in vistos}
+            for k in movidas:
+                sala.owners.pop(k, None)
+            sala.queue = nuevas[1:] + [i for i in sala.queue if i["id"] not in movidas]
+            sala.pausada = False   # (sin parlante: si estaba pausada, que suene)
+            _sonar(sala, nuevas[0])
+        elif nuevas:
+            sala.queue.extend(nuevas)
             bump(sala)
-    minutos, maximo = MAX_DURATION // 60, f"del máximo de {MAX_PLAYLIST} por playlist"
-    quedaron = [f"{n} {uno if n == 1 else varios}" for n, uno, varios in (
-        (repetidas, "ya estaba en la cola", "ya estaban en la cola"),
-        (largas, f"dura más de {minutos} minutos", f"duran más de {minutos} minutos"),
-        (vivo, "no dice cuánto dura (¿en vivo?)", "no dicen cuánto duran (¿en vivo?)"),
-        (pl["unavailable"], "no está disponible", "no están disponibles"),
-        (pl["total"] - MAX_PLAYLIST, f"pasa {maximo}", f"pasan {maximo}"),
-    ) if n > 0]
-    afuera = f" Quedaron afuera: {', '.join(quedaron)}." if quedaron else ""
+    afuera = _afuera([(repetidas, "ya estaba en la cola", "ya estaban en la cola"),
+                      *_no_se_puede(vivo, largas), *col["afuera"]])
     if not nuevas:
-        raise ApiError(409, f"No cargué ningún tema de «{pl['title']}».{afuera}")
-    temas = "tema" if len(nuevas) == 1 else "temas"
-    return {"added": len(nuevas),
-            "text": f"Cargué {len(nuevas)} {temas} de «{pl['title']}».{afuera}"}
+        raise ApiError(409, f"No cargué ningún tema de «{col['title']}».{afuera}")
+    temas = _contar(len(nuevas), "tema", "temas")
+    if ahora:
+        texto = f"Suena «{col['title']}» ({temas}); lo que estaba en la cola sigue después.{afuera}"
+    else:
+        texto = f"Cargué {temas} de «{col['title']}» al final de la cola.{afuera}"
+    return {"added": len(nuevas), "text": texto}
 
 
 def remove_playlist(sala, body):
@@ -819,6 +1038,87 @@ def remove_playlist(sala, body):
         sala.queue = [i for i in sala.queue if (i.get("playlist") or {}).get("id") != lista_id]
         if len(sala.queue) != antes:
             bump(sala)
+
+
+# ------------------------------------------------- ♫ las playlists de la rockola
+# Las arma cualquiera; las cambia quien la armó o alguien con el PIN (ver listas.py). Cargarlas
+# enteras a la cola es con el PIN (cargar_entera); pedir sus temas de a uno, como cualquier tema.
+
+def _cambio_en_listas(sala):
+    with lock:
+        bump(sala)   # (el estado lleva la versión de sus playlists: las páginas las piden de nuevo)
+
+
+def para_la_lista(sala, body):
+    """Los temas para sumar a una playlist: uno o varios sueltos (`videoIds`), o una colección
+    entera (`from`, ver `coleccion`). Con las mismas reglas que para pedirlos. Devuelve
+    (temas, título de la colección o None, los que quedaron afuera)."""
+    if not body.get("from"):
+        vids = body.get("videoIds")
+        if not isinstance(vids, list) or not vids:
+            raise ApiError(400, "¿Qué tema hay que sumar?")
+        temas, malas = [], []
+        for v in vids[:MAX_SUELTOS]:   # (los que no conoce, uno por uno a YouTube: la página manda de a uno)
+            try:
+                temas.append(cancion(str(v)))
+            except ApiError as e:
+                malas.append(e)
+        if malas and not temas:
+            raise malas[0]   # era una sola (o ninguna anduvo): por qué
+        return temas, None, [(len(malas), "no se puede pedir", "no se pueden pedir")]
+    col = coleccion(sala, body)
+    vivo = sum(not c["duration"] for c in col["songs"])
+    largas = sum(bool(c["duration"]) and not _se_puede(c) for c in col["songs"])
+    return [c for c in col["songs"] if _se_puede(c)], col["title"], [*_no_se_puede(vivo, largas), *col["afuera"]]
+
+
+def sumar_a_lista(sala, body, admin):
+    client = str(body.get("client", ""))[:64]
+    lid = str(body.get("id", ""))
+    listas.puede(sala.id, lid, client, admin)   # antes de ir a buscar los temas a YouTube
+    temas, de, afuera = para_la_lista(sala, body)
+    n, repetidas, sin_lugar, lista = listas.sumar(sala.id, lid, temas, client, admin)
+    _cambio_en_listas(sala)
+    nombre = lista["name"]
+    afuera = _afuera([(repetidas, "ya estaba", "ya estaban"),
+                      (sin_lugar, f"no entró (máximo {MAX_TEMAS_LISTA})",
+                       f"no entraron (máximo {MAX_TEMAS_LISTA})"), *afuera])
+    if not n:
+        if de is None and len(temas) == 1 and repetidas:
+            raise ApiError(409, f"Ya está en «{nombre}»")
+        raise ApiError(409, f"No sumé ningún tema a «{nombre}».{afuera}")
+    if de is None and n == 1:
+        texto = f"«{temas[0]['title']}» quedó en «{nombre}»"
+    else:
+        texto = f"Sumé {_contar(n, 'tema', 'temas')}" + (f" de «{de}»" if de else "") + f" a «{nombre}».{afuera}"
+    return {"text": texto, "list": lista}
+
+
+def editar_lista(sala, path, body, admin):
+    """Los demás cambios en una playlist: crearla, cambiarle el nombre, borrarla, quitar o mover
+    un tema. Devuelve lo que se le contesta a la página."""
+    client = str(body.get("client", ""))[:64]
+    lid = str(body.get("id", ""))
+    if path == "/api/list-new":
+        lista = listas.crear(sala.id, body.get("name"), body.get("by"), client)
+        print(f"  ♫ Playlist nueva: {lista['name']}" + ("" if sala.principal else f" (sala {sala.nombre})"), flush=True)
+        r = {"list": lista}
+    elif path == "/api/list-rename":
+        r = {"list": listas.renombrar(sala.id, lid, body.get("name"), client, admin)}
+    elif path == "/api/list-delete":
+        r = {"deleted": listas.borrar(sala.id, lid, client, admin)}
+    elif path == "/api/list-remove":
+        r = {"list": listas.quitar(sala.id, lid, str(body.get("videoId", "")), client, admin)}
+    elif path == "/api/list-move":
+        try:
+            a = int(body.get("to", 0))
+        except (TypeError, ValueError):
+            raise ApiError(400, "Posición inválida")
+        r = {"list": listas.mover(sala.id, lid, str(body.get("videoId", "")), a, client, admin)}
+    else:
+        raise ApiError(404, "No existe")
+    _cambio_en_listas(sala)
+    return r
 
 
 # ------------------------------------------------------------------- la cola
@@ -862,6 +1162,7 @@ def public_state(sala, client=None, since=None, radio=False):
             "chat": [{"id": m["id"], "by": m["by"], "text": m["text"], "at": m["at"],
                       "mine": bool(client) and m["client"] == client} for m in sala.chat[-50:]],
             "library": director.descargas.resumen(sala.id) if director else None,
+            "lists": {"v": listas.version(sala.id)} if listas else None,   # (las pide aparte: /api/lists)
             "saving": [dict({k: g.get(k) for k in ("videoId", "title", "artist", "error", "album")},
                             active=g["bajando"], mine=bool(client) and client in g["clientes"])
                        for g in state["saving"] if sala.id in g["salas"]],
@@ -1141,14 +1442,18 @@ def advance(sala, body):
 
 
 def _sonar(sala, item):
-    """Que suene `item` (o nada): la que sonaba pasa a "sonaron recién". Con el lock tomado."""
+    """Que suene `item` (o nada): la que sonaba pasa a "sonaron recién" (y a las estadísticas,
+    con lo que llegó a sonar). Con el lock tomado."""
     if sala.now:
+        if stats and salas.get(sala.id) is sala:   # (si la borraron, sus estadísticas ya se fueron)
+            stats.anotar(sala.id, sala.now, progreso_ahora(sala)["t"])
         sala.history = (sala.history + [sala.now])[-30:]
     sala.now = item
     if item:
         sala.owners.pop(item["id"], None)
     sala.progress = {"t": 0, "d": 0, "playing": False}
     sala.trabajo, sala.lista = None, False   # (sin parlante: Director.mover la baja y la arranca)
+    sala.reanudar = None
     bump(sala)
 
 
@@ -1230,7 +1535,7 @@ def previous(sala):
             sala.queue.insert(0, sala.now)
         sala.now = anterior
         sala.progress = {"t": 0, "d": 0, "playing": False}
-        sala.trabajo, sala.lista = None, False
+        sala.trabajo, sala.lista, sala.reanudar = None, False, None
         bump(sala)
 
 
@@ -1332,6 +1637,38 @@ def set_progress(body):
             bump(sala)
 
 
+# ------------------------------------------------------------- estadísticas
+
+TODAS = "todas"   # ?sala=todas en el recap: todas las salas juntas
+
+
+def recap(sid, periodo, persona):
+    """El recap de una sala (o de todas) en un período: "hoy", "7d", "30d", un año o "todo" (sin
+    nada: el año de hoy). Con `persona`, sólo lo que pidió esa persona."""
+    from estadisticas import rango
+
+    if not stats:
+        raise ApiError(409, "Las estadísticas no andan: mirá los avisos en la consola de la rockola")
+    periodo = periodo or time.strftime("%Y")
+    try:
+        desde, hasta = rango(periodo)
+    except ValueError:
+        raise ApiError(400, "Período inválido")
+    with lock:
+        if sid == TODAS:
+            sala, ids = None, list(salas)
+        else:
+            sala = sala_de(sid)
+            ids = [sala.id]
+        rooms = [s.publica() for s in salas.values()]
+    try:
+        r = stats.recap(ids, desde, hasta, " ".join(persona.split())[:30] or None)
+    except sqlite3.Error as e:
+        print(f"  ⚠ no pude leer las estadísticas: {e}", flush=True)
+        raise ApiError(500, "No pude leer las estadísticas")
+    return dict(r, period=periodo, room=sala.publica() if sala else None, rooms=rooms, mode=state["mode"])
+
+
 # --------------------------------------------------------- director (mpv)
 
 def datos_de(item, sala=None):
@@ -1398,9 +1735,14 @@ class Director:
     def al_reiniciar(self):
         """mpv se cayó y se levantó de nuevo: lo que sonaba se perdió.
 
-        El aviso cambia el estado, así que el Director se despierta y la vuelve a cargar.
+        El aviso cambia el estado, así que el Director se despierta y la vuelve a cargar, en el
+        segundo en que iba (el último que se midió).
         """
-        avisar("El reproductor se reinició; retomando la canción", self.principal)
+        p = self.principal
+        with lock:
+            if p.now is not None and p.reanudar is None and p.progress["t"]:
+                p.reanudar = {"id": p.now["id"], "t": p.progress["t"], "pausada": self.pausado}
+        avisar("El reproductor se reinició; retomando la canción", p)
 
     def al_cambiar(self, nombre, valor):
         p = self.principal
@@ -1520,24 +1862,39 @@ class Director:
             elif error:
                 print(f"  ⚠ no pude guardar “{sig['title']}”: {error}", flush=True)
 
-    def sonar_al_arrancar(self, espera=10, cada=5):
+    def sonar_al_arrancar(self, espera=10, cada=5, retomar=False):
         """Recién arrancada la rockola (al prender la Raspberry, o al reiniciar el servicio,
         p. ej. después de actualizarla): si en `espera` segundos nadie pidió nada, 🔀 al azar
         y a sonar, para que no quede en silencio. Con un parlante Bluetooth (pi/bluetooth.sh)
-        espera a que se conecte, aunque lo prendan al rato; si no hay (jack, USB, HDMI), ya."""
+        espera a que se conecte, aunque lo prendan al rato; si no hay (jack, USB, HDMI), ya.
+
+        Con `retomar`, la que sonaba antes de apagarse quedó cargada en pausa (ver retomar_colas):
+        en lugar de 🔀, sigue ésa, con el parlante listo."""
         p = self.principal
         time.sleep(espera)
         with lock:
-            if p.now is not None or p.queue:
+            if not retomar and (p.now is not None or p.queue):
                 return   # ya pidieron algo
-            p.shuffle = True
-            bump(p)
-        guardar_ajustes(aleatorio=True)
+            if not retomar:
+                p.shuffle = True
+                bump(p)
+        if not retomar:
+            guardar_ajustes(aleatorio=True)
         mac = parlante_bluetooth()
         if mac and not parlante_listo(mac):
-            print("  🔀 Al azar: espero que se conecte el parlante Bluetooth para arrancar", flush=True)
+            print("  ⏯ Espero que se conecte el parlante Bluetooth para arrancar", flush=True)
             while not parlante_listo(mac):
                 time.sleep(cada)
+        if retomar:
+            with lock:
+                if p.reanudar and p.now and p.reanudar["id"] == p.now["id"]:
+                    p.reanudar["pausada"], seguir = False, False   # todavía no cargó: que arranque sonando
+                else:
+                    seguir = p.now is not None and self.pausado
+            if seguir:
+                print("  ⏯ Sigue la que estaba sonando antes de apagarse", flush=True)
+                self.mpv.fijar_pausa(False)
+            return
         with lock:
             seguir = p.shuffle   # si mientras tanto lo apagaron desde la web, no
         if not seguir:
@@ -1642,6 +1999,9 @@ class Director:
         from reproductor import ErrorDescarga
 
         p = self.principal
+        with lock:   # si es la que sonaba antes de reiniciar: en el segundo en que iba (y en pausa, si estaba)
+            r = p.reanudar if p.reanudar and p.reanudar["id"] == now["id"] else None
+        desde, pausada = (r["t"], r["pausada"]) if r else (0, False)
         if not self.descargas.lista(now["videoId"]):
             if self.mpv.pedido is not None:
                 self.mpv.detener()  # que no siga sonando la anterior mientras baja
@@ -1660,7 +2020,7 @@ class Director:
                 return
             if ruta is None or not self.vigente(now["id"]):
                 return
-            sonando = self.mpv.reproducir(now["id"], ruta)
+            sonando = self.mpv.reproducir(now["id"], ruta, desde=desde, pausada=pausada)
             if sonando:
                 self.descargas.usada(now["videoId"], PRINCIPAL)
         finally:  # pase lo que pase, que no quede "cargando…" colgado
@@ -1668,7 +2028,9 @@ class Director:
                 cambio = p.loading
                 p.loading = False
                 if sonando and p.now is not None and p.now["id"] == now["id"]:
-                    p.progress = {"t": 0, "d": now["duration"], "playing": True, "at": time.monotonic()}
+                    p.progress = {"t": desde, "d": now["duration"], "playing": not pausada, "at": time.monotonic()}
+                    if p.reanudar is r:
+                        p.reanudar = None
                     cambio = True
                 if cambio:
                     bump(p)
@@ -1741,9 +2103,11 @@ class Director:
             if sala.now is not now:
                 return   # cambió mientras tanto: la próxima vuelta
             p = sala.progress
-            if not sala.lista:   # recién bajada: arranca desde el principio
+            if not sala.lista:   # recién bajada: arranca desde el principio (o donde iba, si se retoma)
+                r, sala.reanudar = sala.reanudar, None
+                desde = r["t"] if r and r["id"] == now["id"] else 0
                 sala.lista, sala.loading, estrena = True, False, True
-                sala.progress = p = {"t": 0, "d": now["duration"], "playing": False, "at": ahora}
+                sala.progress = p = {"t": desde, "d": now["duration"], "playing": False, "at": ahora}
             suena = escuchan and not sala.pausada
             if p["playing"] != suena:
                 medir(p, progreso_ahora(sala)["t"])
@@ -1943,7 +2307,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_errors(self, fn):
         try:
             fn()
-        except ApiError as e:
+        except (ApiError, ErrorLista) as e:
             self.send_json({"error": e.msg}, e.code)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
             # El cliente se fue (p. ej. cerró la pestaña durante un long-poll), o dejó de leer:
@@ -1958,7 +2322,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(u.query)
 
         def route():
-            if u.path == "/":
+            if u.path in ("/", "/recap"):   # (/recap: la misma página, abierta en el 📊 recap)
                 return self.send_page("index.html")
             if u.path == "/pantalla":
                 return self.send_page("pantalla.html")
@@ -1984,13 +2348,32 @@ class Handler(BaseHTTPRequestHandler):
                     sid = sala_de(qs.get("sala", [""])[0]).id
                     res = [dict(s, saved=director.descargas.en_sala(s["videoId"], sid)) for s in res]
                 return self.send_json(res)
-            if u.path == "/api/albums":   # los de YouTube, para ⬇ guardarlos enteros
+            if u.path == "/api/albums":   # los de YouTube: para verlos, cargarlos enteros o ⬇ guardarlos
                 q = qs.get("q", [""])[0].strip()[:200]
                 sid = sala_de(qs.get("sala", [""])[0]).id
-                res = buscar_albumes(q) if q and director and director.descargas.limite else []
-                # Cuántos temas de cada uno ya están en las guardadas de la sala.
-                return self.send_json([dict(a, saved=director.descargas.del_album(a["title"], a["artist"], sid))
-                                       for a in res])
+                res = buscar_albumes(q) if q else []
+                if director:   # cuántos temas de cada uno ya están en las guardadas de la sala
+                    res = [dict(a, saved=director.descargas.del_album(a["title"], a["artist"], sid)) for a in res]
+                return self.send_json(res)
+            if u.path == "/api/album":   # los temas de uno de esos álbumes
+                bid = qs.get("browseId", [""])[0]
+                if not ALBUM_ID.match(bid):
+                    raise ApiError(400, "Álbum inválido")
+                al = dict(get_album(bid))
+                if director:
+                    sid = sala_de(qs.get("sala", [""])[0]).id
+                    al["songs"] = [dict(c, saved=director.descargas.en_sala(c["videoId"], sid)) for c in al["songs"]]
+                return self.send_json(al)
+            if u.path == "/api/lists":   # las ♫ playlists de la sala (sin sus temas)
+                if not listas:
+                    raise ApiError(409, "No hay playlists")
+                return self.send_json(listas.de_sala(sala_de(qs.get("sala", [""])[0]).id,
+                                                     qs.get("client", [""])[0][:64]))
+            if u.path == "/api/list":   # una, con sus temas
+                if not listas:
+                    raise ApiError(409, "No hay playlists")
+                return self.send_json(listas.una(sala_de(qs.get("sala", [""])[0]).id, qs.get("id", [""])[0][:20],
+                                                 qs.get("client", [""])[0][:64]))
             if u.path == "/api/playlist":
                 return self.send_json(playlist_info(qs.get("q", [""])[0][:300]))
             if u.path.startswith("/api/audio/"):   # 📻 radio
@@ -2011,6 +2394,9 @@ class Handler(BaseHTTPRequestHandler):
                     int(desde) if desde.isdigit() else 0,
                     min(500, int(n)) if n.isdigit() else 30,
                     sala=sala_de(qs.get("sala", [""])[0]).id))
+            if u.path == "/api/stats":   # el recap
+                return self.send_json(recap(qs.get("sala", [""])[0], qs.get("periodo", [""])[0][:10],
+                                            qs.get("persona", [""])[0]))
             if u.path == "/api/info":
                 return self.send_json({"url": url_publica(), "mode": state["mode"],
                                        "pin": bool(PIN)})
@@ -2053,6 +2439,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/radio":   # 📻 prendida o apagada (para saber si alguien escucha)
                 set_radio(sala, body)
                 return self.send_json(public_state(sala, client))
+            if path.startswith("/api/list-"):   # ♫ armar playlists: cualquiera (las cambia quien la armó, o con el PIN)
+                if not listas:
+                    raise ApiError(409, "No hay playlists")
+                admin = self.es_admin(sala)
+                r = sumar_a_lista(sala, body, admin) if path == "/api/list-add" else editar_lista(sala, path, body, admin)
+                return self.send_json(dict(r, state=public_state(sala, client)))
             if path == "/api/progress":  # lo usa el reproductor web, que corre en esta máquina
                 if not self.is_local:
                     raise ApiError(403, "Sólo desde la PC que pone la música")
@@ -2065,8 +2457,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(403, "Para controlar la música hace falta el PIN")
             if path == "/api/admin":
                 return self.send_json({"ok": True, "mode": state["mode"]})
-            if path == "/api/playlist":
-                return self.send_json(add_playlist(sala, body))
+            if path in ("/api/load", "/api/playlist"):   # una colección entera a la cola (/api/playlist: un link)
+                r = cargar_entera(sala, body if path == "/api/load" else dict(body, **{"from": "youtube"}))
+                return self.send_json(dict(r, state=public_state(sala, client)))
             if path == "/api/room-delete":
                 borrar_sala(sala)
                 return self.send_json({"ok": True})
@@ -2117,7 +2510,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global director, PORT, IP_FIJA
+    global director, stats, listas, PORT, IP_FIJA
     ap = argparse.ArgumentParser(description="Rockola de oficina")
     ap.add_argument("--modo", choices=["mpv", "navegador"],
                     help="dónde suena la música (por defecto: mpv si está instalado)")
@@ -2138,9 +2531,22 @@ def main():
     state["mode"] = modo
     salas[PRINCIPAL].shuffle = modo == "mpv" and bool(leer_ajustes().get("aleatorio"))
 
+    from estadisticas import Estadisticas
+    try:
+        stats = Estadisticas(carpeta() / "estadisticas.db")
+    except (OSError, sqlite3.Error) as e:   # sin estadísticas, pero que suene
+        print(f"  ⚠ no pude abrir las estadísticas ({carpeta() / 'estadisticas.db'}): {e}", flush=True)
+    listas = Listas(carpeta() / "listas.json")
+
     if modo == "mpv":
         from reproductor import ErrorMpv
         leer_salas()
+        # Cada sala sigue donde estaba (la cola, y la que sonaba en el segundo en que iba). Al
+        # reiniciar el servicio o a mano (p. ej. para aplicar un cambio), tal cual. En el reinicio
+        # diario de las 6, la principal en pausa: la oficina está vacía. Al prender la Raspberry,
+        # también en pausa, y con azar_al_prender sigue sola cuando el parlante esté listo.
+        diario, prendida = reinicio_diario(), recien_prendida()
+        seguia = retomar_colas(en_pausa=diario or prendida)
         try:
             director = Director()
         except ErrorMpv as e:
@@ -2148,9 +2554,14 @@ def main():
         director.arrancar()
         # Al prender la Raspberry o reiniciar el servicio (p. ej. al actualizar), si nadie pide
         # nada: 🔀 y que suene sola. En el reinicio diario de las 6, no: la oficina está vacía.
-        if AZAR_AL_PRENDER and director.descargas.limite and (
-                recien_prendida() or (como_servicio() and not reinicio_diario())):
-            threading.Thread(target=director.sonar_al_arrancar, daemon=True, name="al-arrancar").start()
+        retomar = seguia and prendida
+        if AZAR_AL_PRENDER and (director.descargas.limite or retomar) and (
+                prendida or (como_servicio() and not diario)):
+            threading.Thread(target=director.sonar_al_arrancar, kwargs={"retomar": retomar},
+                             daemon=True, name="al-arrancar").start()
+    else:
+        retomar_colas()   # (lo retoma el reproductor web, que arranca donde dice el progreso)
+    threading.Thread(target=bucle_colas, daemon=True, name="colas").start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
 
@@ -2174,6 +2585,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            guardar_colas(final=True)   # antes de cerrar mpv: que quede el segundo en que iba
+        except Exception as e:
+            print(f"  ⚠ no pude guardar las colas: {e!r}", flush=True)
+        if stats:   # (la que estaba sonando se anota cuando termine, al retomarla)
+            stats.cerrar()
         if director:
             director.cerrar()
 

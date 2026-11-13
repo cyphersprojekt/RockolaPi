@@ -66,12 +66,12 @@
     /* ...y lo que queda es para lo que sonó y las guardadas, que llegan hasta abajo */
     #panelHistorial { flex: 1 1 0; min-height: 8em; }
     #biblioPanel { flex: 1 1 0; min-height: 16em; }
-    #queue, #results, #history, #guardadas { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-    #history, #guardadas { flex: 1 1 0; }
+    #queue, #results, #history, #guardadas, #playlists { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    #history, #guardadas, #playlists { flex: 1 1 0; }
     .filas { flex: 0 1 auto; min-height: 0; overflow: hidden; }
     /* en las que llegan hasta abajo, las filas ocupan todo el alto: el paginado queda pegado al
        fondo, tenga la página las filas que tenga (en la cola y los resultados lo hace el JS) */
-    #history > .filas, #guardadas > .filas { flex: 1 1 0; }
+    #history > .filas, #guardadas > .filas, #playlists > .filas { flex: 1 1 0; }
     /* la franja de arriba: la letra y el chat, del mismo alto */
     .col-letra { display: flex; flex-direction: row; column-gap: 3ch; }
     .col-letra > .panel { flex: 1 1 0; min-width: 0; }
@@ -99,9 +99,24 @@
   .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; margin-right: auto; }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
-  .salas select { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
-                  padding: .3em .5ch; border-radius: 0; max-width: 20ch; }
-  .salas select:focus { border-color: var(--acc); outline: none; }
+
+  /* el selector de salas: un botón que despliega la lista, como un panel más */
+  .selector { position: relative; }
+  #salaBtn { display: flex; align-items: center; gap: 1ch; max-width: 24ch; }
+  #salaBtn .nombre { overflow: hidden; text-overflow: ellipsis; }
+  #salaBtn .flechita { color: var(--dim); }
+  #salaBtn[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
+  .menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: calc(100vw - 32px);
+          max-height: 70vh; overflow-y: auto; margin: 0; padding: .3em 0; list-style: none;
+          background: var(--bg1); border: 1px solid var(--acc); box-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+  .menu.derecha { left: auto; right: 0; }   /* si no entra hacia la derecha */
+  .menu [role="option"] { display: grid; grid-template-columns: 2ch auto; column-gap: 1ch; padding: .35em 1.5ch .35em 1ch;
+                          color: var(--fg); cursor: pointer; white-space: nowrap; }
+  .menu [role="option"] .marca { color: var(--acc); }
+  .menu [role="option"] .sub { grid-column: 2; }
+  .menu [role="option"]:hover, .menu [role="option"]:focus { background: var(--bg2); color: var(--acc); outline: none; }
+  .menu [role="option"][aria-selected="true"] { font-weight: 700; }
+  .menu .sep { border-top: 1px dashed var(--line); margin: .3em 0; }
 
   /* paneles con el título en el borde, como en la terminal */
   .panel { position: relative; border: 2px solid var(--line); margin-top: 1.7em; padding: 1em 1.5ch .8em; }
@@ -120,6 +135,9 @@
   button.primario:hover:not(:disabled) { color: var(--bg); filter: brightness(1.1); }
   button:disabled { opacity: .45; cursor: default; }
   button.on { color: var(--acc); border-color: var(--acc); }
+  a.boton { color: var(--fg); background: var(--bg1); border: 1px solid var(--line); padding: .3em 1ch;
+            white-space: nowrap; text-decoration: none; }
+  a.boton:hover { border-color: var(--acc); color: var(--acc); }
 
   /* sonando */
   .now { display: flex; gap: 2ch; align-items: flex-start; }
@@ -223,9 +241,110 @@
   .fila.album:hover .t, .fila.album:focus-visible .t { color: var(--acc); }
   .fila.album:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
   .flecha { color: var(--dim); flex: none; }
-  .cabeza { border-bottom: 1px solid var(--line); }
+  .cabeza { border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  /* lo que se hace con una colección entera (un álbum, una playlist): debajo de su nombre */
+  .botonera { display: flex; flex-wrap: wrap; gap: .6ch; flex-basis: 100%; }
+  .botonera button { padding: .2em .8ch; }
+
+  /* ♫ playlists: la que se está armando (con ♫+ en cada tema), arriba de los resultados */
+  .armando { display: flex; align-items: center; gap: 1ch; margin-top: .7em; padding: .35em 1ch;
+             border: 1px dashed var(--acc); }
+  .armando .info { flex: 1; min-width: 0; }
+  .armando b { color: var(--acc); }
+  form.nueva { display: flex; flex-wrap: wrap; gap: 1ch; margin-bottom: .5em; }
+  form.nueva input { flex: 1; min-width: 14ch; }
+  .now .en-lista { margin-top: .4em; }
+  .now .en-lista button { padding: .1em .8ch; }
   #guardadas { position: relative; }
   .sonda { position: absolute; top: 0; left: 0; right: 0; visibility: hidden; pointer-events: none; }
+
+  /* ---------- 📊 recap: otra vista de esta misma página (la barra de arriba es la misma). En la
+     compu la página no se desplaza: el recap sí, debajo de la barra. ---------- */
+  #recap .contenido { max-width: var(--ancho); margin: 0 auto; padding: 0 var(--margen) 4em; transition: opacity .2s; }
+  #recap.cargando .contenido { opacity: .55; }   /* lo anterior a media luz mientras llega lo nuevo */
+  @media (min-width: 1000px) and (min-height: 600px) { #recap { flex: 1; min-height: 0; overflow-y: auto; } }
+  #recap .filtros { display: flex; flex-wrap: wrap; align-items: center; gap: .8ch; margin-top: 1.2em; }
+  #recap .filtros .sep { flex: 1; }
+  #recap .persona { margin-top: .8em; display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; }
+  #recap .persona b { color: var(--acc); }
+  #recap .hero { padding: 1.4em 2ch 1.2em; }
+  #recap .kicker { color: var(--dim); text-transform: uppercase; letter-spacing: .12em; font-size: .87em; }
+  #recap .grande { font-size: clamp(48px, 10vw, 96px); font-weight: 700; line-height: 1.05; margin: .1em 0 .15em;
+                   overflow-wrap: anywhere; }
+  #recap .grande .u { font-size: .42em; color: var(--dim); margin: 0 .5ch 0 .15ch; }
+  #recap .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(15ch, 1fr)); gap: 1em 3ch;
+                  margin-top: 1.2em; padding-top: 1em; border-top: 1px dashed var(--line); }
+  #recap .tile .lbl { color: var(--dim); font-size: .87em; }
+  #recap .tile .val { font-size: 1.7em; font-weight: 700; line-height: 1.2; }
+  #recap .error { color: var(--red); }
+  /* En el celular, una columna y en este orden. En la compu, tres; en una pantalla mediana, dos, y la
+     tercera (géneros | horas y días) abajo, a lo ancho. (Los mismos cortes que la página de pedidos.) */
+  #recap .grilla { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 3ch; align-items: start; }
+  #recap .rcol, #recap .cuando { display: contents; }
+  #rpCanciones { order: 1; } #rpArtistas { order: 2; } #rpGeneros { order: 3; } #rpPersonas { order: 4; }
+  #rpHoras { order: 5; } #rpDias { order: 6; } #rpDatos { order: 7; }
+  @media (min-width: 1000px) {
+    #recap .grilla { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #recap .rcol, #recap .cuando { display: block; min-width: 0; }
+    #recap .rcol3 { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+                    column-gap: 3ch; align-items: start; }
+  }
+  @media (min-width: 1250px) {
+    #recap .grilla { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    #recap .rcol3 { grid-column: auto; display: block; }
+  }
+  /* rankings: las mismas filas que la cola, con una barra fina y el valor en la punta */
+  #recap ol.ranking { list-style: none; margin: 0; padding: 0; }
+  #recap .fila:first-child .pos { color: var(--fg); font-weight: 700; }
+  #recap .fila img.redonda { border-radius: 50%; }
+  #recap .medida { display: flex; align-items: center; gap: .8ch; margin-top: .3em; }
+  #recap .rbarra { flex: none; height: 6px; min-width: 2px; width: calc(var(--p) * (100% - 13ch));
+                   background: var(--acc); border-radius: 0 3px 3px 0; }
+  #recap .valor { color: var(--dim); font-size: .87em; white-space: nowrap; }
+  #recap button.nombre { all: unset; cursor: pointer; display: block; overflow: hidden; text-overflow: ellipsis;
+                         white-space: nowrap; }
+  #recap button.nombre:hover, #recap button.nombre:focus-visible { color: var(--acc); text-decoration: underline; }
+  #recap button.nombre:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
+  /* columnas: a qué hora y qué día suena (una sola serie: un solo color) */
+  #recap .rcols { display: grid; gap: 2px; height: 9.5em; padding-top: 1.5em; align-items: end;
+                  border-bottom: 1px solid var(--line); }
+  #recap .slot { position: relative; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+  #recap .slot .c { width: min(100%, 24px); background: var(--acc); border-radius: 4px 4px 0 0; }
+  #recap .slot:hover .c, #recap .slot:focus-visible .c { filter: brightness(1.2); }
+  #recap .slot:focus-visible { outline: 1px solid var(--acc); }
+  #recap .pico { position: absolute; left: 50%; transform: translateX(-50%); font-size: .8em; white-space: nowrap;
+                 pointer-events: none; }
+  #recap .eje { display: grid; gap: 2px; margin-top: .3em; font-size: .8em; color: var(--dim); text-align: center;
+                font-variant-numeric: tabular-nums; }
+  #recap .eje span { white-space: nowrap; }
+  #recap details.tabla { margin-top: .6em; font-size: .87em; }
+  #recap details.tabla summary { color: var(--dim); cursor: pointer; }
+  #recap details.tabla table { border-collapse: collapse; margin-top: .4em; font-variant-numeric: tabular-nums; }
+  #recap details.tabla td, #recap details.tabla th { padding: .1em 1.5ch .1em 0; text-align: left; font-weight: 400; }
+  #recap details.tabla th { color: var(--dim); }
+  #recapTip { position: fixed; z-index: 10; pointer-events: none; background: var(--bg2); border: 1px solid var(--line);
+              padding: .3em 1ch; font-size: .87em; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .4); }
+  #recapTip strong { display: block; }
+  #recapTip span { color: var(--dim); }
+  #recap ul.datos { list-style: none; margin: 0; padding: 0; }
+  #recap ul.datos li { display: grid; grid-template-columns: 2.5ch minmax(0, 1fr); gap: 1ch; padding: .45em 0; }
+  #recap ul.datos li + li { border-top: 1px dashed var(--line); }
+
+  /* preguntas (en lugar de las del navegador): un panel en el medio, con la página a media luz */
+  #dialogo { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
+             max-width: none; overflow: visible; }
+  #dialogo::backdrop { background: rgba(29, 32, 33, .75); }
+  #dialogo[open] { animation: aparecer .15s ease-out; }
+  @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } }
+  @media (prefers-reduced-motion: reduce) { #dialogo[open] { animation: none; } }
+  #dialogo .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--acc); padding: 1.3em 2ch 1em; }
+  #dialogo .panel > .ttl { color: var(--acc); }
+  #dialogo.peligro .panel { border-color: var(--red); }
+  #dialogo.peligro .panel > .ttl { color: var(--red); }
+  #dlgTexto { margin: 0; overflow-wrap: anywhere; }
+  #dlgInput { width: 100%; margin-top: .8em; }
+  .dlgBotones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1ch; margin-top: 1.2em; }
+  button.primario.peligro { background: var(--red); border-color: var(--red); }
 
   /* avisos: barra de abajo */
   #toast { position: fixed; left: 0; right: 0; bottom: 0; padding: .55em 12px; background: var(--bg2);
@@ -237,17 +356,25 @@
 <body>
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
-  <label class="salas" id="salaBox" hidden><span class="largo">sala:</span>
-    <select id="salaSel" aria-label="Sala" title="🔊 suena en el parlante · 📻 se escucha con la radio"></select></label>
+  <div class="salas" id="salaBox" hidden><span class="largo" aria-hidden="true">sala:</span>
+    <div class="selector">
+      <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
+              title="Elegir la sala: 🔊 suena en el parlante · 📻 se escucha con la radio"><span class="nombre" id="salaActual">Principal</span><span
+              class="flechita" aria-hidden="true">▾</span></button>
+      <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
+    </div>
+  </div>
   <button id="radioBtn" type="button" aria-pressed="false" hidden
           title="Escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻<span class="largo"> radio</span></button>
+  <a class="boton" id="recapLink" href="/recap"
+     title="Recap: lo más escuchado, artistas, géneros y quién pide más">📊<span class="largo"> recap</span></a>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
   <button id="lockBtn" type="button" title="Controlar la música (pide PIN)">🔒 controlar</button>
 </div>
 <main>
   <div id="pinPanel" class="panel" hidden>
     <span class="ttl">PIN</span>
-    <form id="pinForm" class="pin">
+    <form id="pinForm" class="pin" novalidate>
       <span class="dim" id="pinTexto">Para controlar la música (está en rockola.toml):</span>
       <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required>
       <button class="primario">entrar</button>
@@ -257,7 +384,7 @@
 
   <div id="salaPanel" class="panel" hidden>
     <span class="ttl">NUEVA SALA</span>
-    <form id="salaForm" class="pin">
+    <form id="salaForm" class="pin" novalidate>
       <span class="dim">Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio,
         cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).</span>
       <input id="salaNombre" maxlength="30" placeholder="nombre: Ventas" autocomplete="off" required aria-label="Nombre de la sala">
@@ -327,22 +454,91 @@
       <input id="q" placeholder="canción, artista o link de YouTube" autocomplete="off" enterkeyhint="search"
              aria-label="Buscar en las guardadas y en YouTube">
     </form>
+    <div id="armando" class="armando" hidden></div>
     <div id="results"></div>
   </section>
 
   <section class="panel" id="biblioPanel" hidden>
     <span class="ttl" id="biblioTitle">GUARDADAS</span>
     <div id="pendientes" class="pendientes" hidden></div>
-    <div class="vistas">
+    <div class="vistas" id="vistas">
       <span class="dim">ver:</span>
       <button type="button" data-vista="albumes" aria-pressed="true">💿 por álbum</button>
       <button type="button" data-vista="recientes" aria-pressed="false">🕘 recientes</button>
+      <button type="button" data-vista="listas" aria-pressed="false"
+              title="Las playlists de la sala: armá una y cargala entera cuando quieras">♫ playlists</button>
     </div>
     <div id="guardadas"></div>
+    <div class="herr" id="listasHerr" hidden>
+      <button type="button" id="listaNuevaBtn" title="Armar una playlist: después tocás ♫+ en los temas que quieras">+ nueva playlist</button>
+    </div>
+    <form id="listaNueva" class="nueva" hidden novalidate>
+      <input id="listaNombre" maxlength="40" placeholder="nombre: Viernes" autocomplete="off" required
+             aria-label="Nombre de la playlist nueva">
+      <button class="primario">crear</button>
+      <button type="button" id="listaCancelar">cancelar</button>
+    </form>
+    <div id="playlists" hidden></div>
   </section>
   </div>
   </div>
 </main>
+
+<section id="recap" hidden aria-labelledby="recapTtl">
+  <div class="contenido">
+    <div class="filtros" id="recapFiltros" role="group" aria-label="Qué mostrar en el recap"></div>
+    <div class="persona" id="recapPersona" hidden>
+      <span>Lo que pidió <b id="recapPersonaNombre"></b></span>
+      <button type="button" id="recapTodosBtn">✕ ver de todos</button>
+    </div>
+
+    <section class="panel hero">
+      <span class="ttl" id="recapTtl">RECAP</span>
+      <div class="kicker" id="recapKicker">sonaron</div>
+      <div class="grande" id="recapValor">–</div>
+      <div class="dim" id="recapSub">cargando…</div>
+      <div class="tiles" id="recapTiles"></div>
+    </section>
+
+    <div id="recapVacio" class="panel" hidden><span class="ttl">NADA POR ACÁ</span><div class="vacio" id="recapVacioTexto"></div></div>
+
+    <div class="grilla" id="recapGrilla">
+      <div class="rcol">
+        <section class="panel" id="rpCanciones"><span class="ttl">TOP CANCIONES</span><ol class="ranking" id="rCanciones"></ol></section>
+        <section class="panel" id="rpDatos"><span class="ttl">DATOS</span><ul class="datos" id="rDatos"></ul></section>
+      </div>
+      <div class="rcol">
+        <section class="panel" id="rpArtistas"><span class="ttl">TOP ARTISTAS</span><ol class="ranking" id="rArtistas"></ol></section>
+        <section class="panel" id="rpPersonas"><span class="ttl">QUIÉN PIDE MÁS</span>
+          <ol class="ranking" id="rPersonas"></ol>
+          <div class="hint">Lo que pidió cada uno (sin contar 🔀 ni lo que se cargó entero: playlists y álbumes). Tocá un nombre para ver lo suyo.</div>
+        </section>
+      </div>
+      <div class="rcol rcol3">
+        <section class="panel" id="rpGeneros"><span class="ttl">GÉNEROS</span><ol class="ranking" id="rGeneros"></ol>
+          <div class="hint" id="rGenerosHint" hidden></div></section>
+        <div class="cuando">
+          <section class="panel" id="rpHoras"><span class="ttl">A QUÉ HORA SUENA</span><div id="rHoras"></div></section>
+          <section class="panel" id="rpDias"><span class="ttl">QUÉ DÍA SUENA MÁS</span><div id="rDias"></div></section>
+        </div>
+      </div>
+    </div>
+    <div class="hint">Una canción cuenta como escuchada si sonó al menos 30 segundos (las más cortas, casi enteras).
+      El tiempo es lo que sonó de verdad. La que está sonando se suma cuando termina.</div>
+  </div>
+</section>
+<div id="recapTip" role="tooltip" hidden></div>
+<dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
+  <form method="dialog" class="panel" id="dlgForm" novalidate>
+    <span class="ttl" id="dlgTitulo">CONFIRMAR</span>
+    <p id="dlgTexto"></p>
+    <input id="dlgInput" autocomplete="off" hidden aria-labelledby="dlgTexto">
+    <div class="dlgBotones">
+      <button type="button" id="dlgNo">cancelar</button>
+      <button value="si" id="dlgSi" class="primario">sí</button>
+    </div>
+  </form>
+</dialog>
 <div id="toast"></div>
 
 <script>
@@ -361,14 +557,18 @@ store.set("client", client);
 const PRINCIPAL = "principal";
 const sala = new URLSearchParams(location.search).get("sala") || store.get("sala") || PRINCIPAL;
 store.set("sala", sala);
-if (sala !== PRINCIPAL && !location.search.includes("sala=")) history.replaceState(null, "", `?sala=${encodeURIComponent(sala)}`);
+if (sala !== PRINCIPAL && !new URLSearchParams(location.search).has("sala")) {
+  const p = new URLSearchParams(location.search);
+  p.set("sala", sala);
+  history.replaceState(null, "", `?${p}`);
+}
 const conSala = path => `${path}${path.includes("?") ? "&" : "?"}sala=${encodeURIComponent(sala)}`;
 
 function irASala(id, aviso) {
   if (aviso) store.set("aviso", JSON.stringify(aviso));   // para mostrarlo ya en la otra
   store.set("sala", id);
   if (radio.on) avisarRadio(false);
-  location.search = id === PRINCIPAL ? "" : `?sala=${encodeURIComponent(id)}`;
+  location.href = recapVista.link(id);   // (si está en el 📊 recap, va al de la otra sala)
 }
 
 const nameInput = $("#name");
@@ -386,6 +586,7 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 const dos = n => String(n).padStart(2, "0");
+const contarTemas = n => `${n} ${n === 1 ? "tema" : "temas"}`;
 const fmt = s => {
   s = Math.max(0, Math.floor(s || 0));
   const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
@@ -398,6 +599,43 @@ function toast(msg, err = false) {
   t.textContent = (err ? "⚠ " : "✓ ") + msg; t.className = "show" + (err ? " err" : "");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 3500);
 }
+
+// ---------- preguntas, con la estética de la página (en lugar de confirm y prompt) ----------
+// preguntar({ titulo, texto, si, no, peligro }) → true / false. Con `valor`, además, un campo de
+// texto que arranca con eso → lo que escribieron, o null si cancelan. Esc, "cancelar" o tocar
+// afuera cancelan; Enter acepta. `peligro`: algo que no se deshace (en rojo, y arranca en cancelar).
+const dlg = $("#dialogo");
+let alCerrarDialogo = null;
+function preguntar({ titulo = "CONFIRMAR", texto, si = "sí", no = "cancelar", peligro = false, valor, max = 100 }) {
+  const conTexto = valor !== undefined;
+  if (!dlg.showModal) return Promise.resolve(conTexto ? prompt(texto, valor) : confirm(texto));   // (navegador muy viejo)
+  if (dlg.open) return Promise.resolve(conTexto ? null : false);   // (ya hay una: no se pisan)
+  $("#dlgTitulo").textContent = titulo;
+  $("#dlgTexto").textContent = texto;
+  const input = $("#dlgInput");
+  input.hidden = !conTexto; input.value = valor ?? ""; input.maxLength = max;
+  $("#dlgSi").textContent = si; $("#dlgSi").classList.toggle("peligro", peligro);
+  $("#dlgNo").textContent = no;
+  dlg.classList.toggle("peligro", peligro);
+  dlg.returnValue = "";
+  dlg.showModal();
+  if (conTexto) { input.focus(); input.select(); } else (peligro ? $("#dlgNo") : $("#dlgSi")).focus();
+  return new Promise(listo => {
+    alCerrarDialogo = () => {
+      const acepto = dlg.returnValue === "si";
+      listo(conTexto ? (acepto ? input.value.trim() : null) : acepto);
+    };
+  });
+}
+dlg.addEventListener("close", () => { const f = alCerrarDialogo; alCerrarDialogo = null; f?.(); });
+$("#dlgNo").onclick = () => dlg.close("no");
+// Tocar afuera del panel cancela (si se apretó y se soltó afuera: no al arrastrar para elegir texto).
+let dlgAbajo = null;
+dlg.addEventListener("pointerdown", e => { dlgAbajo = e.target; });
+dlg.addEventListener("click", e => { if (e.target === dlg && dlgAbajo === dlg) dlg.close("no"); });
+$("#dlgForm").addEventListener("submit", e => {   // sin texto no acepta (en lugar del cartelito del navegador)
+  if (!$("#dlgInput").hidden && !$("#dlgInput").value.trim()) { e.preventDefault(); $("#dlgInput").focus(); }
+});
 
 // ---------- tapa del disco pixelada (como en /pantalla) ----------
 // Se dibuja en la tapa y en la etiqueta del vinilo que asoma detrás.
@@ -463,7 +701,9 @@ function pintarControl() {
   $("#lockBtn").textContent = admin ? "🔓 controlando" : "🔒 controlar";
   $("#lockBtn").classList.toggle("on", admin);
   $("#controls").hidden = !admin;
+  if (armando && !armando.mine && !admin) ponerArmando(null);   // era de otro: la cambiaba con el PIN
   if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
+  pintarListas(); pintarArmando();           // (y las playlists se cargan enteras y se cambian)
   reacomodar();
 }
 
@@ -490,16 +730,26 @@ function salirDeControl() {
 }
 
 function pedirPin() {
+  recapVista.cerrar();   // (el formulario está en la vista de la cola)
   $("#pinPanel").hidden = false; reacomodar();
   $("#pinPanel").scrollIntoView({ block: "nearest" });
   $("#pinInput").focus();
 }
-$("#lockBtn").onclick = () => {
-  if (admin) { if (confirm("¿Dejar de controlar la música desde este dispositivo?")) salirDeControl(); return; }
+$("#lockBtn").onclick = async () => {
+  if (admin) {
+    if (await preguntar({ titulo: "DEJAR DE CONTROLAR", texto: "¿Dejar de controlar la música desde este dispositivo? Para volver, hace falta el PIN de nuevo.",
+                          si: "🔒 dejar de controlar" })) salirDeControl();
+    return;
+  }
   if ($("#pinPanel").hidden) pedirPin(); else { $("#pinPanel").hidden = true; reacomodar(); }
 };
 $("#pinCancel").onclick = () => { $("#pinPanel").hidden = true; reacomodar(); };
-$("#pinForm").addEventListener("submit", e => { e.preventDefault(); entrarAControl($("#pinInput").value.trim()); });
+$("#pinForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const p = $("#pinInput").value.trim();
+  if (!p) { toast("Escribí el PIN", true); $("#pinInput").focus(); return; }
+  entrarAControl(p);
+});
 
 async function control(path, body = {}) {
   try { render(await api(path, body)); }
@@ -610,6 +860,7 @@ document.fonts?.ready.then(reacomodar);
 function accionesCola(it, i) {
   if (admin) {
     return el("div", { class: "acts" },
+      botonLista(it),
       i > 0 && el("button", { title: "Que suene a continuación", "aria-label": "Mover al principio",
                               onclick: () => control("/api/move", { id: it.id, to: 0 }) }, "⤒"),
       i > 0 && el("button", { title: "Subir un lugar", "aria-label": "Subir un lugar",
@@ -617,10 +868,15 @@ function accionesCola(it, i) {
       el("button", { title: "Quitar de la cola", "aria-label": "Quitar",
                      onclick: () => removeSong(it.id) }, "✕"));
   }
-  return it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar");
+  return el("div", { class: "acts" }, botonLista(it), it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar"));
 }
 
 // ---------- estado ----------
+function ponerTitulo(enRecap = recapVista.abierta()) {
+  const otra = last?.room && !last.room.main;   // una sala sin parlante
+  document.title = (otra ? `Rockola · ${last.room.name}` : "Rockola") + (enRecap ? " · recap" : "");
+}
+
 let current = null, progress = null, progressAt = 0, last = null;
 let queuedIds = new Set();
 // Por dónde va la rockola ahora, en segundos: el servidor lo dice con cada estado y, entre uno y
@@ -656,7 +912,8 @@ function render(s) {
       el("div", { class: "titulo", title: s.now.title }, s.now.title),
       el("div", { class: "sub" }, s.now.artist),
       el("div", { class: "sub" }, quien(s.now)),
-      el("div", { class: "barra", id: "bar" }));
+      el("div", { class: "barra", id: "bar" }),
+      armando && el("div", { class: "en-lista" }, botonLista(s.now)));   // ♫+: sumarla a la que se está armando
     const vieja = now.querySelector(":scope > .info");
     if (vieja) vieja.replaceWith(info); else now.append(info);
     if (artFor !== s.now.thumb) { artFor = s.now.thumb; dibujarTapa(disco.querySelectorAll("canvas"), s.now.thumb); }
@@ -674,7 +931,8 @@ function render(s) {
     : s.waiting ? "Nadie la está escuchando: sigue cuando alguien prende 📻 radio."
     : !radio.on ? "Esta sala no tiene parlante: tocá 📻 radio para escucharla acá." : "";
   $("#salaHint").textContent = pista; $("#salaHint").hidden = !pista;
-  document.title = sinParlante ? `Rockola · ${s.room.name}` : "Rockola";
+  ponerTitulo();
+  recapVista.alEstado(s);
   $("#pinTexto").textContent = sinParlante ? `PIN de la sala ${s.room.name} (o el de la rockola):`
                                            : "Para controlar la música (está en rockola.toml):";
   pintarChat(s);
@@ -699,13 +957,11 @@ function render(s) {
     : `${lib.songs} ${lib.songs === 1 ? "canción guardada" : "canciones guardadas"}${variasSalas ? " en esta sala" : ""}`
       + ` · ${tamano(lib.bytes)} de ${gb(lib.limit)} GB${variasSalas ? " entre todas las salas" : ""}`
       + (s.shuffle ? " · con la cola vacía suenan al azar" : "");
-  $("#biblioPanel").hidden = !lib?.limit;
-  if (lib?.limit) {
-    const bajando = (s.saving || []).filter(g => !g.error).length;
-    $("#biblioTitle").textContent = `GUARDADAS · ${lib.songs}` + (variasSalas ? "" : ` · ${tamano(lib.bytes)}`)
-      + (bajando ? ` · ⬇ ${bajando} bajando` : "");
-    if (lib.v !== biblio.v) refrescarGuardadas(biblio.v == null ? 0 : 1500);
-  }
+  // Abajo a la derecha: las guardadas (si hay) y las ♫ playlists de la sala.
+  $("#biblioPanel").hidden = !lib?.limit && !s.lists;
+  pintarVista();
+  if (lib?.limit && lib.v !== biblio.v) refrescarGuardadas(biblio.v == null ? 0 : 1500);
+  if (s.lists && s.lists.v !== listasSala.v && s.lists.v !== listasSala.yendo) refrescarListas();
   if (!arrastrando && s.volume != null) { vol.value = s.volume; mostrarVol(s.volume); }
 
   const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
@@ -713,13 +969,14 @@ function render(s) {
   pintarLista($("#queue"), s.queue, (it, i) => fila(it, {
     pos: i + 1,
     extra: el("div", { class: "sub" }, "pedida por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by),
-              it.playlist && ` · ♫ ${it.playlist.title}`),
+              it.playlist && ` · ${iconoDe(it.playlist)} ${it.playlist.title}`),
     action: accionesCola(it, i),
   }), { arriba: [...herramientasCola(s.queue), ...listasEnCola(s.queue)], vacio: "La cola está vacía.",
         pag: pagCola, nombre: "Páginas de la cola", alCambiar: () => render(last) });
 
   // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo.
-  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it)) }),
+  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it)),
+                                                         action: armando && el("div", { class: "acts" }, botonLista(it)) }),
               { vacio: "Todavía nada.", paginar: false });
 
   // Actualizar botones de resultados ya agregados
@@ -738,7 +995,10 @@ function herramientasCola(queue) {
                    onclick: () => control("/api/shuffle-queue") }, "🔀 mezclar"))];
 }
 
-// Con el PIN: arriba de la cola, cada playlist cargada con un botón para sacarla entera.
+// Lo que se cargó entero a la cola (cada tema dice de dónde vino): un álbum 💿 o una playlist ♫.
+const iconoDe = l => l.kind === "album" ? "💿" : "♫";
+
+// Con el PIN: arriba de la cola, cada playlist (o álbum) cargada con un botón para sacarla entera.
 function listasEnCola(queue) {
   if (!admin) return [];
   const listas = new Map();
@@ -751,11 +1011,13 @@ function listasEnCola(queue) {
   if (!listas.size) return [];
   return [el("div", { class: "listas" }, [...listas.values()].map(l => el("div", { class: "fila" },
     el("div", { class: "info" },
-      el("div", { class: "t", title: l.title }, `♫ ${l.title}`),
+      el("div", { class: "t", title: l.title }, `${iconoDe(l)} ${l.title}`),
       el("div", { class: "sub" }, `${l.n} ${l.n === 1 ? "tema" : "temas"} en la cola · ${fmt(l.d)}`)),
-    el("button", { title: "Quitar de la cola todos los temas de esta playlist",
-                   onclick: () => confirm(`¿Quitar de la cola los ${l.n} temas de «${l.title}»?`)
-                                  && control("/api/remove-playlist", { playlist: l.id }) }, "✕ quitar todos"))))];
+    el("button", { title: `Quitar de la cola todos los temas de ${l.kind === "album" ? "este álbum" : "esta playlist"}`,
+                   onclick: async () => await preguntar({
+                       titulo: "QUITAR DE LA COLA", peligro: true, si: `✕ quitar ${l.n === 1 ? "el tema" : `los ${l.n}`}`,
+                       texto: `¿Quitar de la cola ${l.n === 1 ? "el tema" : `los ${l.n} temas`} de «${l.title}»?` })
+                     && control("/api/remove-playlist", { playlist: l.id }) }, "✕ quitar todos"))))];
 }
 
 function tickProgress() {
@@ -888,26 +1150,72 @@ for (const [accion, fn] of [["play", () => radio.on || prenderRadio()], ["pause"
 
 // ---------- salas ----------
 // La principal suena en el parlante (🔊); las otras se escuchan sólo con la radio (📻). Se elige
-// arriba; "＋ nueva sala…" abre el formulario.
+// arriba, en un menú como el de un <select> (con el teclado: ↑ ↓, Inicio, Fin, Enter, Esc);
+// "＋ nueva sala…" abre el formulario.
 let firmaSalas = "";
+const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
 function pintarSalas(s) {
   $("#salaBox").hidden = s.mode !== "mpv";   // (en modo navegador no hay salas)
   const firma = JSON.stringify(s.rooms);
   if (s.mode !== "mpv" || firma === firmaSalas) return;
   firmaSalas = firma;
-  $("#salaSel").replaceChildren(
-    ...s.rooms.map(r => el("option", { value: r.id }, `${r.main ? "🔊" : "📻"} ${r.name}`)),
-    el("option", { value: "+" }, "＋ nueva sala…"));
-  $("#salaSel").value = sala;
+  const esta = s.rooms.find(r => r.id === sala) || s.rooms[0];
+  $("#salaActual").textContent = esta ? `${esta.main ? "🔊" : "📻"} ${esta.name}` : "sala";
+  salaBtn.setAttribute("aria-label", `Sala: ${esta?.name || ""}`);
+  // ● marca en la que estás.
+  const opcion = (valor, nombre, sub, elegida = false) => el("li", {
+    role: "option", tabindex: -1, "aria-selected": String(elegida), "data-valor": valor,
+    onclick: () => elegirSala(valor) },
+    el("span", { class: "marca", "aria-hidden": "true" }, elegida ? "●" : ""), el("span", {}, nombre),
+    el("span", { class: "sub" }, sub));
+  salaMenu.replaceChildren(
+    ...s.rooms.map(r => opcion(r.id, `${r.main ? "🔊" : "📻"} ${r.name}`,
+                               r.main ? "suena en el parlante" : "se escucha con 📻 radio", r.id === sala)),
+    el("li", { class: "sep", role: "separator" }),
+    opcion("+", "＋ nueva sala…", "con su cola, su chat y su PIN"));
 }
-$("#salaSel").onchange = () => {
-  const v = $("#salaSel").value;
+const opcionesSala = () => [...salaMenu.querySelectorAll('[role="option"]')];
+
+function abrirMenuSalas(foco = "elegida") {
+  salaMenu.hidden = false; salaMenu.classList.remove("derecha");
+  salaBtn.setAttribute("aria-expanded", "true");
+  if (salaMenu.getBoundingClientRect().right > innerWidth - 8) salaMenu.classList.add("derecha");   // que no se salga
+  const ops = opcionesSala();
+  (foco === "ultima" ? ops.at(-1) : ops.find(o => o.getAttribute("aria-selected") === "true") || ops[0])?.focus();
+}
+function cerrarMenuSalas(volver = true) {
+  if (salaMenu.hidden) return;
+  salaMenu.hidden = true; salaBtn.setAttribute("aria-expanded", "false");
+  if (volver) salaBtn.focus();
+}
+function elegirSala(v) {
+  cerrarMenuSalas();
+  if (v === sala) return;
   if (v !== "+") return irASala(v);
-  $("#salaSel").value = sala;
+  recapVista.cerrar();
   $("#salaPanel").hidden = false; reacomodar();
   $("#salaPanel").scrollIntoView({ block: "nearest" });
   $("#salaNombre").focus();
-};
+}
+salaBtn.onclick = () => salaMenu.hidden ? abrirMenuSalas() : cerrarMenuSalas();
+salaBtn.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); abrirMenuSalas(e.key === "ArrowUp" ? "ultima" : "elegida"); }
+});
+salaMenu.addEventListener("keydown", e => {
+  const ops = opcionesSala(), i = ops.indexOf(document.activeElement);
+  const ir = j => ops[(j + ops.length) % ops.length]?.focus();
+  if (e.key === "ArrowDown") ir(i + 1);
+  else if (e.key === "ArrowUp") ir(i - 1);
+  else if (e.key === "Home") ir(0);
+  else if (e.key === "End") ir(ops.length - 1);
+  else if (e.key === "Enter" || e.key === " ") { if (i >= 0) elegirSala(ops[i].dataset.valor); }
+  else if (e.key === "Escape") cerrarMenuSalas();
+  else if (e.key === "Tab") return cerrarMenuSalas(false);
+  else return;
+  e.preventDefault();
+});
+// Tocar afuera lo cierra (sin mover el foco: capaz tocaron otra cosa).
+document.addEventListener("pointerdown", e => { if (!e.target.closest?.(".selector")) cerrarMenuSalas(false); });
 $("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; reacomodar(); };
 $("#salaForm").addEventListener("submit", async e => {
   e.preventDefault();
@@ -925,7 +1233,8 @@ $("#salaForm").addEventListener("submit", async e => {
 
 $("#borrarSalaBtn").onclick = async () => {
   const nombre = last?.room?.name;
-  if (!confirm(`¿Borrar la sala ${nombre}? Se pierden su cola y su chat. Las canciones bajadas quedan (otra sala las puede volver a guardar).`)) return;
+  if (!await preguntar({ titulo: "BORRAR LA SALA", peligro: true, si: "🗑 borrar la sala",
+                         texto: `¿Borrar la sala ${nombre}? Se pierden su cola, su chat, sus playlists y su recap. Las canciones bajadas quedan (otra sala las puede volver a guardar).` })) return;
   try {
     await api("/api/room-delete", {});
     irASala(PRINCIPAL, [`Borré la sala ${nombre}`, false]);
@@ -1094,8 +1403,8 @@ async function loop() {
 // ---------- buscar ----------
 // Un solo buscador, sin botón. Mientras escribís aparecen las guardadas que coinciden (al toque,
 // sin ir a internet); cuando dejás de escribir un ratito (ESPERA_YOUTUBE), además lo que hay en
-// YouTube: sus álbumes (para ⬇ guardarlos enteros) y sus temas. Primero las guardadas. Enter
-// busca en YouTube sin esperar.
+// YouTube: sus álbumes (se tocan para ver sus temas; se cargan enteros o se ⬇ guardan) y sus
+// temas. Primero las guardadas. Enter busca en YouTube sin esperar.
 const MAX_SUGERIDAS = 10;
 const ESPERA_YOUTUBE = 600;   // ms sin escribir antes de buscar en YouTube
 let sugeridas = { q: "", items: [], total: 0 }, sugeridasPedido = 0, sugerirTimer = null;
@@ -1104,6 +1413,9 @@ let buscandoYT = null, youtubeTimer = null;   // el texto que se va a buscar (o 
 const pagResultados = { pagina: 0 };
 // Link de una playlist: se carga entera a la cola (con el PIN).
 let playlistVista = null;   // { q, info } o { q, error }
+// Un álbum de YouTube abierto: en lugar de los resultados, sus temas.
+let discoAbierto = null;    // { a (el de los resultados), datos: { songs } o null mientras carga, error }
+const pagDisco = { pagina: 0 };
 
 const textoBuscado = () => $("#q").value.trim();
 const hayBiblio = () => !!last?.library?.limit;
@@ -1131,6 +1443,7 @@ async function sugerir() {
 $("#q").addEventListener("input", () => {
   const q = textoBuscado();
   clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
+  discoAbierto = null;   // buscan otra cosa: de vuelta a los resultados
   if (!q) return limpiarBusqueda();   // borraron todo: chau resultados
   sugerirTimer = setTimeout(sugerir, 150);
   // Lo de YouTube del texto anterior queda a la vista (con "buscando…") hasta que llegue lo nuevo.
@@ -1142,6 +1455,7 @@ $("#q").addEventListener("input", () => {
 
 function pintarResultados() {
   const box = $("#results"), q = textoBuscado();
+  if (discoAbierto && q) return pintarDisco(box);
   const deAca = sugeridas.q === q ? sugeridas : { items: [] };
   // Lo de YouTube, si es de este texto o si está por llegar lo nuevo (para que la lista no salte).
   const yt = busqueda && (busqueda.q === q || buscandoYT) ? busqueda : null;
@@ -1171,13 +1485,16 @@ function pintarResultados() {
   reajustarGuardadas();   // debajo quedó más (o menos) lugar
 }
 
-function filaResultado(song) {
+// Un tema de la búsqueda. En la de un álbum (`pos`, su número), pedirlo no limpia la búsqueda: capaz
+// quieren otro del mismo disco.
+function filaResultado(song, { pos } = {}) {
   const guardada = song.saved || yaGuardadas.has(song.videoId);
+  const alPedir = pos == null ? limpiarBusqueda : null;
   return fila(song, {
-    imagen: true,
+    imagen: pos == null, pos,
     marca: guardada && el("span", { class: "guardada", title: "Ya está guardada: suena sin esperar la descarga" }, "💾 guardada"),
-    action: el("div", { class: "acts" }, !guardada && botonGuardar(song), botonAhora(song, limpiarBusqueda),
-                botonAgregar(song, limpiarBusqueda)),
+    action: el("div", { class: "acts" }, !guardada && botonGuardar(song), botonLista(song), botonAhora(song, alPedir),
+                botonAgregar(song, alPedir)),
   });
 }
 
@@ -1189,17 +1506,62 @@ function filaResultado(song) {
 const idDisco = a => a.browseId || albumDeGuardadas.get(a.key) || `guardadas:${a.key}`;
 const repintarDiscos = () => { pintarResultados(); if (albumAbierto) pintarGuardadas(); };
 
-function filaDisco(a) {
-  const listo = albumesListos.has(a.browseId) && ![...guardando.values()].some(g => g.album === a.browseId && !g.error);
-  const marca = listo ? el("span", { class: "guardada", title: "Están guardados todos sus temas" }, "💾 guardado")
+// Quedó guardado entero (y no se está bajando nada de él).
+const discoListo = a => albumesListos.has(a.browseId) && ![...guardando.values()].some(g => g.album === a.browseId && !g.error);
+
+function marcaDisco(a) {
+  return discoListo(a) ? el("span", { class: "guardada", title: "Están guardados todos sus temas" }, "💾 guardado")
     : a.saved > 0 && el("span", { class: "guardada", title: `Hay ${a.saved} ${a.saved === 1 ? "tema" : "temas"} de este álbum entre las guardadas` },
                        `💾 ${a.saved} ${a.saved === 1 ? "guardado" : "guardados"}`);
-  return el("div", { class: "fila disco-yt" },
+}
+
+// Un álbum de YouTube en los resultados: tocándolo se ven sus temas (ahí se carga entero).
+function filaDisco(a) {
+  const marca = marcaDisco(a);
+  const abrir = e => { if (!e.target.closest("button")) abrirDisco(a); };   // (⬇ es otra cosa)
+  return el("div", { class: "fila album disco-yt", role: "button", tabindex: 0, title: "Ver sus temas", onclick: abrir,
+                     onkeydown: e => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); abrirDisco(a); } } },
     el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
     el("div", { class: "info" },
       el("div", { class: "t", title: a.title }, "💿 " + a.title),
       el("div", { class: "sub" }, marca, marca && " · ", [a.type, a.artist, a.year].filter(Boolean).join(" · "))),
-    el("div", { class: "acts" }, !listo && botonGuardarAlbum(a)));
+    el("div", { class: "acts" }, !discoListo(a) && botonGuardarAlbum(a)),
+    el("span", { class: "flecha", "aria-hidden": "true" }, "›"));
+}
+
+async function abrirDisco(a) {
+  discoAbierto = { a, datos: null, error: null }; pagDisco.pagina = 0;
+  pintarResultados();
+  $("#results .cabeza button")?.focus();
+  try {
+    const datos = await api(`/api/album?browseId=${encodeURIComponent(a.browseId)}`);
+    if (discoAbierto?.a === a) discoAbierto.datos = datos;
+  } catch (err) {
+    if (discoAbierto?.a === a) discoAbierto.error = err.message;
+  }
+  if (discoAbierto?.a === a) pintarResultados();
+}
+
+// Los temas de un álbum de YouTube, con "‹ resultados" para volver. Arriba, lo que se hace con el
+// disco entero: ▶ reproducir y + a la cola (con el PIN), ♫+ todos, ⬇ guardar.
+function pintarDisco(box) {
+  const { a, datos, error } = discoAbierto;
+  const volver = () => { discoAbierto = null; pintarResultados(); $("#q").focus({ preventScroll: true }); };
+  const songs = datos?.songs || [], fuente = { from: "album", browseId: a.browseId };
+  const total = songs.reduce((t, x) => t + (x.duration || 0), 0), marca = marcaDisco(a);
+  const cabeza = el("div", { class: "fila cabeza" },
+    el("button", { type: "button", title: "Volver a los resultados", onclick: volver }, "‹ resultados"),
+    el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: a.title }, "💿 " + a.title),
+      el("div", { class: "sub" }, marca, marca && " · ",
+         [a.type, a.artist, a.year, datos && contarTemas(songs.length), total && fmt(total)].filter(Boolean).join(" · "))),
+    songs.length > 0 && el("div", { class: "botonera" }, botonesCargar(fuente, "el disco entero"), botonSumarTodos(fuente),
+                           botonGuardarAlbum(a)));
+  pintarLista(box, songs, (song, i) => filaResultado(song, { pos: i + 1 }), {
+    arriba: [cabeza], vacio: error ? "⚠ " + error : datos ? "No tiene temas que se puedan pedir." : "cargando sus temas…",
+    pag: pagDisco, porPagina: TEMAS_POR_PAGINA, nombre: `Páginas de los temas de ${a.title}`, alCambiar: pintarResultados });
+  reajustarGuardadas();   // debajo quedó más (o menos) lugar
 }
 
 function botonGuardarAlbum(a) {
@@ -1299,11 +1661,11 @@ async function guardarCancion(song, btn) {
 // esperan y las que fallaron. ✕ cancela (las propias; con el PIN, cualquiera).
 let firmaPendientes = "";
 function pintarPendientes(s) {
-  const lista = s.saving || [], caja = $("#pendientes");
-  const firma = JSON.stringify([lista, admin]);
+  const lista = s?.saving || [], caja = $("#pendientes");
+  const firma = JSON.stringify([lista, admin, verListas()]);
   if (firma === firmaPendientes) return;
   firmaPendientes = firma;
-  caja.hidden = !lista.length;
+  caja.hidden = !lista.length || verListas();
   if (!lista.length) return caja.replaceChildren();
   const puedo = g => admin || g.mine;
   const cancelables = lista.filter(g => puedo(g) && !g.error).map(g => g.videoId);
@@ -1312,7 +1674,10 @@ function pintarPendientes(s) {
     el("div", { class: "fila cabeza" },
       el("div", { class: "info" }, `⬇ Para guardar: ${esperan} ${esperan === 1 ? "espera" : "esperan"} bajarse`),
       cancelables.length > 1 && el("button", { type: "button", title: "Cancelar todas las que podés cancelar",
-        onclick: () => confirm(`¿Cancelar ${cancelables.length} descargas?`) && cancelarGuardado(cancelables) }, "✕ todas")),
+        onclick: async () => await preguntar({ titulo: "CANCELAR DESCARGAS", peligro: true, no: "volver",
+                                               si: `✕ cancelar ${cancelables.length}`,
+                                               texto: `¿Cancelar ${cancelables.length} descargas? No se bajan (la que se está bajando termina, pero no queda guardada).` })
+                             && cancelarGuardado(cancelables) }, "✕ todas")),
     ...lista.map(g => el("div", { class: "fila" },
       el("div", { class: "info" },
         el("div", { class: "t", title: g.title }, g.title),
@@ -1374,31 +1739,16 @@ function tarjetaPlaylist() {
   if (error) return el("div", { class: "hint" }, "⚠ " + error);
   const datos = [`${info.count} ${info.count === 1 ? "tema" : "temas"}`, info.duration && fmt(info.duration), info.author]
     .filter(Boolean).join(" · ");
-  const boton = admin
-    ? el("button", { class: "primario", onclick: ev => cargarPlaylist(q, ev.currentTarget) }, "+ cargar toda")
-    : el("button", { title: "Cargar una playlist entera pide el PIN", onclick: pedirPin }, "🔒 con PIN");
+  const fuente = { from: "youtube", q };
   return el("div", {},
-    el("div", { class: "fila playlist" },
+    el("div", { class: "fila playlist cabeza" },
       el("img", { src: info.thumb, alt: "", loading: "lazy" }),
       el("div", { class: "info" },
         el("div", { class: "t", title: info.title }, "♫ " + info.title),
         el("div", { class: "sub" }, datos)),
-      boton),
+      el("div", { class: "botonera" }, botonesCargar(fuente, "la playlist entera", limpiarBusqueda), botonSumarTodos(fuente))),
     info.total > info.count && el("div", { class: "hint" },
       `La playlist tiene ${info.total} temas: se cargan los que se pueden pedir (como mucho 200, sin repetidos ni muy largos).`));
-}
-
-async function cargarPlaylist(q, btn) {
-  btn.disabled = true; btn.textContent = "cargando…";
-  try {
-    const r = await api("/api/playlist", { q, by: nameInput.value.trim() });
-    btn.textContent = "cargada"; btn.className = "";
-    limpiarBusqueda();
-    toast(r.text);
-  } catch (err) {
-    btn.disabled = false; btn.textContent = "+ cargar toda";
-    toast(err.message, true);
-  }
 }
 
 // Enter: buscar en YouTube ya, sin esperar (si no se buscó ya eso mismo).
@@ -1423,8 +1773,7 @@ async function buscarEnYouTube(q) {
     ? api(`/api/playlist?q=${encodeURIComponent(q)}`).then(info => ({ q, info }), err => ({ q, error: err.message }))
     : null;
   // Los álbumes, a la par. Si eso falla, igual se ven los temas.
-  const discos = hayBiblio() && !esLink(q)
-    ? api(`/api/albums?q=${encodeURIComponent(q)}`).catch(() => []) : [];
+  const discos = !esLink(q) ? api(`/api/albums?q=${encodeURIComponent(q)}`).catch(() => []) : [];
   try {
     const res = await api(`/api/search?q=${encodeURIComponent(q)}`);
     const lista = pl ? await pl : null;
@@ -1446,7 +1795,7 @@ function limpiarBusqueda() {
   ++busquedaPedido; ++sugeridasPedido;   // si había algo en camino, que no aparezca después
   clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
   $("#q").value = "";
-  busqueda = null; buscandoYT = null; playlistVista = null; sugeridas = { q: "", items: [], total: 0 };
+  busqueda = null; buscandoYT = null; playlistVista = null; discoAbierto = null; sugeridas = { q: "", items: [], total: 0 };
   pintarResultados();
 }
 
@@ -1505,7 +1854,10 @@ async function addSong(song, btn) {
 // sin moverse de la página.
 const POR_PAGINA = { albumes: 15, recientes: 20 };
 const TEMAS_POR_PAGINA = 20;   // los de un álbum, en el celular
-let vista = store.get("vista") === "recientes" ? "recientes" : "albumes";
+let vista = store.get("vista") === "recientes" ? "recientes" : "albumes";   // la de las guardadas
+// Ese panel muestra las guardadas o las ♫ playlists (sin guardadas, sólo las playlists).
+let panelVista = store.get("panel") === "listas" ? "listas" : "guardadas";
+const verListas = () => panelVista === "listas" || !hayBiblio();
 let biblio = { v: null, vista, total: 0, items: [], pagina: 0, n: 0 }, biblioPedido = 0, biblioTimer = null;
 let albumAbierto = null;          // el álbum del que se están viendo los temas
 const pagAlbum = { pagina: 0 };
@@ -1533,17 +1885,46 @@ function subirA(e) {
 }
 
 function pintarVista() {
+  const listas = verListas();
   document.querySelectorAll(".vistas button[data-vista]").forEach(b => {
-    const on = b.dataset.vista === vista;
+    const on = b.dataset.vista === "listas" ? listas : !listas && b.dataset.vista === vista;
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
   });
+  $("#vistas").hidden = !hayBiblio();   // sin guardadas no hay nada que elegir
+  $("#guardadas").hidden = listas;
+  $("#playlists").hidden = !listas;
+  $("#listasHerr").hidden = !listas || !!listasSala.abierta || listasSala.creando;
+  $("#listaNueva").hidden = !listas || !!listasSala.abierta || !listasSala.creando;
+  pintarTituloBiblio();
 }
+
+function pintarTituloBiblio() {
+  const lib = last?.library;
+  if (verListas()) {
+    const n = listasSala.items.length;
+    $("#biblioTitle").textContent = "PLAYLISTS" + (n ? ` · ${n}` : "");
+  } else if (lib?.limit) {
+    const bajando = (last.saving || []).filter(g => !g.error).length;
+    $("#biblioTitle").textContent = `GUARDADAS · ${lib.songs}` + ((last.rooms || []).length > 1 ? "" : ` · ${tamano(lib.bytes)}`)
+      + (bajando ? ` · ⬇ ${bajando} bajando` : "");
+  }
+}
+
 document.querySelectorAll(".vistas button[data-vista]").forEach(b => b.addEventListener("click", () => {
-  if (b.dataset.vista === vista) return;
-  vista = b.dataset.vista; store.set("vista", vista);
-  pintarVista(); cargarGuardadas();
+  const v = b.dataset.vista;
+  if (v === "listas") {
+    if (panelVista === "listas") return;
+    panelVista = "listas"; store.set("panel", panelVista);
+    pintarVista(); pintarListas(); pintarPendientes(last);
+    return;
+  }
+  if (panelVista === "guardadas" && v === vista) return;
+  panelVista = "guardadas"; store.set("panel", panelVista);
+  const otra = v !== vista;
+  vista = v; store.set("vista", vista);
+  pintarVista(); pintarPendientes(last);
+  if (otra) cargarGuardadas(); else { pintarGuardadas(); reajustarGuardadas(); }
 }));
-pintarVista();
 
 function refrescarGuardadas(demora) {
   if (biblioTimer) return;   // ya hay uno en camino
@@ -1553,7 +1934,7 @@ function refrescarGuardadas(demora) {
 // Cuántas por página: en la compu, las que entran en el lugar de la lista (descontando el
 // paginado si hace falta, o sea si son más de `total`); en el celular, POR_PAGINA.
 function porPaginaGuardadas(total) {
-  if (!fijo()) return POR_PAGINA[vista];
+  if (!fijo() || $("#guardadas").hidden) return POR_PAGINA[vista];   // (escondidas no se pueden medir)
   const caja = $("#guardadas");
   const muestra = () => fila({ title: "–", artist: "–", duration: 1 }, { imagen: true, action: el("button", {}, "+ agregar") });
   const sonda = el("div", { class: "sonda" }, muestra(), muestra(), paginador(0, 2, () => {}, ""));   // invisibles
@@ -1590,6 +1971,7 @@ async function cargarGuardadas(pagina = biblio.pagina) {
 
 // Cambió el lugar para la lista (aparecieron resultados, otra ventana…): si ahora entran otras tantas, pedirlas.
 function reajustarGuardadas() {
+  if (verListas()) { if (fijo()) pintarListas(); return; }   // (las playlists se acomodan solas)
   if ($("#biblioPanel").hidden || biblio.v == null) return;
   if (albumAbierto) pintarGuardadas();   // los temas del álbum se acomodan solos
   else if (porPaginaGuardadas(biblio.total) !== biblio.n) cargarGuardadas();
@@ -1640,11 +2022,16 @@ function pintarAlbum(a) {
     el("div", { class: "info" },
       el("div", { class: "t", title: nombreAlbum(a) }, nombreAlbum(a)),
       el("div", { class: "sub" }, datosAlbum(a))),
-    a.album && el("div", { class: "acts" }, botonGuardarAlbum(a)));   // ⬇ completar (los sueltos, no)
+    // El disco entero (los sueltos, no): ▶ reproducir y + a la cola (con el PIN), ♫+ todos, ⬇ completar.
+    // Entero es como está en YouTube Music, en orden: también los temas que no están guardados.
+    a.album && el("div", { class: "botonera" },
+      botonesCargar(fuenteGuardadas(a), "el disco entero (también los temas que no están guardados)"), botonSumarTodos(fuenteGuardadas(a)), botonGuardarAlbum(a)));
   pintarLista($("#guardadas"), a.songs, song => fila(song, { action: accionesGuardada(song) }),
               { arriba: [cabeza], pag: pagAlbum, porPagina: TEMAS_POR_PAGINA,
                 nombre: `Páginas de los temas de ${nombreAlbum(a)}`, alCambiar: pintarGuardadas });
 }
+
+const fuenteGuardadas = a => ({ from: "saved", album: a.album, artist: a.artist, videoIds: a.songs.map(x => x.videoId) });
 
 // Una guardada: + agregar y, con el PIN, 🗑 para borrarla de las guardadas de la sala.
 function accionesGuardada(song) {
@@ -1652,11 +2039,12 @@ function accionesGuardada(song) {
     admin && el("button", { type: "button", title: "Borrarla de las guardadas de esta sala",
                             "aria-label": `Borrar ${song.title} de las guardadas`,
                             onclick: ev => borrarGuardada(song, ev.currentTarget) }, "🗑"),
-    botonAhora(song), botonAgregar(song));
+    botonLista(song), botonAhora(song), botonAgregar(song));
 }
 
 async function borrarGuardada(song, btn) {
-  if (!confirm(`¿Borrar «${song.title}» de las guardadas?`)) return;
+  if (!await preguntar({ titulo: "BORRAR DE LAS GUARDADAS", peligro: true, si: "🗑 borrar",
+                         texto: `¿Borrar «${song.title}» de las guardadas de esta sala? Si vuelve a sonar, se vuelve a guardar.` })) return;
   btn.disabled = true;
   try {
     const r = await api("/api/library-remove", { videoId: song.videoId, client });
@@ -1683,6 +2071,590 @@ async function removeSong(id) {
   try { render(await api("/api/remove", { id, client })); }
   catch (err) { toast(err.message, true); }
 }
+
+// ---------- cargar una colección entera (un álbum, una playlist) ----------
+// ▶ reproducir: suena ya, entera y en orden (lo que estaba en la cola sigue después); + a la cola:
+// al final. Las dos con el PIN, como las playlists de YouTube: sin el PIN, una persona llenaría la
+// cola de una (sus temas sueltos se piden como cualquiera). `que`: "el disco entero", "la playlist entera".
+function botonesCargar(fuente, que, alCargar) {
+  if (!admin) {
+    return el("button", { type: "button", title: `Cargar ${que} a la cola pide el PIN (los temas de a uno se piden sin PIN)`,
+                          onclick: pedirPin }, "🔒 cargar con PIN");
+  }
+  return [
+    el("button", { type: "button", class: "primario",
+                   title: `Que suene ya ${que}, en orden: corta la que está sonando (lo que estaba en la cola sigue después)`,
+                   onclick: ev => cargarEntera(fuente, "now", ev.currentTarget, alCargar) }, "▶ reproducir"),
+    el("button", { type: "button", title: `Poner ${que} al final de la cola`,
+                   onclick: ev => cargarEntera(fuente, "end", ev.currentTarget, alCargar) }, "+ a la cola"),
+  ];
+}
+
+async function cargarEntera(fuente, at, btn, alCargar) {
+  const antes = [...btn.childNodes];
+  btn.disabled = true; btn.replaceChildren("⏳ cargando…");
+  try {
+    const r = await api("/api/load", { ...fuente, at, by: nameInput.value.trim(), client });
+    toast((at === "now" ? "▶ " : "") + r.text);
+    render(r.state);
+    alCargar?.();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false; btn.replaceChildren(...antes);
+  }
+}
+
+// ---------- ♫ playlists de la sala ----------
+// Las arma cualquiera (+ nueva playlist) y quedan guardadas en la rockola; las cambia quien la armó
+// (este dispositivo) o alguien con el PIN. Para sumarle temas se la elige (✚ sumar temas) y aparece
+// ♫+ en cada tema: en la búsqueda, en los álbumes, en las guardadas, en lo que suena, en la cola y en
+// lo que sonó (♫+ todos, en un álbum o una playlist de YouTube, los suma de una). ♫✓: ya está (tocalo
+// para sacarlo). Cargarla entera a la cola pide el PIN (ver botonesCargar).
+// v: la versión que se ve; yendo: la que se está pidiendo.
+const listasSala = { v: null, yendo: null, items: [], abierta: null, creando: false, pedido: 0, error: null };
+let armando = null;   // { id, name, mine, ids }: la playlist a la que se suman los temas con ♫+
+const pagListas = { pagina: 0 }, pagLista = { pagina: 0 };
+const claveArmando = `armando:${sala}`;   // (se recuerda en este dispositivo, por sala)
+const puedoCambiar = l => !!l && (l.mine || admin);
+const datosLista = l => [contarTemas(l.count), l.duration ? fmt(l.duration) : null,
+                         l.mine ? "la armaste vos" : l.by && `de ${l.by}`].filter(Boolean).join(" · ");
+
+function ponerArmando(l) {
+  armando = l && { id: l.id, name: l.name, mine: l.mine, ids: new Set((l.songs || []).map(s => s.videoId)) };
+  if (armando) store.set(claveArmando, armando.id); else store.del(claveArmando);
+}
+
+// Cambiaron las playlists (la versión del estado): la lista, la abierta y la que se está armando.
+async function refrescarListas() {
+  const pedido = ++listasSala.pedido, visto = last?.lists?.v;
+  listasSala.yendo = visto;
+  try {
+    const r = await api(`/api/lists?client=${encodeURIComponent(client)}`);
+    if (pedido !== listasSala.pedido) return;
+    const hay = new Set(r.lists.map(l => l.id));
+    const una = id => id && hay.has(id) ? api(`/api/list?id=${id}&client=${encodeURIComponent(client)}`).catch(() => null) : null;
+    const quiero = armando?.id || store.get(claveArmando), abierta = listasSala.abierta?.id;
+    const [ab, ar] = await Promise.all([una(abierta), quiero === abierta ? null : una(quiero)]);
+    if (pedido !== listasSala.pedido) return;
+    Object.assign(listasSala, { v: r.v, items: r.lists, error: null, abierta: ab });   // (si la borraron, a la lista)
+    const nueva = quiero === abierta ? ab : ar;
+    ponerArmando(nueva && puedoCambiar(nueva) ? nueva : null);
+  } catch (err) {
+    if (pedido !== listasSala.pedido) return;
+    Object.assign(listasSala, { v: visto, error: err.message });   // (que no lo vuelva a pedir con cada estado)
+  }
+  listasSala.yendo = null;
+  repintarListas();
+}
+
+// Algo cambió en las playlists (o en cuál se arma): todo lo que muestra ♫+ o una playlist.
+function repintarListas(s = last) {
+  pintarVista(); pintarListas(); pintarArmando();
+  if (s) render(s);       // lo que suena, la cola y lo que sonó
+  pintarResultados();     // la búsqueda (y reacomoda lo de abajo)
+  if (biblio.v != null && !verListas()) pintarGuardadas();
+}
+
+// Lo que contesta el servidor a un cambio: la playlist como quedó, y el estado.
+function alCambiarLista(r) {
+  const l = r.list;
+  if (l) {
+    if (listasSala.abierta?.id === l.id) listasSala.abierta = l;
+    if (armando?.id === l.id) ponerArmando(l);
+    listasSala.items = listasSala.items.map(x => x.id === l.id ? l : x);
+  }
+  repintarListas(r.state || last);
+}
+
+// ♫+ / ♫✓ en un tema: sumarlo a la que se está armando, o sacarlo si ya está.
+function botonLista(song) {
+  if (!armando || !song?.videoId) return null;
+  const esta = armando.ids.has(song.videoId);
+  return el("button", {
+    type: "button", class: esta ? "on" : "", "aria-pressed": String(esta),
+    "aria-label": esta ? `Sacar ${song.title} de ${armando.name}` : `Sumar ${song.title} a ${armando.name}`,
+    title: esta ? `Está en «${armando.name}»: tocá para sacarla` : `Sumarla a la playlist «${armando.name}»`,
+    onclick: ev => alternarEnLista(song, ev.currentTarget),
+  }, esta ? "♫✓" : "♫+");
+}
+
+async function alternarEnLista(song, btn) {
+  const l = armando, sacar = l.ids.has(song.videoId);
+  btn.disabled = true;
+  try {
+    const r = await api(sacar ? "/api/list-remove" : "/api/list-add",
+                        { id: l.id, client, ...(sacar ? { videoId: song.videoId } : { videoIds: [song.videoId] }) });
+    toast(sacar ? `Saqué «${song.title}» de «${l.name}»` : r.text);
+    alCambiarLista(r);
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+    if (err.status === 404 || err.status === 403) refrescarListas();   // la borraron, o ya no es tuya
+  }
+}
+
+// ♫+ todos: un álbum o una playlist entera, a la que se está armando.
+function botonSumarTodos(fuente) {
+  if (!armando || (fuente.from === "list" && fuente.list === armando.id)) return null;
+  return el("button", { type: "button", title: `Sumar todos sus temas a la playlist «${armando.name}»`,
+                        onclick: ev => sumarTodos(fuente, ev.currentTarget) }, "♫+ todos");
+}
+
+async function sumarTodos(fuente, btn) {
+  const l = armando;
+  btn.disabled = true;
+  try {
+    const r = await api("/api/list-add", { ...fuente, id: l.id, client });
+    toast(r.text);
+    alCambiarLista(r);
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+  }
+}
+
+// Arriba de los resultados, mientras se arma una: a cuál van los ♫+.
+function pintarArmando() {
+  const caja = $("#armando");
+  caja.hidden = !armando;
+  if (!armando) return caja.replaceChildren();
+  caja.replaceChildren(
+    el("div", { class: "info" },
+      el("div", { class: "t" }, "♫ Sumando a ", el("b", { title: armando.name }, armando.name), ` · ${contarTemas(armando.ids.size)}`),
+      el("div", { class: "sub" }, "Tocá ♫+ en los temas que quieras (♫✓: ya está; tocalo para sacarlo)")),
+    el("button", { type: "button", title: "Ver la playlist", onclick: () => abrirLista(armando.id, true) }, "ver"),
+    el("button", { type: "button", class: "primario", title: "Dejar de sumarle temas", onclick: terminarArmado }, "✓ listo"));
+}
+
+function empezarArmado(l) {
+  ponerArmando(l);
+  repintarListas();
+  subirA($("#panelPedir"));   // (en el celular, la búsqueda está más arriba)
+  $("#q").focus({ preventScroll: true });
+}
+function terminarArmado() { ponerArmando(null); repintarListas(); }
+
+// El panel: la lista de playlists o, con una abierta, sus temas.
+function pintarListas() {
+  pintarVista();
+  if (!verListas()) return;
+  if (listasSala.abierta) return pintarListaAbierta(listasSala.abierta);
+  const { items, error } = listasSala;
+  pintarLista($("#playlists"), items, filaLista, {
+    arriba: error ? [el("div", { class: "hint" }, "⚠ " + error)] : [],
+    vacio: listasSala.v == null ? "cargando…" : "Todavía no hay playlists en esta sala. Armá una con «+ nueva playlist».",
+    pag: pagListas, porPagina: POR_PAGINA.albumes, nombre: "Páginas de las playlists", alCambiar: pintarListas });
+}
+
+function filaLista(l) {
+  const abrir = () => abrirLista(l.id);
+  return el("div", { class: "fila album", role: "button", tabindex: 0, title: "Ver sus temas", onclick: abrir,
+                     onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } } },
+    el("img", { src: l.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: l.name }, "♫ " + l.name),
+      el("div", { class: "sub" }, armando?.id === l.id && el("span", { class: "mia" }, "✚ sumando"),
+         armando?.id === l.id && " · ", datosLista(l))),
+    el("span", { class: "flecha", "aria-hidden": "true" }, "›"));
+}
+
+// `ir`: desde el aviso de arriba (en el celular, el panel está más abajo, y capaz mostraba las guardadas).
+async function abrirLista(id, ir = false) {
+  if (ir && panelVista !== "listas") { panelVista = "listas"; store.set("panel", panelVista); pintarPendientes(last); }
+  const resumen = listasSala.items.find(x => x.id === id) || { name: armando?.id === id ? armando.name : "" };
+  listasSala.abierta = { ...resumen, id, songs: resumen.songs || null };   // (los de ahora, cuando lleguen)
+  listasSala.creando = false; pagLista.pagina = 0;
+  pintarListas();
+  if (ir) $("#biblioPanel").scrollIntoView({ block: "nearest" });
+  else subirA($("#biblioPanel"));
+  $("#playlists .cabeza button")?.focus({ preventScroll: true });
+  try {
+    const l = await api(`/api/list?id=${id}&client=${encodeURIComponent(client)}`);
+    if (listasSala.abierta?.id === id) listasSala.abierta = l;
+  } catch (err) {
+    toast(err.message, true);
+    if (listasSala.abierta?.id === id) listasSala.abierta = null;
+  }
+  pintarListas();
+}
+
+// Una playlist abierta: "‹ playlists" para volver; ▶ reproducir y + a la cola (con el PIN); y si es
+// tuya (o con el PIN): ✚ sumar temas, ✎ cambiarle el nombre, 🗑 borrarla, y ↑ ✕ en cada tema.
+function pintarListaAbierta(l) {
+  const volver = () => { listasSala.abierta = null; pintarListas(); };
+  const mia = puedoCambiar(l), songs = l.songs || [], sumando = armando?.id === l.id;
+  const fuente = { from: "list", list: l.id };
+  const cabeza = el("div", { class: "fila cabeza" },
+    el("button", { type: "button", title: "Volver a la lista de playlists", onclick: volver }, "‹ playlists"),
+    el("img", { src: l.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: l.name }, "♫ " + l.name),
+      el("div", { class: "sub" }, l.songs ? datosLista(l) : "cargando…")),
+    el("div", { class: "botonera" },
+      songs.length > 0 && botonesCargar(fuente, "la playlist entera"),
+      songs.length > 0 && botonSumarTodos(fuente),
+      mia && el("button", {
+        type: "button", class: sumando ? "on" : "", "aria-pressed": String(sumando),
+        title: sumando ? "Dejar de sumarle temas" : "Sumarle temas: aparece ♫+ en cada tema (en la búsqueda, las guardadas, la cola…)",
+        onclick: () => sumando ? terminarArmado() : empezarArmado(l) }, sumando ? "✓ sumando temas" : "✚ sumar temas"),
+      mia && el("button", { type: "button", title: "Cambiarle el nombre", "aria-label": `Cambiarle el nombre a ${l.name}`,
+                            onclick: () => renombrarLista(l) }, "✎"),
+      mia && el("button", { type: "button", title: "Borrar la playlist (sus temas no se borran de ningún lado)",
+                            "aria-label": `Borrar la playlist ${l.name}`, onclick: () => borrarLista(l) }, "🗑")));
+  const vacia = !l.songs ? "cargando…" : !mia ? "Está vacía." : sumando
+    ? "Está vacía: buscá temas arriba y tocá ♫+ en los que quieras."
+    : ["Está vacía. ", el("button", { type: "button", onclick: () => empezarArmado(l) }, "✚ sumar temas")];
+  pintarLista($("#playlists"), songs, (song, i) => fila(song, { pos: i + 1, action: accionesEnLista(l, song, i) }), {
+    arriba: [cabeza], vacio: vacia, pag: pagLista, porPagina: TEMAS_POR_PAGINA,
+    nombre: `Páginas de los temas de ${l.name}`, alCambiar: pintarListas });
+}
+
+function accionesEnLista(l, song, i) {
+  const mia = puedoCambiar(l);
+  return el("div", { class: "acts" },
+    mia && i > 0 && el("button", { type: "button", title: "Subir un lugar en la playlist", "aria-label": `Subir ${song.title}`,
+                                   onclick: () => cambiarLista("/api/list-move", { id: l.id, videoId: song.videoId, to: i - 1 }) }, "↑"),
+    mia && el("button", { type: "button", title: "Sacarla de la playlist", "aria-label": `Sacar ${song.title} de la playlist`,
+                          onclick: () => cambiarLista("/api/list-remove", { id: l.id, videoId: song.videoId }) }, "✕"),
+    armando?.id !== l.id && botonLista(song), botonAhora(song), botonAgregar(song));
+}
+
+async function cambiarLista(path, body) {
+  try { alCambiarLista(await api(path, { ...body, client })); }
+  catch (err) { toast(err.message, true); if (err.status === 404) refrescarListas(); }
+}
+
+async function renombrarLista(l) {
+  const nombre = await preguntar({ titulo: "CAMBIAR EL NOMBRE", texto: `Nombre de la playlist «${l.name}»:`, valor: l.name,
+                                  max: 40, si: "guardar" });
+  if (!nombre || nombre === l.name) return;
+  await cambiarLista("/api/list-rename", { id: l.id, name: nombre });
+}
+
+async function borrarLista(l) {
+  if (!await preguntar({ titulo: "BORRAR LA PLAYLIST", peligro: true, si: "🗑 borrar la playlist",
+                         texto: `¿Borrar la playlist «${l.name}»? Sus temas no se borran de ningún lado.` })) return;
+  try {
+    const r = await api("/api/list-delete", { id: l.id, client });
+    if (armando?.id === l.id) ponerArmando(null);
+    if (listasSala.abierta?.id === l.id) listasSala.abierta = null;
+    listasSala.items = listasSala.items.filter(x => x.id !== l.id);
+    toast(`Borré la playlist «${r.deleted}»`);
+    repintarListas(r.state);
+  } catch (err) { toast(err.message, true); }
+}
+
+// + nueva playlist: el nombre, y queda abierta y elegida para sumarle temas.
+$("#listaNuevaBtn").onclick = () => {
+  listasSala.creando = true; pintarVista();
+  $("#listaNombre").focus();
+};
+$("#listaCancelar").onclick = () => { listasSala.creando = false; pintarVista(); };
+$("#listaNueva").addEventListener("submit", async e => {
+  e.preventDefault();
+  const by = nameInput.value.trim();
+  if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return; }
+  try {
+    const r = await api("/api/list-new", { name: $("#listaNombre").value, by, client });
+    $("#listaNombre").value = "";
+    Object.assign(listasSala, { creando: false, abierta: r.list, items: [...listasSala.items, r.list] });
+    pagLista.pagina = 0;
+    ponerArmando(r.list);
+    toast(`Armaste «${r.list.name}»: tocá ♫+ en los temas para sumarlos`);
+    repintarListas(r.state);
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- 📊 recap ----------
+// Lo más escuchado de la sala (o de todas) en un período. Es otra vista de esta misma página, con
+// la misma barra de arriba: no se recarga nada y la 📻 radio sigue sonando. 📊 la abre y la
+// cierra; /recap abre la página directo en esta vista (y ← del navegador vuelve a la cola).
+const recapVista = (() => {
+  const ANIO = String(new Date().getFullYear());
+  const PERIODOS = { hoy: "hoy", "7d": "últimos 7 días", "30d": "últimos 30 días", todo: "desde siempre" };
+  const DIAS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+  const DIAS_LARGOS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+  const LOS_DIAS = ["los lunes", "los martes", "los miércoles", "los jueves", "los viernes", "los sábados", "los domingos"];
+  const num = n => Number(n || 0).toLocaleString("es-AR");
+  const contar = (n, uno, varios) => `${num(n)} ${n === 1 ? uno : varios}`;
+  const veces = n => contar(n, "vez", "veces");
+  function partes(s) {   // 312 h 20 min · 45 min · 30 s
+    s = Math.round(s || 0);
+    if (!s) return [[0, "min"]];
+    if (s < 60) return [[s, "s"]];
+    const m = Math.round(s / 60);
+    if (m < 60) return [[m, "min"]];
+    const h = Math.floor(m / 60), r = m % 60;
+    return r && h < 100 ? [[h, "h"], [r, "min"]] : [[h, "h"]];
+  }
+  const dur = s => partes(s).map(([n, u]) => `${num(n)} ${u}`).join(" ");
+
+  // Lo que se está mirando, que va en el link: /recap?periodo=2025&persona=Juli&todas=1
+  const delLink = () => {
+    const q = new URLSearchParams(location.search);
+    return { periodo: q.get("periodo") || ANIO, persona: q.get("persona") || "", todas: q.get("todas") === "1" };
+  };
+  const ver = delLink();
+  let abierta = false, datos = null, pedido = 0, recarga = 0, visto = null, scrollCola = 0;
+
+  function link(paraSala = sala, recap = abierta) {
+    const p = new URLSearchParams();
+    if (paraSala !== PRINCIPAL) p.set("sala", paraSala);
+    if (recap) {
+      if (ver.periodo !== ANIO) p.set("periodo", ver.periodo);
+      if (ver.persona) p.set("persona", ver.persona);
+      if (ver.todas) p.set("todas", "1");
+    }
+    return (recap ? "/recap" : "/") + (String(p) ? `?${p}` : "");
+  }
+
+  function pintarBoton() {
+    const b = $("#recapLink");
+    b.classList.toggle("on", abierta);
+    if (abierta) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    b.href = link(sala, !abierta);   // (para abrirlo en otra pestaña)
+    b.title = abierta ? "Volver a la cola, la letra y el chat"
+                      : "Recap: lo más escuchado, artistas, géneros y quién pide más";
+  }
+
+  function abrir(apilar = true) {
+    if (!abierta) {
+      scrollCola = scrollY;
+      abierta = true;
+      $("main").hidden = true; $("#recap").hidden = false;
+      scrollTo(0, 0);
+      if (apilar) history.pushState(null, "", link());
+      pintarBoton(); ponerTitulo(abierta);
+    }
+    cargar();
+  }
+
+  function cerrar(apilar = true) {
+    if (!abierta) return;
+    abierta = false;
+    ocultarTip(); clearTimeout(recarga);
+    $("#recap").hidden = true; $("main").hidden = false;
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo(abierta);
+    reacomodar();   // mientras tanto las listas estaban ocultas: volver a contar cuántas filas entran
+    scrollTo(0, scrollCola);
+  }
+
+  function cambiar(cambios) {
+    Object.assign(ver, cambios);
+    history.replaceState(null, "", link());
+    pintarBoton();
+    cargar();
+  }
+
+  async function cargar() {
+    const n = ++pedido;
+    $("#recap").classList.add("cargando");
+    const p = new URLSearchParams({ sala: ver.todas ? "todas" : sala, periodo: ver.periodo, persona: ver.persona });
+    try {
+      const r = await fetch(`/api/stats?${p}`);
+      const d = await r.json().catch(() => ({}));
+      if (n !== pedido) return;
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      datos = d;
+      pintar(d);
+    } catch (e) {
+      if (n === pedido) $("#recapSub").replaceChildren(el("span", { class: "error" }, `⚠ ${e.message || "No pude traer el recap"}`));
+    } finally {
+      if (n === pedido) $("#recap").classList.remove("cargando");
+    }
+  }
+
+  // Cada vez que llega el estado de la sala: si terminó un tema (pasó a "sonaron recién"), que
+  // el recap lo sume. (El servidor lo anota en un ratito: por eso la espera.)
+  function alEstado(s) {
+    const ultima = s.history?.[0]?.id ?? "";
+    if (abierta && visto !== null && ultima !== visto) {
+      clearTimeout(recarga);
+      recarga = setTimeout(cargar, 2000);
+    }
+    visto = ultima;
+  }
+
+  function pintar(d) {
+    const t = d.totals, enSala = d.room ? d.room.name : "todas las salas";
+    const periodo = PERIODOS[d.period] || d.period;
+
+    // filtros: el período (los años que tienen algo, y siempre el de hoy), todas las salas y lo mío
+    const anios = [...new Set([ANIO, ...d.years, ...(/^\d{4}$/.test(d.period) ? [d.period] : [])])].sort().reverse();
+    const opciones = [["hoy", "hoy"], ["7d", "7 días"], ["30d", "30 días"], ...anios.map(a => [a, a]), ["todo", "todo"]];
+    const mio = nameInput.value.trim();
+    const esMio = !!mio && !!d.person && mio.toLocaleLowerCase("es") === d.person.toLocaleLowerCase("es");
+    const boton = (txt, on, onclick, attrs = {}) =>
+      el("button", { type: "button", class: on ? "on" : false, "aria-pressed": String(on), onclick, ...attrs }, txt);
+    $("#recapFiltros").replaceChildren(
+      el("span", { class: "dim" }, "período:"),
+      ...opciones.map(([v, txt]) => boton(txt, v === d.period, () => cambiar({ periodo: v }))),
+      el("span", { class: "sep" }),
+      ...(d.rooms.length > 1 ? [boton("∑ todas las salas", ver.todas, () => cambiar({ todas: !ver.todas }),
+                                      { title: "Juntar todas las salas (si no, la que elegiste arriba)" })] : []),
+      boton("👤 lo mío", esMio, () => cambiar({ persona: esMio ? "" : mio }),
+            { disabled: !mio, title: mio ? "Lo que pediste vos (con tu nombre)" : "Poné tu nombre arriba" }));
+    $("#recapPersona").hidden = !d.person;
+    $("#recapPersonaNombre").textContent = d.person || "";
+
+    // lo grande
+    $("#recapTtl").textContent = `${d.person ? `RECAP DE ${d.person}` : "RECAP"} · ${enSala} · ${periodo}`.toUpperCase();
+    $("#recapKicker").textContent = d.person ? "sonó de lo que pidió" : "sonaron";
+    $("#recapValor").replaceChildren(...partes(t.seconds).flatMap(([n, u]) => [num(n), el("span", { class: "u" }, u)]));
+    const dias = t.seconds / 86400;
+    $("#recapSub").textContent = t.all
+      ? `de música, en ${contar(t.plays, "canción", "canciones")}`
+        + (dias >= 1 ? `: es como ${dias >= 2 ? `${num(Math.floor(dias))} días` : "un día entero"} sin parar.` : ".")
+      : "de música.";
+    const tiles = d.person
+      ? [["pidió", num(t.requests + t.playlist)], ["canciones distintas", num(t.songs)],
+         ["artistas", num(t.artists)], ["géneros", num(d.genres.length)]]
+      : [["canciones distintas", num(t.songs)], ["artistas", num(t.artists)],
+         ["pedidos", num(t.requests)], [t.people === 1 ? "persona pidió" : "personas pidieron", num(t.people)]];
+    $("#recapTiles").replaceChildren(...tiles.map(([lbl, val]) =>
+      el("div", { class: "tile" }, el("div", { class: "lbl" }, lbl), el("div", { class: "val" }, val))));
+
+    $("#recapVacio").hidden = !!t.all;
+    $("#recapGrilla").hidden = !t.all;
+    $("#recapVacioTexto").textContent = d.person
+      ? `No sonó nada de lo que pidió ${d.person} (${periodo}, en ${enSala}). Probá con otro período.`
+      : `Todavía no sonó nada (${periodo}, en ${enSala}). Lo que suena se va anotando solo.`;
+    if (!t.all) return;
+
+    ranking($("#rCanciones"), d.songs, c => ({
+      img: c.thumb, t: c.title, sub: c.artist, n: c.plays, valor: veces(c.plays),
+      title: `${c.title} · ${veces(c.plays)} · ${dur(c.seconds)}`,
+    }));
+    ranking($("#rArtistas"), d.artists, a => ({
+      img: a.thumb, redonda: true, t: a.name, n: a.plays, valor: veces(a.plays),
+      title: `${a.name} · ${veces(a.plays)} · ${dur(a.seconds)}`,
+    }));
+    const conGenero = d.genres.reduce((s, g) => s + g.plays, 0);
+    ranking($("#rGeneros"), d.genres.slice(0, 10), g => ({
+      t: g.name, n: g.plays, valor: `${Math.round(100 * g.plays / conGenero)}%`,
+      title: `${g.name} · ${veces(g.plays)} · ${dur(g.seconds)}`,
+    }), "Todavía no sé de qué género es nada de esto.");
+    $("#rGenerosHint").hidden = !d.unknownGenre;
+    $("#rGenerosHint").textContent = `${contar(d.unknownGenre, "escucha", "escuchas")} sin género: de artistas `
+      + "que iTunes no conoce, o que todavía se están averiguando (de a uno, sin apuro).";
+    $("#rpPersonas").hidden = !!d.person;
+    ranking($("#rPersonas"), d.people, pp => ({
+      t: el("button", { type: "button", class: "nombre", onclick: () => cambiar({ persona: pp.name }),
+                        title: `Ver lo que pidió ${pp.name}` }, pp.name),
+      sub: pp.artist ? `le gusta: ${pp.artist}` : "", n: pp.requests, valor: contar(pp.requests, "pedido", "pedidos"),
+      title: `${pp.name} · ${contar(pp.requests, "pedido", "pedidos")} · ${dur(pp.seconds)}`,
+    }), "Nadie pidió nada: todo sonó al azar o de playlists y álbumes cargados enteros.");
+
+    // a qué hora: sólo las horas en las que sonó algo (en una oficina, de 9 a 19)
+    const conAlgo = d.hours.map((v, h) => v ? h : -1).filter(h => h >= 0);
+    let desde = conAlgo.length ? Math.min(...conAlgo) : 9, hasta = conAlgo.length ? Math.max(...conAlgo) : 18;
+    while (hasta - desde < 7) { if (desde > 0) desde--; if (hasta - desde < 7 && hasta < 23) hasta++; }
+    const horas = [];
+    for (let h = desde; h <= hasta; h++) horas.push({ v: d.hours[h], eje: hasta - desde > 12 && h % 3 ? "" : `${h}`,
+                                                       lbl: `de ${h} a ${h + 1} h` });
+    columnas($("#rHoras"), horas, "hora");
+    columnas($("#rDias"), d.weekdays.map((v, i) => ({ v, eje: DIAS[i], lbl: DIAS_LARGOS[i] })), "día");
+
+    // datos sueltos
+    const sueltos = [];
+    if (d.topDay) {
+      const [y, m, dd] = d.topDay.date.split("-").map(Number);
+      const fecha = new Date(y, m - 1, dd).toLocaleDateString("es-AR",
+        { weekday: "long", day: "numeric", month: "long", ...(String(y) === ANIO ? {} : { year: "numeric" }) });
+      sueltos.push(["📅", "El día que más sonó: ", el("b", {}, fecha), `, ${dur(d.topDay.seconds)} de música.`]);
+    }
+    const pico = d.hours.indexOf(Math.max(...d.hours));
+    if (d.hours[pico]) sueltos.push(["⏰", "La hora pico: ", el("b", {}, `de ${pico} a ${pico + 1} h`), "."]);
+    const diaTop = d.weekdays.indexOf(Math.max(...d.weekdays));
+    if (d.weekdays[diaTop]) sueltos.push(["🗓", "El día de la semana con más música: ", el("b", {}, LOS_DIAS[diaTop]), "."]);
+    if (!d.person) {
+      const pc = n => `${Math.round(100 * n / t.all)}%`;
+      const de = [[t.requests, "lo pidieron"], [t.shuffle, "sonó 🔀 al azar"], [t.playlist, "vino de playlists o álbumes enteros"]]
+        .filter(([n]) => n).map(([n, txt]) => `${pc(n)} ${txt}`);
+      sueltos.push(["🎶", "De lo que sonó: ", el("b", {}, de.join(", ")), "."]);
+    }
+    if (d.person && t.playlist) sueltos.push(["📃", "Además de lo que pidió, sonaron ",
+      el("b", {}, contar(t.playlist, "tema", "temas")), " de playlists o álbumes que cargó enteros."]);
+    if (t.songs && t.plays) sueltos.push(["🔁", "Cada canción sonó, en promedio, ",
+      el("b", {}, `${(t.plays / t.songs).toLocaleString("es-AR", { maximumFractionDigits: 1 })} veces`), "."]);
+    if (d.skipped) sueltos.push(["⏭", "La que más saltearon: ", el("b", {}, `«${d.skipped.title}»`),
+                                 `, de ${d.skipped.artist} (${veces(d.skipped.times)}).`]);
+    $("#rDatos").replaceChildren(...sueltos.map(([ico, ...txt]) =>
+      el("li", {}, el("span", { "aria-hidden": "true" }, ico), el("span", {}, ...txt))));
+  }
+
+  // Un ranking: las mismas filas que la cola (puesto, tapa, nombre) con una barra fina y el valor en la punta.
+  function ranking(lista, items, filaDe, vacio = "Nada todavía.") {
+    if (!items.length) return lista.replaceChildren(el("li", { class: "vacio" }, vacio));
+    const filas = items.map(filaDe), max = Math.max(...filas.map(f => f.n), 1);
+    lista.replaceChildren(...filas.map((f, i) => el("li", { class: "fila", title: f.title },
+      el("span", { class: "pos" }, i + 1),
+      f.img !== undefined ? el("img", { src: f.img || false, alt: "", loading: "lazy", referrerpolicy: "no-referrer",
+                                        class: f.redonda ? "redonda" : false }) : null,
+      el("div", { class: "info" },
+        el("div", { class: "t" }, f.t),
+        f.sub ? el("div", { class: "sub" }, f.sub) : null,
+        el("div", { class: "medida" },
+          el("span", { class: "rbarra", style: `--p: ${(f.n / max).toFixed(4)}` }),
+          el("span", { class: "valor" }, f.valor))))));
+  }
+
+  // Columnas de una sola serie: la más alta lleva su valor arriba; las demás, al pasar el mouse (o
+  // con el teclado), y todas en la tabla de abajo.
+  function columnas(caja, items, que) {
+    const max = Math.max(...items.map(i => i.v), 1), top = items.findIndex(i => i.v === max);
+    const plantilla = `grid-template-columns: repeat(${items.length}, minmax(0, 1fr))`;
+    caja.replaceChildren(
+      el("div", { class: "rcols", style: plantilla, role: "list" }, ...items.map((it, i) => {
+        const alto = it.v ? Math.max(2, 100 * it.v / max) : 0;
+        const slot = el("div", { class: "slot", tabindex: "0", role: "listitem",
+                                 "aria-label": `${it.lbl}: ${it.v ? dur(it.v) : "nada"}` },
+          el("div", { class: "c", style: `height: ${alto}%` }),
+          i === top && it.v ? el("span", { class: "pico", style: `bottom: calc(${alto}% + 3px)` }, dur(it.v)) : null);
+        const mostrar = () => mostrarTip(slot, it.v ? dur(it.v) : "nada", it.lbl);
+        slot.addEventListener("pointerenter", mostrar);
+        slot.addEventListener("focus", mostrar);
+        slot.addEventListener("pointerleave", ocultarTip);
+        slot.addEventListener("blur", ocultarTip);
+        return slot;
+      })),
+      el("div", { class: "eje", style: plantilla, "aria-hidden": "true" }, ...items.map(it => el("span", {}, it.eje))),
+      el("details", { class: "tabla" }, el("summary", {}, "ver en tabla"),
+        el("table", {}, el("tr", {}, el("th", {}, que), el("th", {}, "sonó")),
+          ...items.map(it => el("tr", {}, el("td", {}, it.lbl), el("td", {}, it.v ? dur(it.v) : "–"))))));
+  }
+
+  function mostrarTip(ancla, valor, lbl) {
+    const tip = $("#recapTip");
+    tip.replaceChildren(el("strong", {}, valor), el("span", {}, lbl));
+    tip.hidden = false;
+    const a = ancla.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    tip.style.left = `${Math.min(Math.max(8, a.left + a.width / 2 - t.width / 2), innerWidth - t.width - 8)}px`;
+    tip.style.top = `${Math.max(8, a.top - t.height - 6)}px`;
+  }
+  function ocultarTip() { $("#recapTip").hidden = true; }
+  addEventListener("scroll", ocultarTip, { passive: true });
+  $("#recap").addEventListener("scroll", ocultarTip, { passive: true });   // (en la compu se desplaza el recap)
+
+  $("#recapLink").addEventListener("click", e => {
+    if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;   // en otra pestaña: que vaya el link
+    e.preventDefault();
+    if (abierta) cerrar(); else abrir();
+  });
+  $("#recapTodosBtn").onclick = () => cambiar({ persona: "" });
+  nameInput.addEventListener("input", () => { if (abierta && datos) pintar(datos); });   // (👤 lo mío)
+  addEventListener("popstate", () => {
+    if (location.pathname !== "/recap") return cerrar(false);
+    Object.assign(ver, delLink());   // (lo que se estaba mirando cuando se fue de acá)
+    abrir(false);
+  });
+
+  pintarBoton();
+  if (location.pathname === "/recap") abrir(false);
+  return { abrir, cerrar, alEstado, link, abierta: () => abierta };
+})();
 
 // Recordar el PIN en este dispositivo; después, el aviso que dejó la página antes de cambiar de
 // sala (p. ej. "creé la sala…"), que si no lo taparía el de "ya podés controlar".

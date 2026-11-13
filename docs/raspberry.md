@@ -145,7 +145,8 @@ Y listo. Desde ahora:
   saltear canciones. Cuando el parlante vuelve, la música vuelve a salir por él.
 - **Al prender la Pi** (o al reiniciar la rockola, si en 10 segundos nadie pidió nada), la rockola
   espera a que se conecte el parlante y arranca a sonar al azar (con las canciones guardadas),
-  aunque lo prendas un rato después. Se apaga con `azar_al_prender = false` en `rockola.toml`.
+  aunque lo prendas un rato después. Si cuando se apagó estaba sonando un tema, sigue ése, donde
+  iba, con la cola como estaba. Se apaga con `azar_al_prender = false` en `rockola.toml`.
 
 Otros comandos:
 

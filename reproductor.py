@@ -812,13 +812,17 @@ class Mpv:
 
     # --- reproducción
 
-    def reproducir(self, item_id, ruta):
+    def reproducir(self, item_id, ruta, desde=0, pausada=False):
+        """Que suene `ruta`, desde el segundo `desde` (para retomar una que venía sonando). Con
+        `pausada`, queda cargada pero en pausa. Devuelve False si terminó antes de arrancar."""
         self.asegurar()
         with self.lock:
             self.pedido = item_id
             self.actual = self.entrada = None  # mientras carga, los eventos van a `finales`
             self.finales.clear()
         try:
+            if pausada or desde > 0:   # en pausa hasta llegar adonde iba: que no se oiga el principio
+                self.comando("set_property", "pause", True)
             data = self.comando("loadfile", ruta, "replace")
         except ErrorMpv:
             with self.lock:  # no quedó pedida: que el Director pueda reintentar
@@ -844,8 +848,29 @@ class Mpv:
         if termino:
             self.al_terminar(item_id, err)
             return False
-        self.comando("set_property", "pause", False)
+        if desde > 0:
+            self._saltar(desde)
+        if not pausada:
+            self.comando("set_property", "pause", False)
         return True
+
+    def _saltar(self, desde, espera=5):
+        """Recién cargada (en pausa): ir al segundo `desde`. Hay que esperar a que mpv la abra (hasta
+        entonces no tiene time-pos). Con `seek`, que anda igual en todas las versiones (las opciones
+        de loadfile cambiaron de lugar en mpv 0.38). Si no se puede, arranca desde el principio."""
+        hasta = time.monotonic() + espera
+        try:
+            while self.posicion() is None:
+                if time.monotonic() > hasta or self.pedido is None:
+                    return
+                time.sleep(0.05)
+            self.comando("seek", desde, "absolute")
+        except ErrorMpv as e:
+            print(f"  ⚠ no pude retomar en {desde:.0f} s: {e}", flush=True)
+
+    def fijar_pausa(self, pausa):
+        self.asegurar()
+        self.comando("set_property", "pause", bool(pausa))
 
     def detener(self):
         with self.lock:

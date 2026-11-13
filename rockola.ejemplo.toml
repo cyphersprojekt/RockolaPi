@@ -36,14 +36,15 @@ ip = ""
 # de nada pasarse de lo que hay libre (mirá con df -h). 0 = no guardar nada.
 guardar_gb = 16
 
-# Dónde se guardan. Vacío = ~/.cache/rockola
+# Dónde se guardan (y las salas, las ♫ playlists y las estadísticas del 📊 recap). Vacío = ~/.cache/rockola
 carpeta = ""
 
 # Al prender la Raspberry, o al reiniciar la rockola (p. ej. después de actualizarla), si en 10
 # segundos nadie pidió nada, el modo aleatorio (🔀) se prende solo y arranca a sonar: así hay
 # música sin que nadie toque nada. Si hay un parlante Bluetooth (pi/bluetooth.sh), espera a que
 # se conecte. No pasa en el reinicio diario de las 6 de la mañana, ni si la arrancás a mano
-# (./iniciar.sh en una terminal): sólo con el servicio de la Raspberry.
+# (./iniciar.sh en una terminal): sólo con el servicio de la Raspberry. Si cuando se apagó estaba
+# sonando un tema, en lugar del 🔀 sigue ése, en el segundo en que iba (la cola queda como estaba).
 # false = queda como estaba la última vez, y en silencio hasta que pidan algo o toquen ⏯.
 azar_al_prender = true
 
