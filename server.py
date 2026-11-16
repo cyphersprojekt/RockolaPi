@@ -959,7 +959,7 @@ def _generos_de(sid):
     if not stats:
         raise ApiError(409, "Los géneros se anotan con las estadísticas, que no andan: mirá los avisos en la consola de la rockola")
     try:
-        return stats.generos_de(director.descargas.artistas(sid))
+        return stats.generos_de(director.descargas.autores(sid))
     except sqlite3.Error as e:
         print(f"  ⚠ no pude leer los géneros: {e}", flush=True)
         raise ApiError(500, "No pude leer los géneros")
@@ -983,22 +983,41 @@ def genero_guardado(sid, clave):
     return g
 
 
+def artista_guardado(sid, clave):
+    """Lo guardado en la sala de un artista (`clave`: su "key" en la lista de artistas): sus temas
+    y los álbumes en los que está."""
+    if not director:
+        raise ApiError(409, "Las canciones guardadas sólo existen en modo mpv")
+    a = director.descargas.del_artista(clave, sala=sid)
+    if not a:
+        raise ApiError(404, "No hay guardadas de ese artista")
+    return a
+
+
+def _mezcladas(titulo, kind, temas):
+    """Una colección que no tiene un orden (todo lo guardado de un género o de un artista): va
+    mezclada y, si son muchas, las que entran (cada vez, otras)."""
+    temas = list(temas)
+    random.shuffle(temas)
+    maximo = f"del máximo de {MAX_PLAYLIST} por vez"
+    return {"title": titulo, "kind": kind, "songs": temas[:MAX_PLAYLIST],
+            "afuera": [(len(temas) - MAX_PLAYLIST, f"pasa {maximo}", f"pasan {maximo}")]}
+
+
 def coleccion(sala, body):
     """Una colección de temas entera, para cargarla a la cola o sumarla a una playlist, según
     `from`: una playlist de la rockola (`list`, su id), un álbum de YouTube Music (`browseId`), uno de las
-    guardadas (`album`, `artist` y sus `videoIds`), una playlist de YouTube (`q`, el link) o las
-    guardadas de un género (`genre`, su clave).
-    Devuelve {title, kind, songs, afuera}: `kind` es "album", "lista", "youtube" o "genero"; `afuera`,
-    los que no vinieron, como (cuántos, uno, varios)."""
+    guardadas (`album`, `artist` y sus `videoIds`), una playlist de YouTube (`q`, el link) o lo
+    guardado de un género (`genre`, su clave) o de un artista (`artist`, la suya).
+    Devuelve {title, kind, songs, afuera}: `kind` es "album", "lista", "youtube", "genero" o
+    "artista"; `afuera`, los que no vinieron, como (cuántos, uno, varios)."""
     de = body.get("from")
     if de == "genre":
-        # No tiene un orden: van mezcladas (y, si son muchas, las que entran: cada vez, otras).
         g = genero_guardado(sala.id, str(body.get("genre", ""))[:80])
-        temas = g["songs"]
-        random.shuffle(temas)
-        maximo = f"del máximo de {MAX_PLAYLIST} por vez"
-        return {"title": g["genre"] or "Sin género", "kind": "genero", "songs": temas[:MAX_PLAYLIST],
-                "afuera": [(len(temas) - MAX_PLAYLIST, f"pasa {maximo}", f"pasan {maximo}")]}
+        return _mezcladas(g["genre"] or "Sin género", "genero", g["songs"])
+    if de == "artist":
+        a = artista_guardado(sala.id, str(body.get("artist", ""))[:200])
+        return _mezcladas(a["artist"] or "Sin artista", "artista", a["songs"])
     if de == "list":
         titulo, temas = listas.temas(sala.id, str(body.get("list", "")))
         return {"title": titulo, "kind": "lista", "songs": temas, "afuera": []}
@@ -1044,7 +1063,8 @@ def cargar_entera(sala, body):
     Devuelve un resumen para mostrar."""
     col = coleccion(sala, body)
     ahora = body.get("at") == "now"
-    name = str(body.get("by", "")).strip()[:30] or {"album": "Álbum", "genero": "Género"}.get(col["kind"], "Playlist")
+    name = str(body.get("by", "")).strip()[:30] or {"album": "Álbum", "genero": "Género",
+                                                      "artista": "Artista"}.get(col["kind"], "Playlist")
     # (para la cola: cada tema dice de dónde vino, y con el PIN se saca entera de un toque)
     lista = {"id": uuid.uuid4().hex[:10], "title": col["title"], "kind": col["kind"]}
     vivo = largas = repetidas = 0
@@ -2573,6 +2593,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(dict(director.descargas.generos(de, desde, n, sala=sid), pending=faltan))
                 if vista == "genero":    # las de uno
                     return self.send_json(genero_guardado(sid, qs.get("genero", [""])[0][:80]))
+                if vista == "artistas":  # los artistas, con cuántas tiene cada uno
+                    return self.send_json(director.descargas.artistas(desde, n, sala=sid))
+                if vista == "artista":   # lo de uno: sus temas y sus álbumes
+                    return self.send_json(artista_guardado(sid, qs.get("artista", [""])[0][:200]))
                 ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
                 return self.send_json(ver(qs.get("q", [""])[0][:100], desde, n, sala=sid))
             if u.path == "/api/stats":   # el recap

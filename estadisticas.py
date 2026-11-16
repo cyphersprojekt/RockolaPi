@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
-from reproductor import _para_buscar, _primer_artista
+from reproductor import _artistas, _para_buscar, _primer_artista
 
 CUENTA = 30            # segundos que tiene que sonar un tema para contar como escuchado (o el 90%,
                        # si es más corto): lo que se corta antes es "salteado"
@@ -70,11 +70,6 @@ def _junto(texto):
 
 def _clave_por(nombre):
     return " ".join(_para_buscar(nombre).split())
-
-
-def _artistas(artista):
-    """«Bizarrap, Quevedo» -> ["Bizarrap", "Quevedo"] (así los junta YouTube Music)."""
-    return [a.strip() for a in str(artista or "").split(", ") if a.strip()]
 
 
 def rango(periodo, ahora=None):

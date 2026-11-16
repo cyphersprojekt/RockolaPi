@@ -70,6 +70,11 @@ def _primer_artista(artista):
     return str(artista or "").split(", ")[0].strip()
 
 
+def _artistas(artista):
+    """«Bizarrap, Quevedo» -> ["Bizarrap", "Quevedo"] (así los junta YouTube Music)."""
+    return [a.strip() for a in str(artista or "").split(", ") if a.strip()]
+
+
 class Descargas:
     """Baja canciones con yt-dlp y las guarda en `carpeta`.
 
@@ -531,28 +536,43 @@ class Descargas:
         Un álbum es su nombre más el primer artista (hay muchos «Grandes éxitos»). Las que
         no tienen álbum (videos sueltos) van al final, juntas. Con `buscar`, como `listado`.
         """
-        palabras = _para_buscar(buscar).split()
-        grupos = {}
         with self.lock:
-            for vid, g in self._de(sala):
-                if palabras and not self._coincide(g, palabras):
-                    continue
-                d = g["datos"]
-                album = str(d.get("album") or "").strip()
-                artista = _primer_artista(d.get("artist")) if album else ""
-                k = f"{_para_buscar(album)}\0{_para_buscar(artista)}"
-                a = grupos.setdefault(k, {"key": k, "album": album, "artist": artista,
-                                          "thumb": "", "duration": 0, "songs": []})
-                a["songs"].append(dict(d, videoId=vid))
-                a["duration"] += int(d.get("duration") or 0)
-                a["thumb"] = a["thumb"] or d.get("thumb") or ""
-            version = self.version
-        orden = sorted(grupos.values(), key=lambda a: (not a["album"], _para_buscar(a["album"]),
-                                                       _para_buscar(a["artist"])))
-        for a in orden:
-            a["songs"].sort(key=lambda s: _para_buscar(s.get("title")))
+            grupos, version = self._por_album(sala, _para_buscar(buscar).split()), self.version
+        orden = self._en_orden(grupos.values())
         return {"total": len(orden), "songs": sum(len(a["songs"]) for a in orden),
                 "albums": orden[desde:desde + cuantos], "v": version}
+
+    @staticmethod
+    def _clave_album(d):
+        """(clave, álbum, artista) del álbum de un tema: "" si es un video suelto."""
+        album = str(d.get("album") or "").strip()
+        artista = _primer_artista(d.get("artist")) if album else ""
+        return f"{_para_buscar(album)}\0{_para_buscar(artista)}", album, artista
+
+    def _por_album(self, sala, palabras=()):
+        """Las guardadas (de `sala`) agrupadas por álbum: {clave: álbum, con sus temas}. Con el
+        lock tomado."""
+        grupos = {}
+        for vid, g in self._de(sala):
+            if palabras and not self._coincide(g, palabras):
+                continue
+            d = g["datos"]
+            k, album, artista = self._clave_album(d)
+            a = grupos.setdefault(k, {"key": k, "album": album, "artist": artista,
+                                      "thumb": "", "duration": 0, "songs": []})
+            a["songs"].append(dict(d, videoId=vid))
+            a["duration"] += int(d.get("duration") or 0)
+            a["thumb"] = a["thumb"] or d.get("thumb") or ""
+        return grupos
+
+    @staticmethod
+    def _en_orden(albumes):
+        """Los álbumes por orden alfabético (los temas sin álbum, al final), cada uno con sus temas
+        también por orden alfabético."""
+        orden = sorted(albumes, key=lambda a: (not a["album"], _para_buscar(a["album"]), _para_buscar(a["artist"])))
+        for a in orden:
+            a["songs"].sort(key=lambda s: _para_buscar(s.get("title")))
+        return orden
 
     def del_album(self, album, artista, sala=None):
         """Cuántas guardadas (de `sala`) son de ese álbum: el mismo nombre y primer artista,
@@ -563,8 +583,57 @@ class Descargas:
                         _para_buscar(_primer_artista(g["datos"].get("artist")))) == k
                        for _, g in self._de(sala))
 
-    def artistas(self, sala=None):
-        """Los artistas de las guardadas (de `sala`), como vienen en cada tema («Bizarrap, Quevedo»)."""
+    def _por_artista(self, sala):
+        """Las guardadas (de `sala`) de cada artista: {clave: artista, con sus temas}. Un tema de
+        varios («Bizarrap, Quevedo») está en el de cada uno. La tapa es la del que sonó más
+        recién. Con el lock tomado."""
+        grupos = {}
+        for vid, g in sorted(self._de(sala), key=lambda kv: kv[1]["usada"], reverse=True):
+            d = g["datos"]
+            for nombre in dict.fromkeys(_artistas(d.get("artist")) or [""]):
+                k = " ".join(_para_buscar(nombre).split())
+                a = grupos.setdefault(k, {"key": k, "artist": nombre, "thumb": "", "duration": 0, "songs": []})
+                a["songs"].append(dict(d, videoId=vid))
+                a["duration"] += int(d.get("duration") or 0)
+                a["thumb"] = a["thumb"] or d.get("thumb") or ""
+        return grupos
+
+    def artistas(self, desde=0, cuantos=20, sala=None):
+        """Una página de los artistas de las guardadas (de `sala`), en orden alfabético, con cuántos
+        temas y cuántos álbumes tiene cada uno (los temas y los álbumes, con `del_artista`)."""
+        with self.lock:
+            grupos, version, temas = self._por_artista(sala), self.version, len(self._de(sala))
+        orden = sorted(grupos.values(), key=lambda a: (not a["artist"], a["key"]))
+        pagina = [dict({k: a[k] for k in ("key", "artist", "thumb", "duration")}, count=len(a["songs"]),
+                       albumCount=len({self._clave_album(s)[0] for s in a["songs"] if str(s.get("album") or "").strip()}))
+                  for a in orden[desde:desde + cuantos]]
+        return {"total": len(orden), "songs": temas, "artists": pagina, "v": version}
+
+    def del_artista(self, clave, sala=None):
+        """Lo guardado (en `sala`) de un artista (`clave`: su "key" en `artistas`), o None si no
+        hay nada: sus temas (`songs`, por orden alfabético) y los álbumes en los que está
+        (`albums`, como los de `albumes`: cada uno con todos sus temas guardados, también los de
+        otros artistas). Sus temas sueltos van al final, como un álbum sin nombre."""
+        with self.lock:
+            a, discos, version = self._por_artista(sala).get(clave), self._por_album(sala), self.version
+        if not a:
+            return None
+        claves, sueltos = {}, []
+        for s in a["songs"]:
+            k, album, _ = self._clave_album(s)
+            if album:
+                claves[k] = True
+            else:
+                sueltos.append(s)
+        albumes = self._en_orden([discos[k] for k in claves if k in discos])
+        if sueltos:
+            albumes += self._en_orden([{"key": "\0", "album": "", "artist": "", "thumb": sueltos[0].get("thumb") or "",
+                                        "duration": sum(int(s.get("duration") or 0) for s in sueltos), "songs": sueltos}])
+        a["songs"].sort(key=lambda s: _para_buscar(s.get("title")))
+        return dict(a, count=len(a["songs"]), albumCount=len(claves), albums=albumes, v=version)
+
+    def autores(self, sala=None):
+        """De quién es cada guardada (de `sala`), como viene en el tema («Bizarrap, Quevedo»)."""
         with self.lock:
             return {str(g["datos"].get("artist") or "") for _, g in self._de(sala)}
 
