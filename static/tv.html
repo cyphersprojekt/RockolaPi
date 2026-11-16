@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#3c3836">
+<title>Rockola · tv</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Misma estética que la página de pedidos, /pantalla y la TUI (paleta gruvbox) */
+  :root {
+    --bg: #282828; --bg1: #32302f; --bg2: #3c3836; --line: #504945;
+    --fg: #ebdbb2; --dim: #a89984; --acc: #fabd2f; --ok: #b8bb26; --warn: #fe8019; --red: #fb4934;
+    --ancho: 760px; --margen: 12px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--fg);
+         font: 15px/1.45 "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  main { max-width: var(--ancho); margin: 0 auto; padding: 0 var(--margen) 5em; }
+  .dim { color: var(--dim); }
+
+  /* En el celular, una columna: el video, para poner otro, los que siguen y el chat. En la compu,
+     el video a la izquierda y lo demás a la derecha. */
+  .columnas { display: flex; flex-direction: column; }
+  .col { display: contents; }
+  @media (min-width: 1000px) {
+    :root { --ancho: 1800px; --margen: 24px; }
+    .columnas { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); column-gap: 3ch; align-items: start; }
+    .col { display: block; min-width: 0; }
+    #results { max-height: 21em; overflow-y: auto; }
+    #queue { max-height: 17em; overflow-y: auto; }
+  }
+
+  /* barra de arriba (su contenido alineado con el de abajo) */
+  .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 1ch; flex-wrap: wrap;
+         padding: .4em max(var(--margen), calc((100% - var(--ancho)) / 2 + var(--margen)));
+         background: var(--bg2); }
+  .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; margin-right: auto; }
+  .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
+  .name input { width: 13ch; }
+
+  /* el selector de salas: un botón que despliega la lista, como un panel más */
+  .selector { position: relative; }
+  #salaBtn { display: flex; align-items: center; gap: 1ch; max-width: 24ch; }
+  #salaBtn .nombre { overflow: hidden; text-overflow: ellipsis; }
+  #salaBtn .flechita { color: var(--dim); }
+  #salaBtn[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
+  .menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: calc(100vw - 32px);
+          max-height: 70vh; overflow-y: auto; margin: 0; padding: .3em 0; list-style: none;
+          background: var(--bg1); border: 1px solid var(--acc); box-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+  .menu.derecha { left: auto; right: 0; }   /* si no entra hacia la derecha */
+  .menu [role="option"] { display: grid; grid-template-columns: 2ch auto; column-gap: 1ch; padding: .35em 1.5ch .35em 1ch;
+                          color: var(--fg); cursor: pointer; white-space: nowrap; }
+  .menu [role="option"] .marca { color: var(--acc); }
+  .menu [role="option"] .sub { grid-column: 2; }
+  .menu [role="option"]:hover, .menu [role="option"]:focus { background: var(--bg2); color: var(--acc); outline: none; }
+  .menu [role="option"][aria-selected="true"] { font-weight: 700; }
+  .menu .sep { border-top: 1px dashed var(--line); margin: .3em 0; }
+
+  /* paneles con el título en el borde, como en la terminal */
+  .panel { position: relative; border: 2px solid var(--line); margin-top: 1.7em; padding: 1em 1.5ch .8em; }
+  .panel > .ttl { position: absolute; top: -.8em; left: 1.2ch; background: var(--bg); padding: 0 1ch;
+                  color: var(--dim); font-weight: 700; white-space: nowrap; max-width: calc(100% - 2.4ch);
+                  overflow: hidden; text-overflow: ellipsis; }
+
+  input { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+          padding: .35em 1ch; outline: none; min-width: 0; border-radius: 0; }
+  input:focus { border-color: var(--acc); }
+  input::placeholder { color: var(--dim); }
+  button { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line);
+           padding: .3em 1ch; cursor: pointer; white-space: nowrap; border-radius: 0; }
+  button:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
+  button.primario { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
+  button.primario:hover:not(:disabled) { color: var(--bg); filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.on { color: var(--acc); border-color: var(--acc); }
+
+  /* el video: el reproductor de YouTube y, mientras no se mira (o no hay nada), una tapa encima */
+  .video { position: relative; width: min(100%, calc(72vh * 16 / 9)); aspect-ratio: 16 / 9; margin: 0 auto;
+           background: #000; border: 1px solid var(--line); }
+  .video iframe, #yt { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border: 0; }
+  .tapa { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center;
+          justify-content: center; gap: 1em; text-align: center; padding: 1em 2ch;
+          background: #1d2021 center / cover no-repeat; }
+  .tapa::before { content: ""; position: absolute; inset: 0; background: rgba(29, 32, 33, .8); }
+  .tapa > * { position: relative; max-width: 100%; }
+  .tapa button { font-size: 1.15em; padding: .5em 2ch; }
+  .tapa .texto { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+
+  .now { margin-top: .9em; }
+  .estado { font-weight: 700; color: var(--ok); }
+  .estado.pausa, .estado.carga { color: var(--acc); }
+  .titulo { font-size: 1.2em; font-weight: 700; line-height: 1.25; margin-top: .25em;
+            overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .barra { white-space: pre; overflow: hidden; margin-top: .5em; }
+  .barra .on { color: var(--acc); }
+  .barra .off { color: var(--line); }
+  .barra .vivo { color: var(--red); font-weight: 700; }
+  .vacio { color: var(--dim); padding: .3em 0; }
+  .controles { display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; margin-top: .9em;
+               padding-top: .8em; border-top: 1px dashed var(--line); }
+  .controles .pista { flex-basis: 100%; font-size: .87em; }
+  form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
+  form.pin input { width: 11ch; letter-spacing: .2em; }
+  form.pin input.nombre { width: 20ch; letter-spacing: 0; }
+
+  /* buscar */
+  form.buscar { display: flex; gap: 1ch; }
+  form.buscar input { flex: 1; }
+  .prompt { color: var(--acc); font-weight: 700; align-self: center; }
+
+  /* listas */
+  .fila { display: flex; align-items: center; gap: 1.2ch; padding: .4em 0; }
+  .fila + .fila { border-top: 1px dashed var(--line); }
+  .fila img { width: 5em; height: 2.8em; object-fit: cover; flex: none; background: var(--bg1);
+              border: 1px solid var(--line); }
+  .fila .pos { width: 2.5ch; text-align: right; color: var(--dim); flex: none; }
+  .fila .info { flex: 1; min-width: 0; }
+  .fila.sala { cursor: pointer; }
+  .fila.sala:hover .t, .fila.sala:focus-visible .t { color: var(--acc); }
+  .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { color: var(--dim); font-size: .87em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quien { color: var(--acc); }
+  .mia { color: var(--ok); font-weight: 700; }
+  .acts { display: flex; gap: .6ch; flex: none; }
+  .acts button { padding: .2em .8ch; }
+  .hint { color: var(--dim); margin-top: .7em; }
+  @media (max-width: 599px) { .largo { display: none; } }
+
+  /* chat de la sala */
+  .chat { height: 15em; overflow-y: auto; overflow-wrap: anywhere; }
+  .msg { padding: .1em 0; }
+  .msg .hora { color: var(--dim); font-size: .87em; }
+  .chatform { margin-top: .6em; }
+
+  /* preguntas (en lugar de las del navegador): un panel en el medio, con la página a media luz */
+  #dialogo { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
+             max-width: none; overflow: visible; }
+  #dialogo::backdrop { background: rgba(29, 32, 33, .75); }
+  #dialogo .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--red); padding: 1.3em 2ch 1em; }
+  #dialogo .panel > .ttl { color: var(--red); }
+  #dlgTexto { margin: 0; overflow-wrap: anywhere; }
+  .dlgBotones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1ch; margin-top: 1.2em; }
+  button.primario.peligro { background: var(--red); border-color: var(--red); }
+
+  /* avisos: barra de abajo */
+  #toast { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: .55em 12px; background: var(--bg2);
+           border-top: 2px solid var(--ok); transform: translateY(110%); transition: transform .2s; }
+  #toast.show { transform: none; }
+  #toast.err { border-top-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="logo">♫ ROCKOLA · TV</span>
+  <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
+    <div class="selector">
+      <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
+              title="Elegir la sala: 🔊 📻 las de música · 📺 las de tv"><span class="nombre" id="salaActual">📺 …</span><span
+              class="flechita" aria-hidden="true">▾</span></button>
+      <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
+    </div>
+  </div>
+  <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
+  <button id="lockBtn" type="button" hidden title="Con el PIN: quitar o adelantar videos de otros, y borrar la sala">🔒 controlar</button>
+</div>
+<main>
+  <div id="pinPanel" class="panel" hidden>
+    <span class="ttl">PIN</span>
+    <form id="pinForm" class="pin" novalidate>
+      <span class="dim" id="pinTexto">PIN de la sala (o el de la rockola):</span>
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required>
+      <button class="primario">entrar</button>
+      <button type="button" id="pinCancel">cancelar</button>
+    </form>
+  </div>
+
+  <div id="salaPanel" class="panel" hidden>
+    <span class="ttl">NUEVA SALA DE TV</span>
+    <form id="salaForm" class="pin" novalidate>
+      <span class="dim">Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat.
+        El PIN es para quitar videos de otros y para borrarla.</span>
+      <input id="salaNombre" class="nombre" maxlength="30" placeholder="nombre: Almuerzo" autocomplete="off" required
+             aria-label="Nombre de la sala de tv">
+      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN" minlength="4" maxlength="30"
+             required aria-label="PIN de la sala (4 o más)">
+      <button class="primario">crear</button>
+      <button type="button" id="salaCancel">cancelar</button>
+    </form>
+  </div>
+
+  <!-- sin sala elegida (/tv a secas): cuáles hay -->
+  <section class="panel" id="elegir" hidden>
+    <span class="ttl">SALAS DE TV</span>
+    <div id="elegirLista"><div class="vacio">conectando…</div></div>
+  </section>
+
+  <div class="columnas" id="columnas">
+  <div class="col">
+  <section class="panel" id="panelVideo">
+    <span class="ttl" id="videoTitulo">TELE</span>
+    <div class="video">
+      <div id="yt"></div>
+      <div class="tapa" id="tapa">
+        <button id="mirarBtn" class="primario" type="button">▶ mirar acá</button>
+        <div class="texto" id="tapaTexto">conectando…</div>
+      </div>
+    </div>
+    <div id="now" class="now"><div class="vacio">conectando…</div></div>
+    <div class="controles">
+      <button id="playBtn" class="primario" type="button" disabled>⏸ pausa</button>
+      <button id="skipBtn" type="button" disabled title="Pasar al video que sigue (les pasa a todos)">⏭ siguiente</button>
+      <button id="borrarSalaBtn" type="button" hidden
+              title="Borrar esta sala de tv: se pierden su cola y su chat">🗑 borrar sala</button>
+      <div class="dim pista">El control es de todos: si pausás, adelantás o saltás el video, les pasa a los demás.
+        Si un video no arranca solo, tocá ▶ en el video.</div>
+    </div>
+  </section>
+  </div>
+
+  <div class="col">
+  <section class="panel" id="panelPedir">
+    <span class="ttl">PONER UN VIDEO</span>
+    <form class="buscar" id="search">
+      <span class="prompt">&gt;</span>
+      <input id="q" placeholder="buscar en YouTube, o pegar un link" autocomplete="off" enterkeyhint="search"
+             aria-label="Buscar un video en YouTube, o pegar su link">
+    </form>
+    <div id="results"></div>
+  </section>
+
+  <section class="panel" id="panelCola">
+    <span class="ttl" id="queueTitle">PRÓXIMOS</span>
+    <div id="queue"></div>
+  </section>
+
+  <section class="panel" id="panelChat">
+    <span class="ttl">CHAT</span>
+    <div id="chat" class="chat" role="log" aria-label="Mensajes de la sala"><div class="vacio">conectando…</div></div>
+    <form id="chatForm" class="buscar chatform">
+      <span class="prompt">&gt;</span>
+      <input id="chatInput" maxlength="300" placeholder="escribile a la sala…" autocomplete="off" enterkeyhint="send"
+             aria-label="Mensaje para la sala">
+    </form>
+  </section>
+  </div>
+  </div>
+</main>
+
+<dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
+  <form method="dialog" class="panel">
+    <span class="ttl" id="dlgTitulo">CONFIRMAR</span>
+    <p id="dlgTexto"></p>
+    <div class="dlgBotones">
+      <button type="button" id="dlgNo">cancelar</button>
+      <button value="si" id="dlgSi" class="primario peligro">sí</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast"></div>
+
+<script>
+// Una sala de tv (📺): videos de YouTube, entre todos los que estén en la sala, cada uno en su
+// navegador. El servidor lleva la cuenta (qué video va, por qué segundo, si está en pausa: ver
+// tele.py) y esta página hace que su reproductor de YouTube vaya a la par. El control es de
+// todos: lo que alguien hace con el video de acá (pausarlo, moverlo) se lo cuenta a la sala.
+const $ = s => document.querySelector(s);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+// El mismo identificador que en la página de pedidos (crypto.randomUUID no existe en http://).
+const client = store.get("client") || Math.random().toString(36).slice(2) + Date.now().toString(36);
+store.set("client", client);
+
+// La sala: la del link (/tv?sala=almuerzo) o la última en la que se estuvo. Sin ninguna, se elige.
+const PRINCIPAL = "principal";
+const sala = new URLSearchParams(location.search).get("sala") || store.get("tv") || "";
+if (sala) {
+  store.set("tv", sala);
+  if (!new URLSearchParams(location.search).has("sala")) history.replaceState(null, "", `?sala=${encodeURIComponent(sala)}`);
+}
+
+const nameInput = $("#name");
+nameInput.value = store.get("name") || "";
+nameInput.addEventListener("input", () => store.set("name", nameInput.value.trim()));
+const nombre = () => nameInput.value.trim();
+function faltaNombre() { toast("Poné tu nombre arriba primero", true); nameInput.focus(); }
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
+  return e;
+}
+const dos = n => String(n).padStart(2, "0");
+const fmt = s => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}:${dos(m)}:${dos(s % 60)}` : `${m}:${dos(s % 60)}`;
+};
+
+// `marca`: con ✓ o ⚠ adelante (los avisos de la sala ya traen su dibujito).
+let toastTimer;
+function toast(msg, err = false, marca = true) {
+  const t = $("#toast");
+  t.textContent = (marca ? (err ? "⚠ " : "✓ ") : "") + msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 3500);
+}
+
+// Una pregunta de sí o no para algo que no se deshace, con la estética de la página.
+const dlg = $("#dialogo");
+let alCerrarDialogo = null;
+function preguntar({ titulo, texto, si }) {
+  if (!dlg.showModal) return Promise.resolve(confirm(texto));   // (navegador muy viejo)
+  if (dlg.open) return Promise.resolve(false);
+  $("#dlgTitulo").textContent = titulo; $("#dlgTexto").textContent = texto; $("#dlgSi").textContent = si;
+  dlg.returnValue = "";
+  dlg.showModal();
+  $("#dlgNo").focus();
+  return new Promise(listo => { alCerrarDialogo = () => listo(dlg.returnValue === "si"); });
+}
+dlg.addEventListener("close", () => { const f = alCerrarDialogo; alCerrarDialogo = null; f?.(); });
+$("#dlgNo").onclick = () => dlg.close("no");
+dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close("no"); });   // tocar afuera cancela
+
+// A otra página (otra sala, o la de pedidos). `aviso`: [texto, es un error], para mostrarlo allá.
+function ir(url, aviso) {
+  if (aviso) store.set("aviso", JSON.stringify(aviso));
+  location.href = url;
+}
+const linkTv = id => `/tv?sala=${encodeURIComponent(id)}`;
+
+// Barra de progreso hecha con caracteres, del ancho justo
+function columnas(e) {
+  const probe = document.createElement("span");
+  probe.textContent = "━".repeat(20);
+  probe.style.visibility = "hidden"; probe.style.position = "absolute";
+  e.append(probe);
+  const w = probe.getBoundingClientRect().width / 20;
+  probe.remove();
+  return w ? Math.max(10, Math.floor(e.clientWidth / w)) : 30;
+}
+
+// ---------- con el PIN ----------
+// El de la sala, o el de la rockola, que vale en todas. Se recuerdan junto a los de las salas de
+// música (si acá no hay uno, se prueba el de la principal). Es para lo que no es de todos: quitar
+// o adelantar videos de otro, y borrar la sala.
+const leerPins = () => { try { return JSON.parse(store.get("pins") || "{}") || {}; } catch { return {}; } };
+const clavePin = id => `tv:${id}`;
+function recordarPin(p, id = sala) { store.set("pins", JSON.stringify({ ...leerPins(), [clavePin(id)]: p })); }
+let pin = (pins => clavePin(sala) in pins ? pins[clavePin(sala)] : pins[PRINCIPAL] || "")(leerPins());
+let admin = false;
+
+// Los pedidos que cambian algo van con la sala y el identificador en el cuerpo.
+async function api(path, body) {
+  const headers = { "Content-Type": "application/json" };
+  if (pin) headers["X-Pin"] = pin;
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers, body: JSON.stringify({ sala, client, ...body }) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 403 && admin && path !== "/api/tv/remove") salirDeControl();   // cambiaron el PIN
+    throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status });
+  }
+  return data;
+}
+
+function pintarControl() {
+  $("#lockBtn").textContent = admin ? "🔓 controlando" : "🔒 controlar";
+  $("#lockBtn").classList.toggle("on", admin);
+  $("#borrarSalaBtn").hidden = !admin;
+  if (last) pintarCola(last);
+}
+
+// `solo`: al abrir la página, con el que estaba recordado (si no anda, no se avisa).
+async function entrarAControl(p, solo = false) {
+  pin = p;
+  try {
+    await api("/api/tv/admin", {});
+    admin = true; recordarPin(p);
+    $("#pinPanel").hidden = true; $("#pinInput").value = "";
+    if (!solo) toast("Listo: ya podés quitar videos de otros y borrar la sala");
+  } catch (err) {
+    admin = false; pin = ""; recordarPin("");
+    if (p && !solo) toast(err.message.includes("PIN") ? "PIN incorrecto" : err.message, true);
+  }
+  pintarControl();
+}
+function salirDeControl() {
+  admin = false; pin = ""; recordarPin("");
+  pintarControl();
+}
+$("#lockBtn").onclick = () => {
+  if (admin) return salirDeControl();
+  $("#pinPanel").hidden = !$("#pinPanel").hidden;
+  if (!$("#pinPanel").hidden) { $("#pinPanel").scrollIntoView({ block: "nearest" }); $("#pinInput").focus(); }
+};
+$("#pinCancel").onclick = () => { $("#pinPanel").hidden = true; };
+$("#pinForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const p = $("#pinInput").value.trim();
+  if (!p) { toast("Escribí el PIN", true); $("#pinInput").focus(); return; }
+  entrarAControl(p);
+});
+
+// ---------- el estado de la sala ----------
+// `last` es lo último que dijo el servidor. `progress` y `modo` ("sonar", "pausa" o null si no
+// hay video) salen de ahí, salvo un ratito después de tocar el video de acá: ver loHicieronAca().
+let last = null, lastAt = 0, progress = { t: 0, d: 0, playing: false }, progressAt = 0, modo = null;
+// Por dónde va la sala ahora, en segundos: el servidor lo dice con cada estado y, entre uno y
+// otro, se adelanta lo que pasó.
+const posicion = () => progress.t + (progress.playing ? (performance.now() - progressAt) / 1000 : 0);
+
+// Mientras viaja un pedido de esta página, los estados que lleguen esperan: el que vale es el de
+// después (si no, el video de acá iría y volvería). `guardado`: { s, en }, el más nuevo que espera.
+let enVuelo = 0, guardado = null;
+const masNuevo = (a, b) => !a ? b : !b ? a : a.s.boot !== b.s.boot || b.s.version >= a.s.version ? b : a;
+
+// Un estado de la sala. `en`: cuándo llegó (desde ahí se adelanta el reloj).
+function recibir(s, en = performance.now()) {
+  if (enVuelo) { guardado = masNuevo(guardado, { s, en }); return; }
+  // Uno viejo que llegó tarde. (`boot` cambia cuando se reinicia la rockola: ahí las versiones empiezan de nuevo.)
+  if (last && s.boot === last.boot && s.version < last.version) return;
+  const iba = last ? posicion() : null;
+  last = s; lastAt = en; progress = s.progress; progressAt = en;
+  if (iba == null || Math.abs(posicion() - iba) > 1) rep.corregido = [];   // movieron el reloj de la sala: cuenta nueva
+  modo = !s.now ? null : s.progress.playing || s.starting ? "sonar" : "pausa";
+  render(s);
+  aplicar();
+}
+
+// Un pedido que cambia la sala: la respuesta trae cómo quedó.
+async function mandar(path, body = {}) {
+  let s = null;
+  enVuelo++;
+  try {
+    s = await api(path, body);
+    return s;
+  } finally {
+    enVuelo--;
+    if (s?.version != null) guardado = masNuevo(guardado, { s, en: performance.now() });
+    if (!enVuelo && guardado) { const g = guardado; guardado = null; recibir(g.s, g.en); }
+  }
+}
+// Lo mismo, desde un botón: si no se puede, se avisa.
+async function pedir(path, body) {
+  try { await mandar(path, body); return true; }
+  catch (err) { toast(err.message, true); return false; }
+}
+
+function fila(v, { pos, imagen = false, extra, action } = {}) {
+  return el("div", { class: "fila" },
+    pos != null && el("span", { class: "pos" }, pos),
+    imagen && el("img", { src: v.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: v.title }, v.title),
+      el("div", { class: "sub" }, [v.artist, v.live ? "🔴 en vivo" : fmt(v.duration)].filter(Boolean).join(" · ")),
+      extra),
+    action);
+}
+
+function render(s) {
+  pintarSalas(s);
+  document.title = `📺 ${s.room.name} · Rockola`;
+  $("#lockBtn").hidden = false;
+  $("#pinTexto").textContent = `PIN de la sala ${s.room.name} (o el de la rockola):`;
+  $("#videoTitulo").textContent = "TELE" + (s.viewers ? ` · 👀 ${s.viewers} ${s.viewers === 1 ? "mira" : "miran"}` : "");
+  pintarTapa();
+  pintarAhora();
+  pintarCola(s);
+  pintarChat(s);
+  // Lo que pasó en la sala (alguien saltó el video, lo movió, uno que no se pudo ver). Lo propio no.
+  const n = s.notice;
+  if (n && ultimoAviso !== null && n.id !== ultimoAviso && !n.mine) toast(n.text, n.err, n.err);
+  ultimoAviso = n ? n.id : 0;
+}
+let ultimoAviso = null;
+
+// La tapa del video: hasta que tocan "mirar acá" (el navegador necesita un toque para dejar
+// sonar algo, y recién ahí esta página cuenta como que lo está mirando) y cuando no hay nada.
+function pintarTapa() {
+  const v = last?.now;
+  $("#tapa").hidden = mirando && !!v;
+  $("#tapa").style.backgroundImage = v?.thumb && !mirando ? `url(${JSON.stringify(v.thumb)})` : "";
+  $("#mirarBtn").hidden = mirando;
+  $("#tapaTexto").textContent = !last ? "conectando…"
+    : v && !mirando ? `En la tele: ${v.title}`
+    : mirando ? "Nada en la tele. Buscá un video y agregalo: lo ven todos los de la sala."
+    : "Nada en la tele todavía: cuando pongan un video, se ve acá.";
+}
+
+function pintarAhora() {
+  const s = last, v = s?.now, caja = $("#now");
+  $("#playBtn").disabled = $("#skipBtn").disabled = !v;
+  $("#playBtn").textContent = v && modo === "sonar" ? "⏸ pausa" : "▶ seguir";
+  if (!s) return;
+  if (!v) return caja.replaceChildren(el("div", { class: "vacio" }, "Nada en la tele. Buscá un video y agregalo: lo ven todos los de la sala."));
+  const [txt, cls] = modo === "sonar" ? (s.starting ? ["⏳ ARRANCANDO…", "estado carga"] : ["▶ EN PANTALLA", "estado"])
+    : s.waiting ? ["📺 EN ESPERA: NADIE MIRA", "estado pausa"]
+    : ["⏸ EN PAUSA" + (s.paused && s.paused_by ? ` · pausó ${s.paused_by}` : ""), "estado pausa"];
+  caja.replaceChildren(
+    el("div", { class: cls }, txt),
+    el("div", { class: "titulo", title: v.title }, v.title),
+    el("div", { class: "sub" }, v.artist),
+    el("div", { class: "sub" }, "pedido por ", el("span", { class: "quien" }, v.by)),
+    v.live ? el("div", { class: "barra" }, el("span", { class: "vivo" }, "● EN VIVO"))
+           : el("div", { class: "barra", id: "bar" }));
+  tickProgress();
+}
+
+function tickProgress() {
+  const bar = document.getElementById("bar"), v = last?.now;
+  if (!bar || !v) return;
+  const d = v.duration, t = Math.min(d, Math.max(0, posicion()));
+  const tiempos = `  ${fmt(t)} / ${fmt(d)}`;
+  const n = Math.max(5, columnas(bar) - tiempos.length);
+  const on = d ? Math.round(n * t / d) : 0;
+  bar.replaceChildren(el("span", { class: "on" }, "━".repeat(on)), el("span", { class: "off" }, "─".repeat(n - on)), tiempos);
+}
+addEventListener("resize", tickProgress);
+
+// (Sólo si cambió: si se pintara con cada estado, un clic a medio hacer en un botón se perdería.)
+let firmaCola = null;
+function pintarCola(s) {
+  const firma = JSON.stringify([s.queue, s.now?.videoId, admin]);
+  if (firma === firmaCola) return;
+  firmaCola = firma;
+  pintarResultados();   // (los que ya están en la cola dicen "en cola")
+  const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
+  $("#queueTitle").textContent = s.queue.length ? `PRÓXIMOS · ${s.queue.length}${total ? ` · ${fmt(total)}` : ""}` : "PRÓXIMOS";
+  $("#queue").replaceChildren(...(s.queue.length ? s.queue.map((it, i) => fila(it, {
+      pos: i + 1,
+      extra: el("div", { class: "sub" }, "pedido por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by)),
+      action: accionesCola(it, i),
+    })) : [el("div", { class: "vacio" }, "No hay más videos en la cola.")]));
+}
+
+// Cada uno quita los suyos; con el PIN, cualquiera, y se elige cuál sigue.
+function accionesCola(it, i) {
+  const quitar = () => pedir("/api/tv/remove", { id: it.id });
+  if (admin) return el("div", { class: "acts" },
+    i > 0 && el("button", { title: "Que sea el que sigue", "aria-label": "Mover al principio",
+                            onclick: () => pedir("/api/tv/first", { id: it.id }) }, "⤒"),
+    el("button", { title: "Quitar de la cola", "aria-label": "Quitar", onclick: quitar }, "✕"));
+  return it.mine ? el("div", { class: "acts" }, el("button", { onclick: quitar }, "quitar")) : null;
+}
+
+// ---------- el control (de todos) ----------
+// Los botones de la página: se le pide a la sala, y el video de acá hace lo que diga la respuesta.
+// (Lo mismo se puede hacer en el video: ver seguir().)
+$("#playBtn").onclick = () => {
+  const v = last?.now;
+  if (!v) return;
+  const pausar = modo === "sonar";
+  // Al pausar, que quede en el cuadro que se ve acá (si acá se ve).
+  const t = pausar && viendoElVideo(v) && player.getPlayerState() === YT.PlayerState.PLAYING ? player.getCurrentTime() : undefined;
+  pedir("/api/tv/control", { id: v.id, action: pausar ? "pause" : "play", t, by: nombre() });
+};
+$("#skipBtn").onclick = () => last?.now && pedir("/api/tv/next", { id: last.now.id, by: nombre() });
+
+// ---------- el reproductor de YouTube, a la par de la sala ----------
+// Dos cosas a la vez, y hay que distinguirlas:
+//  · la página le da órdenes al reproductor para que quede como dice la sala (el mismo video, en
+//    el mismo segundo, andando o en pausa);
+//  · si alguien toca el video de acá (lo pausa, le da play, lo mueve), eso se le cuenta a la sala.
+// El reproductor avisa igual que cambió, lo haya tocado alguien o haya sido por una orden, y
+// además cambia solo (carga, se traba, pasa una publicidad). Para no confundir una cosa con otra
+// (y que dos páginas no terminen pausándose y soltándose entre sí para siempre): después de cada
+// orden, por un rato (QUIETO) no se le cree; un cambio se toma por de alguien sólo si antes estaba
+// como decía la sala (`asentado`) y si dura (FIRME); y si no parece ser el video (una
+// publicidad: dura otra cosa), tampoco.
+const TOLERANCIA = 1.5;        // segundos que puede irse del reloj de la sala antes de saltar adonde va
+const TOLERANCIA_PAUSA = 0.3;  // en pausa: que todos queden viendo el mismo cuadro
+const SALTO = 2;               // si el video de acá pegó un salto así, lo movieron a mano
+const QUIETO = 1200;           // ms sin creerle al reproductor después de una orden
+const FIRME = 350;             // ms que tiene que durar un estado para ser de alguien y no de paso
+const ESPERA_AVISO = 30000;    // ms que se espera, como mucho, a que parezca el video para avisar que ya se ve
+let player = null, listo = false, mirando = false;
+const rep = {
+  id: null,          // el video cargado (el id del pedido, no el de YouTube)
+  orden: null,       // lo último que se le ordenó: "sonar" o "pausa"
+  quieto: 0,         // hasta cuándo no creerle
+  asentado: false,   // ya se lo vio como dice la sala: si después cambia, lo tocó alguien acá
+  desde: 0,          // desde cuándo está en el estado en que está
+  antes: null,       // { t, en, sonaba }: la última vez que se miró por dónde iba
+  salto: 0,          // cuándo se vio que lo movieron a mano (se avisa cuando lo sueltan)
+  saltoEn: 0, adelanto: 0,   // lo que tarda en saltar: se salta eso más adelante, para caer justo
+  corregido: [],     // cuándo hubo que llevarlo al segundo de la sala, hace poco (ver seguir)
+  cue: 0,            // en pausa y sin tocar: en qué segundo se lo cargó
+  pausaEn: null, pausaN: 0,   // en pausa: adónde se lo llevó la última vez, y cuántas veces
+  espera: 0, aviso: 0,       // desde cuándo la sala espera para arrancar, y cuándo se le avisó
+  visto: 0,          // la última vez que corrió seguir(): si pasó mucho, la compu estuvo dormida
+  vuelta: 0,         // cuándo volvió a verse la página
+  callado: 0,        // hasta cuándo no contarle nada a la sala (pidió ir más despacio)
+  timer: 0,
+};
+
+// Se le dio una orden: lo que haga ahora es por eso.
+function ordenado() {
+  rep.quieto = performance.now() + QUIETO;
+  rep.asentado = false; rep.salto = 0; rep.antes = null;
+}
+
+// ¿Lo que muestra el reproductor es el video de la sala? Durante una publicidad dice otra
+// duración (y otro segundo): ahí no hay que llevarlo a ningún lado ni creerle nada.
+function esElVideo(v) {
+  try {
+    const vid = player.getVideoData?.()?.video_id;
+    if (vid && vid !== v.videoId) return false;
+    const d = player.getDuration?.() || 0;
+    return !(v.duration > 0 && d > 0 && Math.abs(d - v.duration) > 3);
+  } catch { return true; }
+}
+const viendoElVideo = v => mirando && listo && rep.id === v.id && esElVideo(v);
+
+// Que el reproductor quede como dice la sala: el video, y andando o en pausa. (El segundo lo
+// lleva seguir().) Con cada estado nuevo y cuando el reproductor está listo.
+function aplicar() {
+  if (!mirando || !listo || !last) return;
+  const v = last.now;
+  if (!v) {
+    if (rep.id) { rep.id = rep.orden = null; player.stopVideo(); }
+    return;
+  }
+  if (v.id !== rep.id) {   // otro video
+    rep.id = v.id; rep.orden = modo;
+    rep.adelanto = rep.espera = rep.aviso = rep.pausaN = 0;
+    rep.pausaEn = null; rep.corregido = [];
+    rep.cue = v.live ? 0 : Math.max(0, posicion());
+    ordenado();
+    const que = { videoId: v.videoId, startSeconds: v.live ? undefined : rep.cue };
+    if (modo === "sonar") player.loadVideoById(que); else player.cueVideoById(que);
+    return;
+  }
+  if (modo !== rep.orden) {
+    rep.orden = modo;
+    if (modo === "sonar") rep.pausaEn = null;
+    ordenado();
+    if (modo === "sonar") player.playVideo(); else player.pauseVideo();
+  }
+  seguir();
+}
+
+// Lo que cambió en el reproductor: ¿fue alguien? Y de paso, que vaya por el segundo de la sala.
+// Corre dos veces por segundo y cada vez que el reproductor avisa algo.
+function seguir() {
+  const s = last, v = s?.now, ahora = performance.now();
+  // Si pasó mucho desde la última vez, la compu estuvo dormida (o la pestaña, congelada): lo que
+  // le haya pasado al video no lo hizo nadie. Que quede como dice la sala.
+  const dormida = rep.visto && ahora - rep.visto > 5000;
+  rep.visto = ahora;
+  if (!mirando || !listo || !v || rep.id !== v.id) return;
+  if (dormida) { rep.orden = null; return aplicar(); }
+
+  const E = YT.PlayerState, st = player.getPlayerState(), t = player.getCurrentTime() || 0;
+  const suena = st === E.PLAYING;
+  const fuera = ahora >= rep.quieto, firme = ahora - rep.desde >= FIRME, elVideo = esElVideo(v);
+
+  // La sala espera a que alguno lo esté viendo para arrancar el reloj (así nadie se pierde el
+  // principio por lo que tarde en cargar): avisarle. Si pasa una publicidad, cuando termine;
+  // pero no para siempre, por si lo que no coincide es la duración que se sabe del video.
+  if (!s.starting) rep.espera = 0; else if (!rep.espera) rep.espera = ahora;
+  if (s.starting && modo === "sonar" && suena && (!rep.aviso || ahora - rep.aviso > 2000)
+      && (elVideo || ahora - rep.espera > ESPERA_AVISO)) {
+    rep.aviso = ahora;
+    contar("ready", elVideo ? t : undefined);
+  }
+
+  if (modo === "sonar") {
+    if (suena) { if (fuera) rep.asentado = true; }
+    else if (st === E.PAUSED && rep.asentado) {
+      // Andaba y ahora está en pausa: lo pausaron acá. Salvo con la página escondida (o recién
+      // vuelta): en el celular, el navegador frena el video al cambiar de pestaña o bloquear la
+      // pantalla, y eso no tiene que pausarles a todos.
+      if (document.hidden || rep.desde < rep.vuelta + 1000) rep.asentado = false;
+      else if (firme && elVideo) return loHicieronAca("pause", t);
+    } else if (fuera && st !== E.BUFFERING && st !== E.ENDED) {   // no arrancó: de nuevo
+      ordenado();
+      player.playVideo();
+    }
+  } else {
+    if (st === E.PAUSED || st === E.CUED || st === E.ENDED) { if (fuera) rep.asentado = true; }
+    else if (suena && rep.asentado) { if (firme && elVideo) return loHicieronAca("play", t); }
+    else if (fuera && !rep.asentado && (suena || st === E.BUFFERING)) {   // no frenó: de nuevo
+      ordenado();
+      player.pauseVideo();
+    }
+  }
+
+  // El segundo. En vivo no hay cuál seguir; mientras la sala espera para arrancar, tampoco.
+  if (!v.duration || !elVideo || !fuera || (s.starting && modo === "sonar")) return;
+  const obj = posicion();
+  if (st === E.CUED && modo === "pausa") {   // cargado en pausa, sin tocar: si movieron la sala, cargarlo ahí
+    if (Math.abs(rep.cue - obj) > TOLERANCIA_PAUSA) {
+      rep.cue = obj;
+      ordenado();
+      player.cueVideoById({ videoId: v.videoId, startSeconds: obj });
+    }
+    return;
+  }
+  if (st === E.ENDED && modo === "sonar") {   // acá terminó, pero la sala volvió para atrás
+    if (obj < v.duration - 3) { ordenado(); player.seekTo(obj, true); }
+    return;
+  }
+  if (!suena && st !== E.PAUSED) return;
+  if (!rep.asentado) return;   // todavía se está acomodando a la última orden
+
+  // ¿Lo movieron a mano? El video no está donde tendría que estar según la última vez que se
+  // miró. Se le cuenta a la sala cuando lo sueltan (mientras lo arrastran, pega varios saltos).
+  const a = rep.antes;
+  rep.antes = { t, en: ahora, sonaba: suena };
+  if (a) {
+    const esperado = a.t + (a.sonaba ? (ahora - a.en) / 1000 : 0);
+    if (t > esperado + SALTO || t < a.t - SALTO) rep.salto = ahora;
+    else if (rep.salto && ahora - rep.salto >= 400) return loHicieronAca("seek", t);
+  }
+  if (rep.salto) return;
+
+  // Si se fue del reloj de la sala (se trabó, pasó una publicidad, otro lo movió), llevarlo.
+  if (modo === "sonar" && suena) {
+    // Si hubo que llevarlo hace poco y el reloj de la sala no se movió, es que este navegador no
+    // logra caer justo (una conexión lenta): cada vez se le da más aire, así no se queda saltando.
+    rep.corregido = rep.corregido.filter(x => ahora - x < 20000);
+    if (Math.abs(t - obj) > TOLERANCIA * (1 + rep.corregido.length) && obj < v.duration - 1) {
+      rep.corregido.push(ahora);
+      rep.saltoEn = ahora;
+      ordenado();
+      player.seekTo(Math.min(obj + rep.adelanto, v.duration - 1), true);
+    }
+  } else if (modo === "pausa" && st === E.PAUSED) {
+    // (hasta tres veces al mismo lugar: si el reproductor no cae justo ahí, no insistir)
+    if (Math.abs(t - obj) <= TOLERANCIA_PAUSA) rep.pausaN = 0;
+    else {
+      if (rep.pausaEn == null || Math.abs(rep.pausaEn - obj) > 0.05) { rep.pausaEn = obj; rep.pausaN = 0; }
+      if (rep.pausaN < 3) {
+        rep.pausaN++;
+        ordenado();
+        player.seekTo(obj, true);
+      }
+    }
+  }
+}
+
+// Alguien tocó el video de acá: contárselo a la sala. La página se adelanta y lo da por hecho:
+// así lo que pase con el reproductor mientras viaja el pedido no se toma por otra cosa.
+function loHicieronAca(action, t) {
+  if (performance.now() < rep.callado) {   // la sala pidió ir más despacio: no vale, de vuelta a como estaba
+    rep.orden = null;
+    return aplicar();
+  }
+  if (action === "pause") { modo = rep.orden = "pausa"; progress = { ...progress, t, playing: false }; rep.pausaEn = null; }
+  else if (action === "play") { modo = rep.orden = "sonar"; progress = { ...progress, t, playing: true }; }
+  else progress = { ...progress, t };
+  progressAt = performance.now();
+  rep.salto = 0; rep.antes = null;
+  pintarAhora();
+  contar(action, t);
+}
+
+// Decirle a la sala lo que pasó con el video de acá ("pause", "play", "seek") o lo que avisa
+// esta página ("ready": ya se ve; "ended": terminó; "error": no se puede ver).
+async function contar(action, t, mas = {}) {
+  const v = last?.now;
+  if (!v) return;
+  try {
+    await mandar("/api/tv/control", { id: v.id, action, t, by: nombre(), ...mas });
+  } catch (err) {
+    if (err.status === 429) rep.callado = performance.now() + 5000;
+    if (action === "pause" || action === "play" || action === "seek") toast(err.message, true);
+    if (last && !enVuelo) recibir(last, lastAt);   // no salió: de vuelta a lo que dice la sala
+  }
+}
+
+function alCambiar(st) {
+  const ahora = performance.now();
+  rep.desde = ahora;
+  if (st === YT.PlayerState.PLAYING && rep.saltoEn) {
+    rep.adelanto = Math.min(3, (ahora - rep.saltoEn) / 1000);
+    rep.saltoEn = 0;
+  }
+  if (st === YT.PlayerState.ENDED) {
+    // Terminó (de verdad: no una publicidad, ni un corte a la mitad): que pase el que sigue.
+    const v = last?.now, d = player.getDuration() || 0;
+    if (v && rep.id === v.id && esElVideo(v) && !(v.duration && d && player.getCurrentTime() < d - 3)) contar("ended");
+  }
+  seguir();
+  clearTimeout(rep.timer);
+  rep.timer = setTimeout(seguir, FIRME + 30);   // (para ver si lo de ahora dura)
+}
+
+function alFallar(code) {
+  const v = last?.now;
+  if (!v || rep.id !== v.id) return;
+  // No existe, es privado o no deja verse fuera de YouTube: no lo va a poder ver nadie.
+  if ([100, 101, 150].includes(code)) return contar("error", undefined, { code });
+  toast(`El reproductor de YouTube no pudo con este video (error ${code}). Probá recargando la página.`, true);
+}
+
+function crearReproductor() {
+  if (player) return;
+  player = new YT.Player("yt", {
+    width: "100%", height: "100%",
+    playerVars: { playsinline: 1, rel: 0, origin: location.origin },
+    events: {
+      onReady: () => { listo = true; aplicar(); },
+      onStateChange: e => alCambiar(e.data),
+      onError: e => alFallar(e.data),
+    },
+  });
+}
+
+// Que el servidor sepa que esta página tiene el video a la vista: el reloj de la sala corre
+// mientras alguien lo mira (si no, queda en espera). Además, cada pedido de estado lo dice
+// (loop()). `keepalive`: que llegue aunque se esté cerrando la página.
+function avisarMirando(on) {
+  fetch("/api/tv/watch", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+                           body: JSON.stringify({ sala, client, on }) })
+    .then(r => r.ok && r.json()).then(s => s && recibir(s)).catch(() => {});
+}
+addEventListener("pagehide", () => { if (mirando) avisarMirando(false); });
+
+// "▶ mirar acá": recién ahí se carga el reproductor (dentro del clic: si no, el navegador no lo
+// deja sonar solo).
+$("#mirarBtn").onclick = () => {
+  if (mirando) return;
+  mirando = true;
+  pintarTapa();
+  avisarMirando(true);
+  if (player) return aplicar();   // (ya estaba, de un intento anterior)
+  if (window.YT?.Player) return crearReproductor();
+  window.onYouTubeIframeAPIReady = crearReproductor;
+  const tag = el("script", { src: "https://www.youtube.com/iframe_api" });
+  const noCargo = () => {
+    if (listo || !mirando) return;
+    mirando = false;
+    avisarMirando(false);
+    tag.remove();
+    pintarTapa();
+    toast("No pude cargar el reproductor de YouTube: ¿esta compu llega a youtube.com?", true);
+  };
+  tag.onerror = noCargo;
+  setTimeout(noCargo, 15000);
+  document.head.append(tag);
+};
+
+setInterval(() => { seguir(); tickProgress(); }, 500);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  rep.vuelta = performance.now();
+  // De vuelta a la vista: si mientras tanto el navegador lo frenó, que quede como dice la sala.
+  const v = last?.now;
+  if (!mirando || !listo || !v || rep.id !== v.id) return;
+  const E = YT.PlayerState, st = player.getPlayerState();
+  if (modo === "sonar" ? st !== E.PLAYING && st !== E.BUFFERING : st === E.PLAYING) { rep.orden = null; aplicar(); }
+});
+
+// ---------- salas ----------
+// El mismo menú que en la página de pedidos (con el teclado: ↑ ↓, Inicio, Fin, Enter, Esc): las
+// de música llevan a esa página; las de tv, a esta.
+let firmaSalas = "";
+const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
+function pintarSalas(s) {
+  const firma = JSON.stringify([s.rooms, s.tvs]);
+  if (firma === firmaSalas) return;
+  firmaSalas = firma;
+  const esta = s.tvs.find(r => r.id === sala);
+  $("#salaActual").textContent = esta ? `📺 ${esta.name}` : "📺 elegir…";
+  salaBtn.setAttribute("aria-label", `Sala: ${esta?.name || "ninguna"}`);
+  const opcion = (valor, nombre, sub, elegida = false) => el("li", {
+    role: "option", tabindex: -1, "aria-selected": String(elegida), "data-valor": valor,
+    onclick: () => elegirSala(valor) },
+    el("span", { class: "marca", "aria-hidden": "true" }, elegida ? "●" : ""), el("span", {}, nombre),
+    el("span", { class: "sub" }, sub));
+  const sep = () => el("li", { class: "sep", role: "separator" });
+  salaMenu.replaceChildren(
+    ...s.rooms.map(r => opcion(`musica:${r.id}`, `${r.main ? "🔊" : "📻"} ${r.name}`,
+                               r.main ? "la música: suena en el parlante" : "música: se escucha con 📻 radio")),
+    sep(),
+    ...s.tvs.map(r => opcion(`tv:${r.id}`, `📺 ${r.name}`, "videos de YouTube, entre todos", r.id === sala)),
+    ...(s.tvs.length ? [sep()] : []),
+    opcion("+", "＋ nueva sala de tv…", "con su cola, su chat y su PIN"));
+}
+const opcionesSala = () => [...salaMenu.querySelectorAll('[role="option"]')];
+
+function abrirMenuSalas(foco = "elegida") {
+  salaMenu.hidden = false; salaMenu.classList.remove("derecha");
+  salaBtn.setAttribute("aria-expanded", "true");
+  if (salaMenu.getBoundingClientRect().right > innerWidth - 8) salaMenu.classList.add("derecha");   // que no se salga
+  const ops = opcionesSala();
+  (foco === "ultima" ? ops.at(-1) : ops.find(o => o.getAttribute("aria-selected") === "true") || ops[0])?.focus();
+}
+function cerrarMenuSalas(volver = true) {
+  if (salaMenu.hidden) return;
+  salaMenu.hidden = true; salaBtn.setAttribute("aria-expanded", "false");
+  if (volver) salaBtn.focus();
+}
+function elegirSala(v) {
+  cerrarMenuSalas();
+  if (v === "+") return abrirNuevaSala();
+  if (v === `tv:${sala}`) return;
+  ir(v.startsWith("tv:") ? linkTv(v.slice(3)) : `/?sala=${encodeURIComponent(v.slice(7))}`);
+}
+salaBtn.onclick = () => salaMenu.hidden ? abrirMenuSalas() : cerrarMenuSalas();
+salaBtn.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); abrirMenuSalas(e.key === "ArrowUp" ? "ultima" : "elegida"); }
+});
+salaMenu.addEventListener("keydown", e => {
+  const ops = opcionesSala(), i = ops.indexOf(document.activeElement);
+  const irA = j => ops[(j + ops.length) % ops.length]?.focus();
+  if (e.key === "ArrowDown") irA(i + 1);
+  else if (e.key === "ArrowUp") irA(i - 1);
+  else if (e.key === "Home") irA(0);
+  else if (e.key === "End") irA(ops.length - 1);
+  else if (e.key === "Enter" || e.key === " ") { if (i >= 0) elegirSala(ops[i].dataset.valor); }
+  else if (e.key === "Escape") cerrarMenuSalas();
+  else if (e.key === "Tab") return cerrarMenuSalas(false);
+  else return;
+  e.preventDefault();
+});
+// Tocar afuera lo cierra (sin mover el foco: capaz tocaron otra cosa).
+document.addEventListener("pointerdown", e => { if (!e.target.closest?.(".selector")) cerrarMenuSalas(false); });
+
+function abrirNuevaSala() {
+  $("#salaPanel").hidden = false;
+  $("#salaPanel").scrollIntoView({ block: "nearest" });
+  $("#salaNombre").focus();
+}
+$("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; };
+$("#salaForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const boton = e.submitter, name = $("#salaNombre").value.trim(), clave = $("#salaPin").value.trim();
+  if (boton) boton.disabled = true;
+  try {
+    const { room } = await api("/api/tv/rooms", { name, pin: clave });
+    recordarPin(clave, room.id);   // quien la crea, la controla
+    ir(linkTv(room.id), [`Listo: creé la sala de tv ${room.name}. Pasales el link (o que la elijan arriba).`, false]);
+  } catch (err) {
+    if (boton) boton.disabled = false;
+    toast(err.message, true);
+  }
+});
+
+let borrando = false;   // (que loop(), al enterarse de que la sala ya no está, no avise otra cosa)
+$("#borrarSalaBtn").onclick = async () => {
+  const name = last?.room?.name;
+  if (!await preguntar({ titulo: "BORRAR LA SALA", si: "🗑 borrar la sala",
+                         texto: `¿Borrar la sala de tv ${name}? Se pierden su cola y su chat.` })) return;
+  borrando = true;
+  try {
+    await api("/api/tv/room-delete", {});
+    store.del("tv");
+    ir("/tv", [`Borré la sala de tv ${name}`, false]);
+  } catch (err) {
+    borrando = false;
+    toast(err.message, true);
+  }
+};
+
+// ---------- chat de la sala ----------
+// Los últimos mensajes llegan con el estado. Viven en la memoria del servidor: al reiniciar la
+// rockola se borran.
+let firmaChat = null;
+const hora = t => new Date(t * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+
+function pintarChat(s, alFondo = false) {
+  const msgs = s.chat || [];
+  const firma = msgs.map(m => m.id).join();
+  if (firma === firmaChat && !alFondo) return;   // (si no, se movería mientras lo leen)
+  const caja = $("#chat");
+  const abajo = firmaChat === null || caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40;
+  firmaChat = firma;
+  caja.replaceChildren(...(msgs.length ? msgs.map(m => el("div", { class: "msg" },
+      el("span", { class: "hora" }, hora(m.at)), " ",
+      el("span", { class: m.mine ? "mia" : "quien" }, m.by), ": ", m.text))
+    : [el("div", { class: "vacio" }, "Nadie escribió todavía. Lo que escribas lo ven todos los de esta sala.")]));
+  if (abajo || alFondo) caja.scrollTop = caja.scrollHeight;   // si estaba abajo, que siga abajo
+}
+
+let enviandoChat = false;
+$("#chatForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = $("#chatInput").value.trim(), by = nombre();
+  if (!text || enviandoChat || !sala) return;
+  if (!by) return faltaNombre();
+  enviandoChat = true;
+  try {
+    const s = await mandar("/api/tv/chat", { by, text });
+    $("#chatInput").value = "";
+    pintarChat(s, true);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    enviandoChat = false;
+  }
+});
+
+// ---------- buscar ----------
+// En YouTube (cualquier video, no sólo música), cuando dejan de escribir un ratito o con Enter.
+// Pegando un link, ese video.
+const ESPERA_YOUTUBE = 600;   // ms sin escribir antes de buscar
+let busqueda = null, buscando = null, busquedaPedido = 0, busquedaTimer = null;   // { q, res } o { q, aviso }
+const textoBuscado = () => $("#q").value.trim();
+
+$("#q").addEventListener("input", () => {
+  clearTimeout(busquedaTimer);
+  const q = textoBuscado();
+  if (!q) return limpiarBusqueda();
+  if (q.length >= 2 && q !== busqueda?.q && q !== buscando) busquedaTimer = setTimeout(() => buscar(q), ESPERA_YOUTUBE);
+});
+$("#search").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = textoBuscado();
+  if (q && q !== buscando) buscar(q);
+});
+
+async function buscar(q) {
+  clearTimeout(busquedaTimer);
+  const pedido = ++busquedaPedido;
+  buscando = q;
+  pintarResultados();
+  try {
+    const res = await api(`/api/tv/search?q=${encodeURIComponent(q)}`);
+    if (pedido !== busquedaPedido) return;   // mientras tanto escribieron otra cosa o limpiaron
+    busqueda = { q, res };
+  } catch (err) {
+    if (pedido !== busquedaPedido) return;
+    busqueda = { q, aviso: "⚠ " + err.message };
+  }
+  buscando = null;
+  pintarResultados();
+}
+
+function limpiarBusqueda() {
+  ++busquedaPedido;   // si había algo en camino, que no aparezca después
+  clearTimeout(busquedaTimer);
+  $("#q").value = "";
+  busqueda = buscando = null;
+  pintarResultados();
+}
+
+function pintarResultados() {
+  const res = busqueda?.res || [];
+  const pista = buscando ? "buscando en YouTube…" : busqueda?.aviso || (busqueda && !res.length ? "No encontré nada con eso." : "");
+  const enCola = new Set([...(last?.queue || []).map(i => i.videoId), last?.now?.videoId].filter(Boolean));
+  $("#results").replaceChildren(...[
+    pista && el("div", { class: "hint" }, pista),
+    ...res.map(v => {
+      const esta = enCola.has(v.videoId);
+      return fila(v, { imagen: true, action: el("div", { class: "acts" },
+        el("button", { disabled: esta, class: esta ? "" : "primario", onclick: ev => agregar(v, ev.currentTarget) },
+           esta ? "en cola" : "+ agregar")) });
+    })].filter(Boolean));
+}
+
+async function agregar(v, btn) {
+  const by = nombre();
+  if (!by) return faltaNombre();
+  btn.disabled = true;
+  try {
+    await mandar("/api/tv/queue", { videoId: v.videoId, by });
+    toast(`Agregado: ${v.title}`);
+    limpiarBusqueda();
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message, true);
+  }
+}
+
+// ---------- arrancar ----------
+// Long-poll: el servidor responde apenas cambia algo (o a los 25 s).
+async function loop() {
+  let version = null;
+  for (;;) {
+    try {
+      const s = await api(`/api/tv/state?sala=${encodeURIComponent(sala)}&client=${client}`
+                          + (version != null ? `&since=${version}` : "") + (mirando ? "&viendo=1" : ""));
+      version = s.version;
+      recibir(s);
+    } catch (err) {
+      if (err.status === 404 && borrando) return;   // la está borrando esta página: ya se va
+      if (err.status === 404) { store.del("tv"); return ir("/tv", ["Esa sala de tv ya no existe", true]); }
+      $("#now").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));
+      await new Promise(r => setTimeout(r, 3000));
+      version = null;
+    }
+  }
+}
+
+// Sin sala (/tv a secas): cuáles hay, para entrar a una o crear otra. Si hay una sola, a esa.
+async function elegir() {
+  $("#columnas").hidden = true; $("#elegir").hidden = false;
+  for (let primera = true; ; primera = false) {
+    try {
+      const r = await api("/api/tv/rooms");
+      if (primera && r.tvs.length === 1) return location.replace(linkTv(r.tvs[0].id));
+      pintarSalas(r);
+      $("#elegirLista").replaceChildren(...(r.tvs.length ? r.tvs.map(t => el("div", {
+          class: "fila sala", role: "link", tabindex: 0, onclick: () => ir(linkTv(t.id)),
+          onkeydown: e => { if (e.key === "Enter") ir(linkTv(t.id)); } },
+          el("div", { class: "info" }, el("div", { class: "t" }, `📺 ${t.name}`)), el("span", { class: "dim" }, "entrar ›")))
+        : [el("div", { class: "vacio" }, "Todavía no hay ninguna. Creá la primera: es para mirar videos de YouTube entre varios, cada uno en su navegador.")]));
+      if (primera && !r.tvs.length) abrirNuevaSala();
+    } catch {
+      $("#elegirLista").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));
+    }
+    await new Promise(r => setTimeout(r, 10000));
+  }
+}
+
+// Recordar el PIN en este dispositivo; después, el aviso que dejó la página anterior (p. ej.
+// "creé la sala…").
+(sala && pin ? entrarAControl(pin, true) : Promise.resolve()).then(() => {
+  try {
+    const [texto, err] = JSON.parse(store.get("aviso") || "null") || [];
+    store.del("aviso");
+    if (texto) toast(texto, err);
+  } catch {}
+});
+if (sala) loop(); else elegir();
+</script>
+</body>
+</html>

@@ -359,7 +359,7 @@
   <div class="salas" id="salaBox" hidden><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
-              title="Elegir la sala: 🔊 suena en el parlante · 📻 se escucha con la radio"><span class="nombre" id="salaActual">Principal</span><span
+              title="Elegir la sala: 🔊 suena en el parlante · 📻 se escucha con la radio · 📺 de tv, para mirar videos"><span class="nombre" id="salaActual">Principal</span><span
               class="flechita" aria-hidden="true">▾</span></button>
       <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
     </div>
@@ -383,10 +383,9 @@
   </div>
 
   <div id="salaPanel" class="panel" hidden>
-    <span class="ttl">NUEVA SALA</span>
+    <span class="ttl" id="salaTtl">NUEVA SALA</span>
     <form id="salaForm" class="pin" novalidate>
-      <span class="dim">Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio,
-        cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).</span>
+      <span class="dim" id="salaTexto"></span>
       <input id="salaNombre" maxlength="30" placeholder="nombre: Ventas" autocomplete="off" required aria-label="Nombre de la sala">
       <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN" minlength="4" maxlength="30"
              required aria-label="PIN de la sala (4 o más)">
@@ -1151,13 +1150,16 @@ for (const [accion, fn] of [["play", () => radio.on || prenderRadio()], ["pause"
 // ---------- salas ----------
 // La principal suena en el parlante (🔊); las otras se escuchan sólo con la radio (📻). Se elige
 // arriba, en un menú como el de un <select> (con el teclado: ↑ ↓, Inicio, Fin, Enter, Esc);
-// "＋ nueva sala…" abre el formulario.
-let firmaSalas = "";
+// "＋ nueva sala…" abre el formulario. Ahí están también las salas de tv (📺), para mirar videos
+// de YouTube entre varios: son otra página (/tv). En modo navegador no hay más salas de música
+// que la principal, pero de tv sí.
+let firmaSalas = "", salaDeTv = false;   // (salaDeTv: el formulario está por crear una de tv)
 const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
+const linkTv = id => `/tv?sala=${encodeURIComponent(id)}`;
 function pintarSalas(s) {
-  $("#salaBox").hidden = s.mode !== "mpv";   // (en modo navegador no hay salas)
-  const firma = JSON.stringify(s.rooms);
-  if (s.mode !== "mpv" || firma === firmaSalas) return;
+  $("#salaBox").hidden = false;
+  const tvs = s.tvs || [], firma = JSON.stringify([s.rooms, tvs, s.mode]);
+  if (firma === firmaSalas) return;
   firmaSalas = firma;
   const esta = s.rooms.find(r => r.id === sala) || s.rooms[0];
   $("#salaActual").textContent = esta ? `${esta.main ? "🔊" : "📻"} ${esta.name}` : "sala";
@@ -1168,11 +1170,15 @@ function pintarSalas(s) {
     onclick: () => elegirSala(valor) },
     el("span", { class: "marca", "aria-hidden": "true" }, elegida ? "●" : ""), el("span", {}, nombre),
     el("span", { class: "sub" }, sub));
-  salaMenu.replaceChildren(
+  const sep = () => el("li", { class: "sep", role: "separator" });
+  salaMenu.replaceChildren(...[
     ...s.rooms.map(r => opcion(r.id, `${r.main ? "🔊" : "📻"} ${r.name}`,
                                r.main ? "suena en el parlante" : "se escucha con 📻 radio", r.id === sala)),
-    el("li", { class: "sep", role: "separator" }),
-    opcion("+", "＋ nueva sala…", "con su cola, su chat y su PIN"));
+    ...(tvs.length ? [sep(), ...tvs.map(t => opcion(`tv:${t.id}`, `📺 ${t.name}`, "videos de YouTube, entre todos"))] : []),
+    sep(),
+    s.mode === "mpv" && opcion("+", "＋ nueva sala…", "con su cola, su chat y su PIN"),
+    opcion("+tv", "＋ nueva sala de tv…", "para mirar videos de YouTube entre todos"),
+  ].filter(Boolean));
 }
 const opcionesSala = () => [...salaMenu.querySelectorAll('[role="option"]')];
 
@@ -1191,7 +1197,14 @@ function cerrarMenuSalas(volver = true) {
 function elegirSala(v) {
   cerrarMenuSalas();
   if (v === sala) return;
-  if (v !== "+") return irASala(v);
+  if (v.startsWith("tv:")) { location.href = linkTv(v.slice(3)); return; }
+  if (v !== "+" && v !== "+tv") return irASala(v);
+  salaDeTv = v === "+tv";
+  $("#salaTtl").textContent = salaDeTv ? "NUEVA SALA DE TV" : "NUEVA SALA";
+  $("#salaTexto").textContent = salaDeTv
+    ? "Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat. El PIN es para quitar videos de otros y para borrarla."
+    : "Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio, cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).";
+  $("#salaNombre").placeholder = salaDeTv ? "nombre: Almuerzo" : "nombre: Ventas";
   recapVista.cerrar();
   $("#salaPanel").hidden = false; reacomodar();
   $("#salaPanel").scrollIntoView({ block: "nearest" });
@@ -1222,6 +1235,13 @@ $("#salaForm").addEventListener("submit", async e => {
   const boton = e.submitter, nombre = $("#salaNombre").value.trim(), clave = $("#salaPin").value.trim();
   if (boton) boton.disabled = true;
   try {
+    if (salaDeTv) {
+      const { room } = await api("/api/tv/rooms", { name: nombre, pin: clave });
+      pins[`tv:${room.id}`] = clave; store.set("pins", JSON.stringify(pins));   // quien la crea, la controla
+      store.set("aviso", JSON.stringify([`Listo: creé la sala de tv ${room.name}. Pasales el link (o que la elijan arriba).`, false]));
+      location.href = linkTv(room.id);
+      return;
+    }
     const { room } = await api("/api/rooms", { name: nombre, pin: clave });
     pins[room.id] = clave; store.set("pins", JSON.stringify(pins));   // quien la crea, la controla
     irASala(room.id, [`Listo: creé la sala ${room.name}. Pasales el link (o que la elijan arriba).`, false]);

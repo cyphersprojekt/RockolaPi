@@ -9,7 +9,7 @@ pin = "CAMBIAR"
 # Puerto de la página web.
 puerto = 8000
 
-# Canciones pendientes que puede tener cada persona en la cola.
+# Canciones pendientes que puede tener cada persona en la cola (y videos, en una sala de tv).
 max_por_persona = 3
 
 # Duración máxima de una canción, en segundos (0 = sin límite).

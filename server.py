@@ -13,6 +13,9 @@ Por defecto usa mpv si está instalado. La configuración va en rockola.toml.
 Salas (modo mpv): la principal suena en el parlante de esta máquina. Las otras, que se crean
 desde la web, no tienen parlante: cada una tiene su cola, su chat y sus guardadas, y se
 escuchan con 📻 radio, cada uno en su compu.
+
+Salas de tv (📺, en los dos modos): para mirar videos de YouTube entre varios, cada uno en su
+navegador (/tv). No pasan por esta máquina: no se baja nada ni suena en el parlante (ver tele.py).
 """
 import argparse
 import hashlib
@@ -42,6 +45,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from ytmusicapi import YTMusic
 
 from listas import MAX_TEMAS as MAX_TEMAS_LISTA, ErrorLista, Listas
+from tele import ErrorTele, Teles
 
 # ------------------------------------------------------------------ ajustes
 # Valores por defecto. Se cambian en rockola.toml (ver rockola.ejemplo.toml), no acá.
@@ -67,6 +71,7 @@ PLAYLIST_ID = re.compile(r"[?&]list=([A-Za-z0-9_-]{2,100})")
 ALBUM_ID = re.compile(r"^MPRE[A-Za-z0-9_-]{4,60}$")   # browseId de un álbum de YouTube Music
 MAX_PLAYLIST = 200        # temas que se cargan, como mucho, de una playlist
 MAX_ALBUMES = 4           # álbumes que aparecen, como mucho, al buscar
+MAX_VIDEOS = 12           # videos que aparecen, como mucho, al buscar para una sala de tv
 DATOS_TEMA = ("videoId", "title", "artist", "duration", "thumb", "album")   # los de un tema, sin más
 MAX_SUELTOS = 20          # temas sueltos que se suman de una vez a una ♫ playlist
 RANGO = re.compile(r"bytes=(\d*)-(\d*)")   # el pedazo de un archivo que pide el navegador
@@ -126,6 +131,8 @@ albumes = {}           # browseId -> (cuándo, datos): lo mismo con los álbumes
 director = None        # Director en modo mpv
 stats = None           # Estadisticas: lo que sonó, para el recap (/recap)
 listas = None          # Listas: las ♫ playlists que se arman en la rockola, de cada sala
+teles = None           # Teles: las salas de tv (📺), para mirar videos de YouTube entre varios
+videos = {}            # videoId -> datos de un video (de lo que se buscó para una sala de tv)
 fallos_pin = {}        # ip -> (intentos fallidos, bloqueado hasta)
 
 _local = threading.local()
@@ -247,17 +254,23 @@ def guardar_salas():
         print(f"  ⚠ no pude guardar {ruta}: {e}", flush=True)
 
 
-def crear_sala(body):
-    """Una sala nueva, sin parlante (se escucha con 📻 radio). Cualquiera la puede crear; para
-    controlarla (pausa, ⏭, borrarla) hace falta su PIN, o el de la rockola."""
-    if not director:
-        raise ApiError(409, "Las salas andan sólo en modo mpv")
+def _nombre_y_pin(body):
+    """El nombre y el PIN que eligieron para una sala nueva (de música o de tv)."""
     nombre = " ".join(str(body.get("name", "")).split())[:30]
     pin = str(body.get("pin", "")).strip()
     if not nombre:
         raise ApiError(400, "Ponele un nombre a la sala")
     if len(pin) < 4 or len(pin) > 30:
         raise ApiError(400, "El PIN de la sala tiene que tener entre 4 y 30 caracteres")
+    return nombre, pin
+
+
+def crear_sala(body):
+    """Una sala nueva, sin parlante (se escucha con 📻 radio). Cualquiera la puede crear; para
+    controlarla (pausa, ⏭, borrarla) hace falta su PIN, o el de la rockola."""
+    if not director:
+        raise ApiError(409, "Las salas andan sólo en modo mpv")
+    nombre, pin = _nombre_y_pin(body)
     with lock:
         if any(s.nombre.casefold() == nombre.casefold() for s in salas.values()):
             raise ApiError(409, f"Ya hay una sala «{nombre}»")
@@ -272,6 +285,7 @@ def crear_sala(body):
         s = salas[sid] = Sala(sid, nombre, pin=_hash_pin(pin, sal), sal=sal)
         guardar_salas()
         bump()   # todas: que aparezca en la lista
+    teles.avisar()   # (y en la de las páginas de las salas de tv)
     print(f"  🚪 Sala nueva: {nombre}", flush=True)
     return s.publica()
 
@@ -289,6 +303,7 @@ def borrar_sala(sala):
                 g["salas"].remove(sala.id)
         state["saving"] = [g for g in state["saving"] if g["salas"] or g["error"]]
         bump()   # todas: que desaparezca de la lista (y las páginas que estaban en ella se enteren)
+    teles.avisar()
     print(f"  🚪 Sala borrada: {sala.nombre}", flush=True)
     if stats:
         stats.borrar_sala(sala.id)
@@ -1144,6 +1159,7 @@ def public_state(sala, client=None, since=None, radio=False):
             "mode": state["mode"],
             "room": sala.publica(),
             "rooms": [s.publica() for s in salas.values()],
+            "tvs": teles.publicas(),   # las salas de tv (📺): otra página, /tv
             "now": sala.now,
             "queue": [dict(i, mine=bool(client) and sala.owners.get(i["id"]) == client)
                       for i in sala.queue],
@@ -1635,6 +1651,111 @@ def set_progress(body):
                          "playing": playing, "at": time.monotonic()}
         if playing != was_playing:  # pausa / reanuda: avisar a todos
             bump(sala)
+
+
+# ------------------------------------------------------------ salas de tv (📺)
+# La cuenta de cada sala (el video, su reloj, la cola, el chat) la lleva tele.py. Acá, lo que es
+# hablar con YouTube y lo que toca a las otras salas.
+
+def _recordar_video(v):
+    if len(videos) > 5000:
+        videos.clear()
+    videos[v["videoId"]] = v
+    return v
+
+
+def video(video_id):
+    """Los datos de un video para una sala de tv, o None si no existe. No es `lookup`, que es para
+    canciones: acá importa si es una transmisión en vivo (`live`: va sin duración, y las páginas no
+    la llevan a la par por segundo) y si no deja verse fuera de YouTube."""
+    r = yt().get_song(video_id) or {}
+    d = r.get("videoDetails") or {}
+    if d.get("videoId") != video_id:
+        return None
+    if d.get("isPrivate"):
+        raise ApiError(400, "Ese video es privado")
+    if (r.get("playabilityStatus") or {}).get("playableInEmbed") is False:
+        raise ApiError(400, "Ese video no deja verse fuera de YouTube")
+    largo = int(d.get("lengthSeconds") or 0)
+    # En vivo: lo dice, no trae duración o trae una que no puede ser (una transmisión que ya
+    # terminó queda guardada con 12 horas como mucho).
+    vivo = bool(d.get("isLive")) or not largo or (bool(d.get("isLiveContent")) and largo > 12 * 3600)
+    return _recordar_video({
+        "videoId": video_id,
+        "title": d.get("title", ""),
+        "artist": d.get("author", ""),
+        "duration": 0 if vivo else largo,
+        "thumb": _thumb((d.get("thumbnail") or {}).get("thumbnails")),
+        "live": vivo,
+    })
+
+
+def buscar_videos(q):
+    """Para una sala de tv: videos de YouTube (un link trae ese video). `search` busca canciones en
+    YouTube Music; acá sirve cualquier cosa (una charla, un resumen, un trailer), así que se busca
+    en YouTube, con yt-dlp: sólo la lista de resultados, sin bajar nada."""
+    m = URL_ID.search(q)
+    if m:
+        v = video(m.group(1))
+        return [v] if v else []
+    if PLAYLIST_ID.search(q):
+        raise ApiError(400, "Eso es una playlist: pegá el link de un video")
+    try:
+        import yt_dlp   # import tardío: recién hace falta al buscar
+    except ImportError:
+        raise ApiError(409, "Para buscar videos hace falta yt-dlp. Mientras, pegá el link del video")
+    opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "skip_download": True, "socket_timeout": 10}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        r = ydl.extract_info(f"ytsearch{MAX_VIDEOS}:{q}", download=False) or {}
+    out = []
+    for e in r.get("entries") or []:
+        vid = str((e or {}).get("id") or "")
+        if not VIDEO_ID.match(vid):
+            continue
+        vivo = e.get("live_status") in ("is_live", "is_upcoming") or not e.get("duration")
+        out.append(_recordar_video({
+            "videoId": vid,
+            "title": e.get("title") or "",
+            "artist": e.get("channel") or e.get("uploader") or "",
+            "duration": 0 if vivo else int(e["duration"]),
+            "thumb": _thumb(e.get("thumbnails")) or f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+            "live": vivo,
+        }))
+    return out
+
+
+def video_pedido(vid):
+    """Los datos de un video que quieren poner en una sala de tv. Si no se puede, ApiError."""
+    if not VIDEO_ID.match(vid):
+        raise ApiError(400, "Video inválido")
+    v = videos.get(vid) or video(vid)   # (los que salieron en una búsqueda ya se conocen)
+    if not v:
+        raise ApiError(404, "No encontré ese video")
+    return v
+
+
+def crear_tele(body):
+    """Una sala de tv nueva. Como las otras, la crea cualquiera; su PIN (o el de la rockola) es
+    para lo que no es de todos: sacar o adelantar un video de otro, y borrarla."""
+    nombre, pin = _nombre_y_pin(body)
+    sal = uuid.uuid4().hex
+    room = teles.crear(_slug(nombre), nombre, _hash_pin(pin, sal), sal)
+    with lock:
+        bump()   # todas las de música: que aparezca en la lista
+    return room
+
+
+def borrar_tele(sala):
+    teles.borrar(sala)
+    with lock:
+        bump()
+
+
+def estado_tv(sala, client="", since=None, viendo=False):
+    """El estado de una sala de tv para su página, con las salas de música (para el menú)."""
+    e = teles.estado(sala, client, since, viendo)
+    with lock:
+        return dict(e, rooms=[s.publica() for s in salas.values()], mode=state["mode"])
 
 
 # ------------------------------------------------------------- estadísticas
@@ -2307,7 +2428,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_errors(self, fn):
         try:
             fn()
-        except (ApiError, ErrorLista) as e:
+        except (ApiError, ErrorLista, ErrorTele) as e:
             self.send_json({"error": e.msg}, e.code)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
             # El cliente se fue (p. ej. cerró la pestaña durante un long-poll), o dejó de leer:
@@ -2326,6 +2447,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_page("index.html")
             if u.path == "/pantalla":
                 return self.send_page("pantalla.html")
+            if u.path == "/tv":
+                return self.send_page("tv.html")
             if u.path == "/player":
                 if state["mode"] == "mpv":
                     return self.redirect("/pantalla")  # la música ya suena en el servidor
@@ -2341,6 +2464,20 @@ class Handler(BaseHTTPRequestHandler):
                     qs.get("client", [""])[0][:64],
                     int(since) if since.isdigit() else None,
                     radio=qs.get("radio", [""])[0] == "1"))
+            if u.path == "/api/tv/state":
+                since = qs.get("since", [""])[0]
+                return self.send_json(estado_tv(
+                    teles.sala(qs.get("sala", [""])[0]),
+                    qs.get("client", [""])[0][:64],
+                    int(since) if since.isdigit() else None,
+                    viendo=qs.get("viendo", [""])[0] == "1"))
+            if u.path == "/api/tv/rooms":   # para elegir una (la página /tv, sin sala)
+                with lock:
+                    rooms = [s.publica() for s in salas.values()]
+                return self.send_json({"tvs": teles.publicas(), "rooms": rooms, "mode": state["mode"]})
+            if u.path == "/api/tv/search":
+                q = qs.get("q", [""])[0].strip()[:200]
+                return self.send_json(buscar_videos(q) if q else [])
             if u.path == "/api/search":
                 q = qs.get("q", [""])[0].strip()[:200]
                 res = search(q) if q else []
@@ -2415,6 +2552,8 @@ class Handler(BaseHTTPRequestHandler):
 
         def route():
             body = self.read_body()
+            if path.startswith("/api/tv/"):
+                return self.tv(path.removeprefix("/api/tv/"), body)
             if path == "/api/rooms":   # crear una sala (cualquiera; su PIN es para controlarla)
                 return self.send_json({"room": crear_sala(body)})
             sala = sala_de(body.get("sala"))
@@ -2501,16 +2640,50 @@ class Handler(BaseHTTPRequestHandler):
 
         self.handle_errors(route)
 
+    def tv(self, que, body):
+        """Los pedidos de una sala de tv (📺). Poner videos, chatear y el control (pausa, ir a otro
+        segundo, ⏭) son de todos; con el PIN, además, lo de la cola de otros y borrar la sala."""
+        if que == "rooms":
+            return self.send_json({"room": crear_tele(body)})
+        sala = teles.sala(body.get("sala"))
+        client = str(body.get("client", ""))[:64]
+        if que == "queue":
+            teles.agregar(sala, video_pedido(str(body.get("videoId", ""))), client, body.get("by"))
+        elif que == "remove":
+            teles.quitar(sala, body.get("id"), client, self.es_admin(sala))
+        elif que == "watch":   # esa página tiene el video a la vista (o lo dejó de tener)
+            teles.mirar(sala, client, bool(body.get("on")))
+        elif que == "control":
+            teles.control(sala, body)
+        elif que == "next":
+            teles.siguiente(sala, body.get("id"), client, body.get("by"))
+        elif que == "chat":
+            teles.chatear(sala, body)
+        # Lo que sigue: desde esta máquina, o desde la web con el PIN (de la rockola o de la sala).
+        elif not self.es_admin(sala):
+            raise ApiError(403, "Para eso hace falta el PIN")
+        elif que == "admin":
+            return self.send_json({"ok": True})
+        elif que == "first":
+            teles.primero(sala, body.get("id"))
+        elif que == "room-delete":
+            borrar_tele(sala)
+            return self.send_json({"ok": True})
+        else:
+            raise ApiError(404, "No existe")
+        return self.send_json(estado_tv(sala, client))
+
     def log_message(self, fmt, *args):
         # No llenar la consola con los polls de estado.
         path = getattr(self, "path", "")  # no existe si la conexión venció antes del pedido
-        if any(p in path for p in ("/api/state", "/api/progress", "/api/info", "/api/qr", "/api/audio")):
+        if any(p in path for p in ("/api/state", "/api/tv/state", "/api/progress", "/api/info", "/api/qr",
+                                   "/api/audio")):
             return
         super().log_message(fmt, *args)
 
 
 def main():
-    global director, stats, listas, PORT, IP_FIJA
+    global director, stats, listas, teles, PORT, IP_FIJA
     ap = argparse.ArgumentParser(description="Rockola de oficina")
     ap.add_argument("--modo", choices=["mpv", "navegador"],
                     help="dónde suena la música (por defecto: mpv si está instalado)")
@@ -2537,6 +2710,8 @@ def main():
     except (OSError, sqlite3.Error) as e:   # sin estadísticas, pero que suene
         print(f"  ⚠ no pude abrir las estadísticas ({carpeta() / 'estadisticas.db'}): {e}", flush=True)
     listas = Listas(carpeta() / "listas.json")
+    teles = Teles(carpeta() / "tv.json", MAX_PER_PERSON)
+    teles.arrancar()
 
     if modo == "mpv":
         from reproductor import ErrorMpv
@@ -2589,6 +2764,7 @@ def main():
             guardar_colas(final=True)   # antes de cerrar mpv: que quede el segundo en que iba
         except Exception as e:
             print(f"  ⚠ no pude guardar las colas: {e!r}", flush=True)
+        teles.cerrar()   # que quede por dónde iba cada video
         if stats:   # (la que estaba sonando se anota cuando termine, al retomarla)
             stats.cerrar()
         if director:

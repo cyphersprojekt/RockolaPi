@@ -35,6 +35,9 @@ muestra qué está sonando, quién lo pidió y qué viene después.
   🔀 al azar y sus guardadas: lo que pide ventas no se mezcla con lo de tu equipo, pero un tema
   que ya bajó otra sala suena al instante, sin bajarlo de nuevo.
 - **💬 Chat** en cada sala.
+- **📺 Salas de tv:** para mirar videos de YouTube entre varios, cada uno en su navegador. Van a
+  la par: si alguien pausa, adelanta o salta el video, les pasa a todos. Con su cola y su chat.
+  No pasan por la Raspberry: no se baja nada ni suena en el parlante.
 - **📊 Recap**, tipo "wrapped": las canciones, los artistas y los géneros más escuchados, quién pide
   más, cuánto tiempo sonó y a qué hora, por sala y por período (hoy, 7 o 30 días, el año, todo).
   Queda en una base que sobrevive a los reinicios.
@@ -152,6 +155,25 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   (`guardar_gb`) es uno solo para todas.
 - **💬 Chat:** el de la sala en la que estás (en la compu, a la izquierda, debajo de la letra).
   Escribís y Enter. Se borra cuando se reinicia la rockola.
+- **📺 Salas de tv:** en el mismo menú de **sala:** están las de tv, y **＋ nueva sala de tv…**
+  crea una (con un nombre y un PIN, como las otras). Son otra página: `http://<ip>:8000/tv?sala=almuerzo`
+  (`/tv` a secas las lista). Ahí se busca un video de YouTube (cualquiera, no sólo música) o se pega
+  su link, y **+ agregar** lo pone en la cola de la sala: hasta `max_por_persona` esperando por
+  persona, y cada uno quita los suyos. Para verlo, **▶ mirar acá**: cada uno lo ve en su navegador,
+  con su volumen, en el reproductor de YouTube (pantalla completa, subtítulos y calidad, los de
+  siempre), y todos van por el mismo segundo.
+  - **El control es de todos:** si alguien pausa, le da play o mueve el video (en el video mismo
+    o con **⏸ pausa** y **⏭ siguiente**, abajo), les pasa a todos, y dice quién fue. Con el PIN
+    de la sala (o el de la rockola), **🔒 controlar** suma lo que no es de todos: quitar (✕) o
+    adelantar (⤒) videos de otro y **🗑 borrar sala**.
+  - **Corre mientras alguien mira:** cada video arranca cuando el primero lo tiene andando (nadie
+    se pierde el principio por lo que tarde en cargar), y si se van todos queda en espera, donde
+    iba. El que entra tarde cae donde van los demás.
+  - También transmisiones **en vivo** (ahí no hay segundo que seguir: se comparten la pausa y el play).
+  - La publicidad es de cada uno: al que le toca, cuando termina alcanza a los demás (con YouTube
+    Premium en ese navegador, no hay). Un video que no deja verse fuera de YouTube se saltea solo.
+  - Hay hasta 8, y andan en los dos modos. Quedan guardadas entre reinicios, con su cola y por
+    dónde iba el video (el chat no).
 - **📊 Recap:** arriba, **📊 recap** cambia la cola por el recap, en la misma página: la 📻 radio sigue
   sonando, y se vuelve tocándolo de nuevo (o con ← del navegador). Su link es
   `http://<ip>:8000/recap`, y se actualiza solo cuando termina un tema. Muestra cuánto sonó, el top de
@@ -212,6 +234,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 | Canciones guardadas y 🔀 | sí | no |
 | 📻 Radio | sí | no |
 | 🚪 Salas | sí | no (hay una sola) |
+| 📺 Salas de tv | sí | sí |
 
 ## Guías
 
@@ -239,14 +262,14 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 |---|---|---|
 | `pin` | al azar | PIN para controlar desde la web (vacío = sólo desde la máquina) |
 | `puerto` | `8000` | |
-| `max_por_persona` | `3` | canciones pendientes por persona |
+| `max_por_persona` | `3` | canciones pendientes por persona (y videos, en una sala de tv) |
 | `duracion_maxima` | `600` | segundos (0 = sin límite) |
 | `volumen` | `80` | volumen inicial (0–130) |
 | `normalizar` | `false` | iguala el volumen entre canciones |
 | `modo` | automático | `mpv` o `navegador` |
 | `ip` | automática | la IP que muestran el link y el QR |
 | `guardar_gb` | `16` | GB para canciones guardadas, entre todas las salas; al pasarlos se borran las que hace más que no suenan (0 = no guardar). Siempre deja 2 GB libres |
-| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas, las salas, las ♫ playlists y las estadísticas del recap |
+| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas, las salas (también las de tv), las ♫ playlists y las estadísticas del recap |
 | `azar_al_prender` | `true` | al prender la Raspberry o reiniciar el servicio, si en 10 s nadie pide nada: 🔀 prendido y a sonar (con un parlante Bluetooth, cuando se conecta); si estaba sonando un tema, sigue ése. No en el reinicio de las 6 |
 | `predescargar` | `0` | canciones de la cola que se bajan por adelantado (0 = toda la cola) |
 | `[controles]` | | pines de los botones, paso de volumen y doble toque |
@@ -258,9 +281,10 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── reproductor.py        descargas con yt-dlp y control de mpv por su socket JSON IPC
 ├── estadisticas.py       lo que sonó, en SQLite, para el 📊 recap (y los géneros, de iTunes)
 ├── listas.py             las ♫ playlists que se arman en la rockola, por sala (listas.json)
+├── tele.py               las 📺 salas de tv: el video que va, su reloj, la cola y el chat (tv.json)
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
-├── static/               páginas web: pedidos y 📊 recap (/), /pantalla y /player
+├── static/               páginas web: pedidos y 📊 recap (/), las salas de tv (/tv), /pantalla y /player
 ├── iniciar.sh, tui.sh    arrancar el servidor y la pantalla
 ├── rockola.ejemplo.toml  configuración de ejemplo
 ├── pi/                   instalador de la Raspberry, salida de audio y Bluetooth
@@ -305,6 +329,20 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   `~/.cache/rockola/salas.json`; la cola, en `colas.json` (ver abajo); el chat, en memoria. Cada guardada anota de qué salas
   es (`salas` en su `.json`; las de antes de las salas, de la principal). Cuando falta lugar se
   borran primero las que no son de ninguna (las de salas borradas).
+- **📺 Salas de tv:** el servidor no toca el video: lleva la cuenta de cada sala (`tele.py`: qué
+  video va, por qué segundo según un reloj, si está en pausa, la cola y el chat) y cada página hace
+  que su reproductor de YouTube (el oficial, el mismo de `/player`) vaya a la par: carga ese video
+  y, si se va más de un segundo y medio del reloj, salta adonde va. Al revés, cuando alguien toca
+  el video de su página (pausa, play, lo mueve), la página se lo cuenta al servidor y de ahí les
+  llega a las demás. Como el reproductor avisa igual sus cambios, los haya pedido la página o una
+  persona, la página sólo toma por de una persona lo que pasa cuando el video ya estaba como decía
+  la sala y dura un rato: así dos páginas no terminan pausándose entre sí, y un video frenado por
+  el navegador (el celular con la pantalla bloqueada, una publicidad) no les pausa a todos. El reloj
+  de un video arranca cuando la primera página avisa que ya lo tiene andando, y corre sólo
+  mientras alguna tenga el video a la vista (lo dice al pedir el estado; a los 40 s sin noticias se
+  la da por cerrada). La búsqueda es la de YouTube (con yt-dlp: sólo la lista de resultados, sin
+  bajar nada), porque la de YouTube Music trae sólo música. Tienen su propio lock: lo que pasa en
+  una sala de tv no despierta a la música. Quedan en `~/.cache/rockola/tv.json`.
 - **📊 Estadísticas:** cada vez que un tema deja de sonar (terminó, ⏭, ▶ ahora…) se anota en `~/.cache/rockola/estadisticas.db` (SQLite, sin nada que instalar): la sala,
   cuánto sonó de verdad (no lo que dura), quién lo pidió y si fue pedido, de una playlist o 🔀. Lo
   escribe un hilo aparte, para no frenar la música. Si la base se rompe (un corte de luz justo
@@ -322,7 +360,8 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   de una, sin el límite por persona. Lo demás se hace
   desde la misma máquina o con el PIN: el de la rockola, que vale en todas las salas, o el de la
   sala (5 intentos fallidos bloquean esa IP 5 minutos). Las páginas no pueden mandar pedidos de
-  control desde otro sitio: el servidor exige JSON y revisa el `Host`.
+  control desde otro sitio: el servidor exige JSON y revisa el `Host`. En una sala de tv el
+  control del video (pausa, moverlo, ⏭) es de todos; el PIN es para la cola de otros y para borrarla.
 - **Entre reinicios:** de cada sala, lo que suena (y en qué segundo), la cola con quién pidió cada
   tema y lo que sonó recién quedan en `~/.cache/rockola/colas.json`. Se escribe un par de segundos
   después de cada cambio, cada 30 s mientras suena algo (por si se corta la luz: no más seguido,
@@ -351,6 +390,7 @@ Google, ni cuenta con su aval.
   música. Pueden dejar de andar cuando YouTube cambia algo.
 - **Términos de YouTube:** en modo mpv se descarga el audio, y la 📻 radio lo comparte con otras
   compus de la red. Los términos de YouTube no lo permiten. El modo navegador usa el reproductor
-  oficial (la búsqueda igual pasa por ytmusicapi).
+  oficial (la búsqueda igual pasa por ytmusicapi). Las 📺 salas de tv también: cada uno ve el
+  video en el reproductor oficial, sin bajar nada (la búsqueda de videos pasa por yt-dlp).
 - **Cada uno es responsable** de cómo la usa: de cumplir los términos de YouTube y las leyes de
   derechos de autor de su país.
