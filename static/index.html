@@ -102,8 +102,9 @@
 
   /* el selector de salas: un botón que despliega la lista, como un panel más */
   .selector { position: relative; }
-  #salaBtn { display: flex; align-items: center; gap: 1ch; max-width: 24ch; }
-  #salaBtn .nombre { overflow: hidden; text-overflow: ellipsis; }
+  /* de ancho fijo, se llame como se llame la sala (si no entra, "…"): así la barra no se mueve */
+  #salaBtn { display: flex; align-items: center; gap: 1ch; width: 22ch; }
+  #salaBtn .nombre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   #salaBtn .flechita { color: var(--dim); }
   #salaBtn[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
   .menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: calc(100vw - 32px);
@@ -137,7 +138,8 @@
   button.on { color: var(--acc); border-color: var(--acc); }
   a.boton { color: var(--fg); background: var(--bg1); border: 1px solid var(--line); padding: .3em 1ch;
             white-space: nowrap; text-decoration: none; }
-  a.boton:hover { border-color: var(--acc); color: var(--acc); }
+  /* .on: 📊 recap, mientras se lo está mirando (tocándolo de nuevo se vuelve a la cola) */
+  a.boton:hover, a.boton.on { border-color: var(--acc); color: var(--acc); }
 
   /* sonando */
   .now { display: flex; gap: 2ch; align-items: flex-start; }
@@ -356,10 +358,10 @@
 <body>
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
-  <div class="salas" id="salaBox" hidden><span class="largo" aria-hidden="true">sala:</span>
+  <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
-              title="Elegir la sala: 🔊 suena en el parlante · 📻 se escucha con la radio · 📺 de tv, para mirar videos"><span class="nombre" id="salaActual">Principal</span><span
+              title="Elegir la sala: 🔊 suena en el parlante · 📻 se escucha con la radio · 📺 de tv, para mirar videos"><span class="nombre" id="salaActual">…</span><span
               class="flechita" aria-hidden="true">▾</span></button>
       <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
     </div>
@@ -466,6 +468,8 @@
       <button type="button" data-vista="recientes" aria-pressed="false">🕘 recientes</button>
       <button type="button" data-vista="listas" aria-pressed="false"
               title="Las playlists de la sala: armá una y cargala entera cuando quieras">♫ playlists</button>
+      <button type="button" data-vista="generos" aria-pressed="false"
+              title="Las guardadas por género (el del artista, según iTunes): tocá uno para ver sus temas o hacerlo sonar entero">🎸 por género</button>
     </div>
     <div id="guardadas"></div>
     <div class="herr" id="listasHerr" hidden>
@@ -994,8 +998,8 @@ function herramientasCola(queue) {
                    onclick: () => control("/api/shuffle-queue") }, "🔀 mezclar"))];
 }
 
-// Lo que se cargó entero a la cola (cada tema dice de dónde vino): un álbum 💿 o una playlist ♫.
-const iconoDe = l => l.kind === "album" ? "💿" : "♫";
+// Lo que se cargó entero a la cola (cada tema dice de dónde vino): un álbum 💿, un género 🎸 o una playlist ♫.
+const iconoDe = l => l.kind === "album" ? "💿" : l.kind === "genero" ? "🎸" : "♫";
 
 // Con el PIN: arriba de la cola, cada playlist (o álbum) cargada con un botón para sacarla entera.
 function listasEnCola(queue) {
@@ -1012,7 +1016,7 @@ function listasEnCola(queue) {
     el("div", { class: "info" },
       el("div", { class: "t", title: l.title }, `${iconoDe(l)} ${l.title}`),
       el("div", { class: "sub" }, `${l.n} ${l.n === 1 ? "tema" : "temas"} en la cola · ${fmt(l.d)}`)),
-    el("button", { title: `Quitar de la cola todos los temas de ${l.kind === "album" ? "este álbum" : "esta playlist"}`,
+    el("button", { title: `Quitar de la cola todos los temas de ${l.kind === "album" ? "este álbum" : l.kind === "genero" ? "este género" : "esta playlist"}`,
                    onclick: async () => await preguntar({
                        titulo: "QUITAR DE LA COLA", peligro: true, si: `✕ quitar ${l.n === 1 ? "el tema" : `los ${l.n}`}`,
                        texto: `¿Quitar de la cola ${l.n === 1 ? "el tema" : `los ${l.n} temas`} de «${l.title}»?` })
@@ -1157,12 +1161,12 @@ let firmaSalas = "", salaDeTv = false;   // (salaDeTv: el formulario está por c
 const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
 const linkTv = id => `/tv?sala=${encodeURIComponent(id)}`;
 function pintarSalas(s) {
-  $("#salaBox").hidden = false;
   const tvs = s.tvs || [], firma = JSON.stringify([s.rooms, tvs, s.mode]);
   if (firma === firmaSalas) return;
   firmaSalas = firma;
   const esta = s.rooms.find(r => r.id === sala) || s.rooms[0];
   $("#salaActual").textContent = esta ? `${esta.main ? "🔊" : "📻"} ${esta.name}` : "sala";
+  $("#salaActual").title = esta?.name || "";   // (entero, por si no entra)
   salaBtn.setAttribute("aria-label", `Sala: ${esta?.name || ""}`);
   // ● marca en la que estás.
   const opcion = (valor, nombre, sub, elegida = false) => el("li", {
@@ -1868,19 +1872,22 @@ async function addSong(song, btn) {
 }
 
 // ---------- canciones guardadas (modo mpv) ----------
-// Por álbum (en orden alfabético) o recientes (la que sonó más recién primero), de a páginas:
-// en la compu, de las que entran en la pantalla; en el celular, de a 15 álbumes o 20 temas.
-// Tocando un álbum se ven sus temas en lugar de la lista. Se refresca sola cuando cambian,
-// sin moverse de la página.
-const POR_PAGINA = { albumes: 15, recientes: 20 };
-const TEMAS_POR_PAGINA = 20;   // los de un álbum, en el celular
-let vista = store.get("vista") === "recientes" ? "recientes" : "albumes";   // la de las guardadas
+// Por álbum o por género (en orden alfabético) o recientes (la que sonó más recién primero), de
+// a páginas: en la compu, de las que entran en la pantalla; en el celular, de a 15 álbumes (o
+// géneros) o 20 temas. Tocando un álbum o un género se ven sus temas en lugar de la lista. Se
+// refresca sola cuando cambian, sin moverse de la página.
+const POR_PAGINA = { albumes: 15, recientes: 20, generos: 15 };
+const TEMAS_POR_PAGINA = 20;   // los de un álbum o un género, en el celular
+let vista = ["recientes", "generos"].includes(store.get("vista")) ? store.get("vista") : "albumes";   // la de las guardadas
 // Ese panel muestra las guardadas o las ♫ playlists (sin guardadas, sólo las playlists).
 let panelVista = store.get("panel") === "listas" ? "listas" : "guardadas";
 const verListas = () => panelVista === "listas" || !hayBiblio();
 let biblio = { v: null, vista, total: 0, items: [], pagina: 0, n: 0 }, biblioPedido = 0, biblioTimer = null;
 let albumAbierto = null;          // el álbum del que se están viendo los temas
 const pagAlbum = { pagina: 0 };
+// El género del que se están viendo los temas: el de la lista, más `songs` (null mientras llegan).
+let generoAbierto = null, generoPedido = 0, generosTimer = null;
+const pagGenero = { pagina: 0 };
 
 // « ‹ 1 2 3 › »: tres números alrededor de la página actual; « y » van a la primera y a la última.
 function paginador(actual, total, ir, nombre) {
@@ -1943,7 +1950,8 @@ document.querySelectorAll(".vistas button[data-vista]").forEach(b => b.addEventL
   const otra = v !== vista;
   vista = v; store.set("vista", vista);
   pintarVista(); pintarPendientes(last);
-  if (otra) cargarGuardadas(); else { pintarGuardadas(); reajustarGuardadas(); }
+  // (los géneros, siempre de nuevo: mientras no se miraban, pudo haberse averiguado alguno más)
+  if (otra || v === "generos") cargarGuardadas(); else { pintarGuardadas(); reajustarGuardadas(); }
 }));
 
 function refrescarGuardadas(demora) {
@@ -1971,19 +1979,24 @@ function porPaginaGuardadas(total) {
 async function cargarGuardadas(pagina = biblio.pagina) {
   const vi = vista;
   const igual = vi === biblio.vista && biblio.v != null;
-  if (!igual) { pagina = 0; albumAbierto = null; }   // cambiaron de vista: a la primera página
+  if (!igual) { pagina = 0; albumAbierto = generoAbierto = null; }   // cambiaron de vista: a la primera página
   const n = porPaginaGuardadas(igual ? biblio.total : Infinity);
   if (igual && biblio.n && n !== biblio.n) pagina = Math.floor(pagina * biblio.n / n);   // misma primera fila
   const pedido = ++biblioPedido;
   try {
     const r = await api(`/api/library?vista=${vi}&desde=${pagina * n}&n=${n}`);
     if (pedido !== biblioPedido) return;   // llegó tarde: hubo otro pedido después
-    biblio = { v: r.v, vista: vi, total: r.total, items: vi === "albumes" ? r.albums : r.songs, pagina, n };
+    biblio = { v: r.v, vista: vi, total: r.total, pagina, n, faltan: r.pending || 0,
+               items: vi === "albumes" ? r.albums : vi === "generos" ? r.genres : r.songs };
     // Se borraron y esa página ya no existe, o con el total de verdad entran otras tantas: pedir de nuevo.
     const ultima = Math.max(0, Math.ceil(r.total / n) - 1);
     if (pagina > ultima || porPaginaGuardadas(r.total) !== n) return cargarGuardadas(Math.min(pagina, ultima));
     if (albumAbierto) albumAbierto = biblio.items.find(a => a.key === albumAbierto.key) || albumAbierto;
     pintarGuardadas();
+    if (generoAbierto) traerGenero();   // (sus temas pueden ser otros)
+    // Mientras falte averiguar el género de algún artista, mirar de nuevo cada tanto: se van acomodando.
+    clearTimeout(generosTimer);
+    if (vi === "generos" && r.pending) generosTimer = setTimeout(() => { if (vista === "generos" && !verListas()) cargarGuardadas(); }, 30000);
   } catch (err) {
     if (pedido === biblioPedido) $("#guardadas").replaceChildren(el("div", { class: "hint" }, "⚠ " + err.message));
   }
@@ -1993,7 +2006,7 @@ async function cargarGuardadas(pagina = biblio.pagina) {
 function reajustarGuardadas() {
   if (verListas()) { if (fijo()) pintarListas(); return; }   // (las playlists se acomodan solas)
   if ($("#biblioPanel").hidden || biblio.v == null) return;
-  if (albumAbierto) pintarGuardadas();   // los temas del álbum se acomodan solos
+  if (albumAbierto || generoAbierto) pintarGuardadas();   // los temas del álbum (o del género) se acomodan solos
   else if (porPaginaGuardadas(biblio.total) !== biblio.n) cargarGuardadas();
 }
 
@@ -2004,11 +2017,13 @@ async function irAPagina(p) {
 
 function pintarGuardadas() {
   if (albumAbierto) return pintarAlbum(albumAbierto);
+  if (generoAbierto) return pintarGenero(generoAbierto);
   const { items, total, vista: v, pagina, n } = biblio;
   const paginas = Math.ceil(total / n);
   $("#guardadas").replaceChildren(
     el("div", { class: "filas" }, items.length
-      ? items.map(it => v === "albumes" ? filaAlbum(it) : fila(it, { imagen: true, action: accionesGuardada(it) }))
+      ? items.map(it => v === "albumes" ? filaAlbum(it) : v === "generos" ? filaGenero(it)
+                                        : fila(it, { imagen: true, action: accionesGuardada(it) }))
       : el("div", { class: "vacio" }, "Todavía no hay. Quedan guardadas las que suenan acá y las que bajás con ⬇ desde el buscador.")),
     ...(paginas > 1 ? [paginador(pagina, paginas, irAPagina, "Páginas de las guardadas")] : []));
 }
@@ -2053,6 +2068,71 @@ function pintarAlbum(a) {
 
 const fuenteGuardadas = a => ({ from: "saved", album: a.album, artist: a.artist, videoIds: a.songs.map(x => x.videoId) });
 
+// ---------- guardadas por género ----------
+// El género de un tema es el de su (primer) artista según iTunes, que es a quien se le pregunta
+// (YouTube no lo dice): de a un artista, sin apuro. Así que al principio hay muchas «sin género» y
+// la lista se va acomodando sola. También quedan ahí los videos sueltos y los artistas que iTunes
+// no conoce.
+const nombreGenero = g => g.genre || "Sin género";
+const datosGenero = g => `${contarTemas(g.count)} · ${fmt(g.duration)}`;
+
+// Un género en la lista. Al tocarlo, se ven sus temas (se piden recién ahí: pueden ser muchos).
+function filaGenero(g) {
+  const abrir = () => {
+    generoAbierto = { ...g, songs: null }; pagGenero.pagina = 0;
+    pintarGuardadas(); subirA($("#biblioPanel"));
+    $("#guardadas .cabeza button")?.focus();
+    traerGenero();
+  };
+  const faltan = biblio.faltan;
+  const nota = g.genre ? "" : faltan ? ` · averiguando ${faltan} ${faltan === 1 ? "artista" : "artistas"}…`
+                                     : " · iTunes no conoce a sus artistas";
+  return el("div", { class: "fila album", role: "button", tabindex: 0, title: "Ver sus temas", onclick: abrir,
+                     onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } } },
+    el("img", { src: g.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: nombreGenero(g) }, nombreGenero(g)),
+      el("div", { class: "sub" }, datosGenero(g) + nota)),
+    el("span", { class: "flecha", "aria-hidden": "true" }, "›"));
+}
+
+// Los temas del género abierto (todos de una: después se paginan acá, como los de un álbum).
+async function traerGenero() {
+  const g = generoAbierto, pedido = ++generoPedido;
+  if (!g) return;
+  const sigue = () => pedido === generoPedido && generoAbierto?.key === g.key;   // (no lo cerraron ni abrieron otro)
+  try {
+    const r = await api(`/api/library?vista=genero&genero=${encodeURIComponent(g.key)}`);
+    if (!sigue()) return;
+    generoAbierto = r;
+  } catch (err) {
+    if (!sigue()) return;
+    // Ya no queda ninguna de ese género (p. ej. se averiguó el de las «sin género»): a la lista.
+    generoAbierto = err.status === 404 ? null : { ...generoAbierto, error: err.message };
+  }
+  pintarGuardadas();
+}
+
+// Los temas de un género (por artista), con "‹ géneros" para volver a la lista y, con el PIN,
+// ▶ reproducir y + a la cola: el género entero, mezclado (no tiene un orden).
+function pintarGenero(g) {
+  const volver = () => { generoAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  const cabeza = el("div", { class: "fila cabeza" },
+    el("button", { type: "button", title: "Volver a la lista de géneros", onclick: volver }, "‹ géneros"),
+    el("img", { src: g.thumb || null, alt: "", loading: "lazy" }),
+    el("div", { class: "info" },
+      el("div", { class: "t", title: nombreGenero(g) }, nombreGenero(g)),
+      el("div", { class: "sub" }, datosGenero(g))),
+    el("div", { class: "botonera" },
+      botonesCargar({ from: "genre", genre: g.key }, `${g.genre ? `todo lo guardado de ${g.genre}` : "todas las que no tienen género"}, mezclado`, null, false)));
+  if (!g.songs) {
+    return $("#guardadas").replaceChildren(cabeza, el("div", { class: "hint" }, g.error ? "⚠ " + g.error : "cargando…"));
+  }
+  pintarLista($("#guardadas"), g.songs, song => fila(song, { action: accionesGuardada(song) }),
+              { arriba: [cabeza], pag: pagGenero, porPagina: TEMAS_POR_PAGINA,
+                nombre: `Páginas de los temas de ${nombreGenero(g)}`, alCambiar: pintarGuardadas });
+}
+
 // Una guardada: + agregar y, con el PIN, 🗑 para borrarla de las guardadas de la sala.
 function accionesGuardada(song) {
   return el("div", { class: "acts" },
@@ -2076,6 +2156,10 @@ async function borrarGuardada(song, btn) {
       albumAbierto = { ...albumAbierto, songs: albumAbierto.songs.filter(otra) };
       albumAbierto.duration = albumAbierto.songs.reduce((a, s) => a + (s.duration || 0), 0);
       if (!albumAbierto.songs.length) albumAbierto = null;   // era la última del álbum: a la lista
+    } else if (generoAbierto?.songs) {
+      const quedan = generoAbierto.songs.filter(otra);
+      generoAbierto = quedan.length ? { ...generoAbierto, songs: quedan, count: quedan.length,
+                                        duration: quedan.reduce((a, s) => a + (s.duration || 0), 0) } : null;
     } else if (biblio.vista === "recientes") {
       biblio = { ...biblio, items: biblio.items.filter(otra), total: biblio.total - 1 };
     }
@@ -2092,18 +2176,19 @@ async function removeSong(id) {
   catch (err) { toast(err.message, true); }
 }
 
-// ---------- cargar una colección entera (un álbum, una playlist) ----------
+// ---------- cargar una colección entera (un álbum, una playlist, un género) ----------
 // ▶ reproducir: suena ya, entera y en orden (lo que estaba en la cola sigue después); + a la cola:
 // al final. Las dos con el PIN, como las playlists de YouTube: sin el PIN, una persona llenaría la
-// cola de una (sus temas sueltos se piden como cualquiera). `que`: "el disco entero", "la playlist entera".
-function botonesCargar(fuente, que, alCargar) {
+// cola de una (sus temas sueltos se piden como cualquiera). `que`: "el disco entero", "la playlist
+// entera". `enOrden`: false si no tiene un orden (un género va mezclado).
+function botonesCargar(fuente, que, alCargar, enOrden = true) {
   if (!admin) {
     return el("button", { type: "button", title: `Cargar ${que} a la cola pide el PIN (los temas de a uno se piden sin PIN)`,
                           onclick: pedirPin }, "🔒 cargar con PIN");
   }
   return [
     el("button", { type: "button", class: "primario",
-                   title: `Que suene ya ${que}, en orden: corta la que está sonando (lo que estaba en la cola sigue después)`,
+                   title: `Que suene ya ${que}${enOrden ? ", en orden" : ""}: corta la que está sonando (lo que estaba en la cola sigue después)`,
                    onclick: ev => cargarEntera(fuente, "now", ev.currentTarget, alCargar) }, "▶ reproducir"),
     el("button", { type: "button", title: `Poner ${que} al final de la cola`,
                    onclick: ev => cargarEntera(fuente, "end", ev.currentTarget, alCargar) }, "+ a la cola"),

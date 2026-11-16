@@ -951,13 +951,54 @@ def _afuera(motivos):
     return f" Quedaron afuera: {', '.join(quedaron)}." if quedaron else ""
 
 
+def _generos_de(sid):
+    """El género de cada artista de las guardadas de una sala (y cuántos falta averiguar): ver
+    Estadisticas.generos_de."""
+    if not director:
+        raise ApiError(409, "Las canciones guardadas sólo existen en modo mpv")
+    if not stats:
+        raise ApiError(409, "Los géneros se anotan con las estadísticas, que no andan: mirá los avisos en la consola de la rockola")
+    try:
+        return stats.generos_de(director.descargas.artistas(sid))
+    except sqlite3.Error as e:
+        print(f"  ⚠ no pude leer los géneros: {e}", flush=True)
+        raise ApiError(500, "No pude leer los géneros")
+
+
+def averiguar_generos():
+    """Que se vaya averiguando el género de los artistas de todas las guardadas, también los de las
+    que nunca sonaron (p. ej. las que se bajaron con ⬇), para cuando las miren por género."""
+    try:
+        _generos_de(None)
+    except ApiError:
+        pass
+
+
+def genero_guardado(sid, clave):
+    """Las guardadas de la sala que son de un género (`clave`: su "key" en la lista de géneros)."""
+    de, _ = _generos_de(sid)
+    g = director.descargas.del_genero(de, clave, sala=sid)
+    if not g:
+        raise ApiError(404, "No hay guardadas de ese género")
+    return g
+
+
 def coleccion(sala, body):
     """Una colección de temas entera, para cargarla a la cola o sumarla a una playlist, según
     `from`: una playlist de la rockola (`list`, su id), un álbum de YouTube Music (`browseId`), uno de las
-    guardadas (`album`, `artist` y sus `videoIds`) o una playlist de YouTube (`q`, el link).
-    Devuelve {title, kind, songs, afuera}: `kind` es "album", "lista" o "youtube"; `afuera`, los
-    que no vinieron, como (cuántos, uno, varios)."""
+    guardadas (`album`, `artist` y sus `videoIds`), una playlist de YouTube (`q`, el link) o las
+    guardadas de un género (`genre`, su clave).
+    Devuelve {title, kind, songs, afuera}: `kind` es "album", "lista", "youtube" o "genero"; `afuera`,
+    los que no vinieron, como (cuántos, uno, varios)."""
     de = body.get("from")
+    if de == "genre":
+        # No tiene un orden: van mezcladas (y, si son muchas, las que entran: cada vez, otras).
+        g = genero_guardado(sala.id, str(body.get("genre", ""))[:80])
+        temas = g["songs"]
+        random.shuffle(temas)
+        maximo = f"del máximo de {MAX_PLAYLIST} por vez"
+        return {"title": g["genre"] or "Sin género", "kind": "genero", "songs": temas[:MAX_PLAYLIST],
+                "afuera": [(len(temas) - MAX_PLAYLIST, f"pasa {maximo}", f"pasan {maximo}")]}
     if de == "list":
         titulo, temas = listas.temas(sala.id, str(body.get("list", "")))
         return {"title": titulo, "kind": "lista", "songs": temas, "afuera": []}
@@ -1003,7 +1044,7 @@ def cargar_entera(sala, body):
     Devuelve un resumen para mostrar."""
     col = coleccion(sala, body)
     ahora = body.get("at") == "now"
-    name = str(body.get("by", "")).strip()[:30] or ("Álbum" if col["kind"] == "album" else "Playlist")
+    name = str(body.get("by", "")).strip()[:30] or {"album": "Álbum", "genero": "Género"}.get(col["kind"], "Playlist")
     # (para la cola: cada tema dice de dónde vino, y con el PIN se saca entera de un toque)
     lista = {"id": uuid.uuid4().hex[:10], "title": col["title"], "kind": col["kind"]}
     vivo = largas = repetidas = 0
@@ -1852,6 +1893,7 @@ class Director:
         """Quedó guardada una canción: que las páginas actualicen la cuenta y la lista."""
         with lock:
             bump()
+        averiguar_generos()   # (el de su artista, si todavía no se sabe)
 
     def al_reiniciar(self):
         """mpv se cayó y se levantó de nuevo: lo que sonaba se perdió.
@@ -2524,13 +2566,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not director:
                     raise ApiError(409, "Las canciones guardadas sólo existen en modo mpv")
                 desde, n = qs.get("desde", ["0"])[0], qs.get("n", ["30"])[0]
-                ver = (director.descargas.albumes if qs.get("vista", [""])[0] == "albumes"
-                       else director.descargas.listado)
-                return self.send_json(ver(
-                    qs.get("q", [""])[0][:100],
-                    int(desde) if desde.isdigit() else 0,
-                    min(500, int(n)) if n.isdigit() else 30,
-                    sala=sala_de(qs.get("sala", [""])[0]).id))
+                desde, n = int(desde) if desde.isdigit() else 0, min(500, int(n)) if n.isdigit() else 30
+                vista, sid = qs.get("vista", [""])[0], sala_de(qs.get("sala", [""])[0]).id
+                if vista == "generos":   # los géneros, con cuántas tiene cada uno
+                    de, faltan = _generos_de(sid)
+                    return self.send_json(dict(director.descargas.generos(de, desde, n, sala=sid), pending=faltan))
+                if vista == "genero":    # las de uno
+                    return self.send_json(genero_guardado(sid, qs.get("genero", [""])[0][:80]))
+                ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
+                return self.send_json(ver(qs.get("q", [""])[0][:100], desde, n, sala=sid))
             if u.path == "/api/stats":   # el recap
                 return self.send_json(recap(qs.get("sala", [""])[0], qs.get("periodo", [""])[0][:10],
                                             qs.get("persona", [""])[0]))
@@ -2727,6 +2771,7 @@ def main():
         except ErrorMpv as e:
             sys.exit(f"Error: {e}")
         director.arrancar()
+        averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
         # Al prender la Raspberry o reiniciar el servicio (p. ej. al actualizar), si nadie pide
         # nada: 🔀 y que suene sola. En el reinicio diario de las 6, no: la oficina está vacía.
         retomar = seguia and prendida

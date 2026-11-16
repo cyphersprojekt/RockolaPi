@@ -45,8 +45,9 @@
 
   /* el selector de salas: un botón que despliega la lista, como un panel más */
   .selector { position: relative; }
-  #salaBtn { display: flex; align-items: center; gap: 1ch; max-width: 24ch; }
-  #salaBtn .nombre { overflow: hidden; text-overflow: ellipsis; }
+  /* de ancho fijo, se llame como se llame la sala (si no entra, "…"): así la barra no se mueve */
+  #salaBtn { display: flex; align-items: center; gap: 1ch; width: 22ch; }
+  #salaBtn .nombre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   #salaBtn .flechita { color: var(--dim); }
   #salaBtn[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
   .menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: calc(100vw - 32px);
@@ -155,8 +156,10 @@
 </style>
 </head>
 <body>
+<!-- La misma barra que en la página de pedidos, con todo en el mismo lugar: así, al pasar de una
+     sala de música a una de tv, no salta. Lo que acá no va (📻 radio, 📊 recap) queda apagado. -->
 <div class="top">
-  <span class="logo">♫ ROCKOLA · TV</span>
+  <span class="logo">♫ ROCKOLA</span>
   <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
@@ -165,8 +168,12 @@
       <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
     </div>
   </div>
+  <button id="radioBtn" type="button" disabled hidden
+          title="La radio es de las salas de música. Acá el video se ve (y se escucha) con ▶ mirar acá">📻<span class="largo"> radio</span></button>
+  <button id="recapBtn" type="button" disabled
+          title="El recap es de la música: está en las salas de música">📊<span class="largo"> recap</span></button>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
-  <button id="lockBtn" type="button" hidden title="Con el PIN: quitar o adelantar videos de otros, y borrar la sala">🔒 controlar</button>
+  <button id="lockBtn" type="button" title="Con el PIN: quitar o adelantar videos de otros, y borrar la sala">🔒 controlar</button>
 </div>
 <main>
   <div id="pinPanel" class="panel" hidden>
@@ -471,7 +478,6 @@ function fila(v, { pos, imagen = false, extra, action } = {}) {
 function render(s) {
   pintarSalas(s);
   document.title = `📺 ${s.room.name} · Rockola`;
-  $("#lockBtn").hidden = false;
   $("#pinTexto").textContent = `PIN de la sala ${s.room.name} (o el de la rockola):`;
   $("#videoTitulo").textContent = "TELE" + (s.viewers ? ` · 👀 ${s.viewers} ${s.viewers === 1 ? "mira" : "miran"}` : "");
   pintarTapa();
@@ -869,11 +875,13 @@ document.addEventListener("visibilitychange", () => {
 let firmaSalas = "";
 const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
 function pintarSalas(s) {
+  $("#radioBtn").hidden = s.mode !== "mpv";   // (como en la página de pedidos: en modo navegador no hay radio)
   const firma = JSON.stringify([s.rooms, s.tvs]);
   if (firma === firmaSalas) return;
   firmaSalas = firma;
   const esta = s.tvs.find(r => r.id === sala);
   $("#salaActual").textContent = esta ? `📺 ${esta.name}` : "📺 elegir…";
+  $("#salaActual").title = esta?.name || "";   // (entero, por si no entra)
   salaBtn.setAttribute("aria-label", `Sala: ${esta?.name || "ninguna"}`);
   const opcion = (valor, nombre, sub, elegida = false) => el("li", {
     role: "option", tabindex: -1, "aria-selected": String(elegida), "data-valor": valor,
@@ -958,7 +966,7 @@ $("#borrarSalaBtn").onclick = async () => {
   try {
     await api("/api/tv/room-delete", {});
     store.del("tv");
-    ir("/tv", [`Borré la sala de tv ${name}`, false]);
+    ir("/", [`Borré la sala de tv ${name}`, false]);   // de vuelta a la música (a la sala en la que estaba)
   } catch (err) {
     borrando = false;
     toast(err.message, true);
@@ -1087,7 +1095,7 @@ async function loop() {
       recibir(s);
     } catch (err) {
       if (err.status === 404 && borrando) return;   // la está borrando esta página: ya se va
-      if (err.status === 404) { store.del("tv"); return ir("/tv", ["Esa sala de tv ya no existe", true]); }
+      if (err.status === 404) { store.del("tv"); return ir("/", ["Esa sala de tv ya no existe: te llevé a la música", true]); }
       $("#now").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));
       await new Promise(r => setTimeout(r, 3000));
       version = null;
@@ -1098,6 +1106,7 @@ async function loop() {
 // Sin sala (/tv a secas): cuáles hay, para entrar a una o crear otra. Si hay una sola, a esa.
 async function elegir() {
   $("#columnas").hidden = true; $("#elegir").hidden = false;
+  $("#lockBtn").disabled = true;   // (sin sala no hay qué controlar)
   for (let primera = true; ; primera = false) {
     try {
       const r = await api("/api/tv/rooms");

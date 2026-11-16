@@ -563,6 +563,48 @@ class Descargas:
                         _para_buscar(_primer_artista(g["datos"].get("artist")))) == k
                        for _, g in self._de(sala))
 
+    def artistas(self, sala=None):
+        """Los artistas de las guardadas (de `sala`), como vienen en cada tema («Bizarrap, Quevedo»)."""
+        with self.lock:
+            return {str(g["datos"].get("artist") or "") for _, g in self._de(sala)}
+
+    def _por_genero(self, de, sala):
+        """Las guardadas (de `sala`) agrupadas por género: {clave: grupo, con sus temas}. `de` dice
+        el género de cada artista ({artista: género}, como viene en el tema: lo sabe
+        Estadisticas.generos_de); las de uno que no está ahí quedan juntas, sin género (""). La
+        tapa de cada grupo es la de la que sonó más recién. Con el lock tomado."""
+        grupos = {}
+        for vid, g in sorted(self._de(sala), key=lambda kv: kv[1]["usada"], reverse=True):
+            d = g["datos"]
+            genero = de.get(str(d.get("artist") or ""), "")
+            k = _para_buscar(genero)
+            gr = grupos.setdefault(k, {"key": k, "genre": genero, "thumb": "", "duration": 0, "songs": []})
+            gr["songs"].append(dict(d, videoId=vid))
+            gr["duration"] += int(d.get("duration") or 0)
+            gr["thumb"] = gr["thumb"] or d.get("thumb") or ""
+        return grupos
+
+    def generos(self, de, desde=0, cuantos=20, sala=None):
+        """Una página de los géneros de las guardadas (de `sala`), en orden alfabético, con cuántos
+        temas tiene cada uno (los temas, con `del_genero`). Las que no tienen género van al
+        final. `de`: ver `_por_genero`."""
+        with self.lock:
+            grupos, version = self._por_genero(de, sala), self.version
+        orden = sorted(grupos.values(), key=lambda g: (not g["genre"], g["key"]))
+        pagina = [dict({k: g[k] for k in ("key", "genre", "thumb", "duration")}, count=len(g["songs"]))
+                  for g in orden[desde:desde + cuantos]]
+        return {"total": len(orden), "songs": sum(len(g["songs"]) for g in orden), "genres": pagina, "v": version}
+
+    def del_genero(self, de, clave, sala=None):
+        """Las guardadas (de `sala`) de un género (`clave`: su "key" en `generos`), por artista y
+        álbum, o None si no hay ninguna."""
+        with self.lock:
+            g, version = self._por_genero(de, sala).get(clave), self.version
+        if not g:
+            return None
+        g["songs"].sort(key=lambda s: tuple(_para_buscar(s.get(k)) for k in ("artist", "album", "title")))
+        return dict(g, count=len(g["songs"]), v=version)
+
     def sin_album(self):
         """Las guardadas por una versión que no anotaba el álbum."""
         with self.lock:

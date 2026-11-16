@@ -6,7 +6,8 @@ anota cuánto sonó de verdad (no lo que dura el tema), quién la pidió, de dó
 una playlist o 🔀 al azar) y en qué sala.
 
 YouTube no dice de qué género es un tema: se le pregunta a la API de búsqueda de iTunes (pública,
-sin cuenta ni clave) por el artista, de a uno y sin apuro, y queda anotado en la misma base.
+sin cuenta ni clave) por el artista, de a uno y sin apuro, y queda anotado en la misma base. Con
+eso se arman los géneros del recap y los de las guardadas (🎸 por género: ver `generos_de`).
 """
 import json
 import os
@@ -29,6 +30,7 @@ ITUNES_PAIS = "AR"     # la tienda de iTunes que se consulta: así los géneros 
 PAUSA_GENEROS = 4      # segundos entre preguntas a iTunes (pide no pasar de unas 20 por minuto)
 REINTENTAR = 300       # si iTunes no contesta, se vuelve a probar a los 5 minutos
 REPREGUNTAR = 30 * 86400   # a un artista que iTunes no conocía, se le vuelve a preguntar al mes
+MAX_PEDIDOS = 5000     # artistas de las guardadas esperando a que se le pregunte su género a iTunes
 UA = {"User-Agent": "Rockola/2.0 (rockola de oficina)"}
 
 ESQUEMA = """
@@ -143,6 +145,7 @@ class Estadisticas:
         self.db = self._abrir()
         self._cerrando = threading.Event()
         self._artistas_nuevos = threading.Event()
+        self._pedidos = {}             # clave -> artista: los que pidió generos_de y falta averiguar
         self._escritor = threading.Thread(target=self._bucle_escribir, daemon=True, name="estadisticas")
         self._escritor.start()
         if generos:
@@ -274,6 +277,7 @@ class Estadisticas:
                 try:
                     with self.lock, self.db:
                         self.db.execute("INSERT OR REPLACE INTO generos VALUES (?, ?, ?)", (clave, genero, time.time()))
+                        self._pedidos.pop(clave, None)
                 except sqlite3.Error:
                     return   # la cerraron
                 self._cerrando.wait(PAUSA_GENEROS)
@@ -282,7 +286,8 @@ class Estadisticas:
                     self._artistas_nuevos.set()
 
     def _sin_genero(self, cuantos=50):
-        """[(clave, artista)] de los que falta averiguar el género, los más escuchados primero."""
+        """[(clave, artista)] de los que falta averiguar el género: los más escuchados primero, y
+        después los que pidió `generos_de` (los de las guardadas que todavía no sonaron)."""
         with self.lock:
             filas = self.db.execute("""
                 SELECT e.clave_artista, e.artista, MAX(e.cuando) FROM escuchas e
@@ -290,7 +295,33 @@ class Estadisticas:
                 WHERE e.clave_artista != '' AND (g.genero IS NULL OR (g.genero = '' AND g.consultado < ?))
                 GROUP BY e.clave_artista ORDER BY COUNT(*) DESC LIMIT ?""",
                 (time.time() - REPREGUNTAR, cuantos)).fetchall()
-        return [(clave, _primer_artista(artista)) for clave, artista, _ in filas]
+            pedidos = list(self._pedidos.items())
+        faltan = [(clave, _primer_artista(artista)) for clave, artista, _ in filas]
+        ya = {clave for clave, _ in faltan}
+        return faltan + [p for p in pedidos if p[0] not in ya][:cuantos - len(faltan)]
+
+    def generos_de(self, artistas):
+        """El género de cada uno de `artistas` (como vienen en un tema: «Bizarrap, Quevedo»; vale
+        el del primero), para agrupar las guardadas: ({artista: género}, cuántos falta averiguar).
+        En el dict están sólo los que se sabe. Los que nunca se le preguntaron a iTunes quedan
+        anotados para preguntárselos, aunque no hayan sonado nunca (lo demás de las estadísticas
+        sólo sabe de lo que sonó)."""
+        claves = {a: _junto(_primer_artista(a)) for a in set(artistas)}
+        viejo = time.time() - REPREGUNTAR
+        with self.lock:
+            sabidos = {c: (g, cuando) for c, g, cuando in
+                       self.db.execute("SELECT clave_artista, genero, consultado FROM generos")}
+            # Falta: no se preguntó nunca, o iTunes no lo conocía y ya pasó un mes.
+            faltan = {c: _primer_artista(a) for a, c in claves.items()
+                      if c and (c not in sabidos or (not sabidos[c][0] and sabidos[c][1] < viejo))}
+            nuevos = faltan.keys() - self._pedidos.keys()
+            if len(self._pedidos) + len(nuevos) > MAX_PEDIDOS:
+                self._pedidos.clear()
+            self._pedidos.update(faltan)
+        if nuevos:
+            self._artistas_nuevos.set()
+        return ({a: sabidos[c][0] for a, c in claves.items() if c in sabidos and sabidos[c][0]},
+                sum(c not in sabidos for c in faltan))
 
     # --- leer
 

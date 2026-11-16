@@ -21,13 +21,14 @@ muestra qué está sonando, quién lo pidió y qué viene después.
   las suyas.
 - **Canciones guardadas y modo aleatorio:** lo que se baja queda guardado en la tarjeta (hasta 16 GB,
   se puede cambiar); si lo vuelven a pedir, suena al instante. En la página se ven todas, por
-  álbum o las de recién, con su tapa, y se pueden pedir de ahí. Con **🔀 al azar**, cuando la cola se vacía suenan canciones
+  álbum, por género o las de recién, con su tapa, y se pueden pedir de ahí. Con **🔀 al azar**, cuando la cola se vacía suenan canciones
   guardadas al azar.
 - **♫ Playlists propias:** cualquiera arma las suyas en la rockola (quedan guardadas, por sala) y
   les suma temas con **♫+** desde la búsqueda, los álbumes, las guardadas, la cola o lo que suena.
-- **Álbumes y playlists enteros:** con el PIN, **▶ reproducir** (ya, en orden) o **+ a la cola**
+- **Álbumes, playlists y géneros enteros:** con el PIN, **▶ reproducir** (ya, en orden) o **+ a la cola**
   un álbum de YouTube Music, uno de las guardadas, una playlist propia o una de YouTube (pegando el
-  link; también mixes). Se puede sacar entero de la cola de un toque.
+  link; también mixes), o todo lo guardado de un género (mezclado). Se puede sacar entero de la
+  cola de un toque.
 - **📻 Radio:** cada uno escucha en su compu, con auriculares, lo que suena en la rockola: el mismo
   tema en el mismo segundo, con su propio volumen. Anda aunque el parlante esté apagado o en 0.
 - **🚪 Salas:** la principal suena en el parlante de la Raspberry; las otras (las crea cualquiera
@@ -134,6 +135,12 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   temas) o **🕘 recientes**, separadas en páginas (**♫ playlists**, al lado, muestra las playlists). Con el PIN, **🗑** borra una a mano: sale de
   las guardadas de la sala y, si ninguna otra sala la tiene, se borra el archivo (si está
   sonando o en la cola, cuando termine). Si vuelve a sonar, se vuelve a guardar.
+- **🎸 Por género:** otra forma de ver las guardadas. Tocás un género y ves sus temas (por artista),
+  para pedirlos de a uno o, con el PIN, **▶ reproducir** o **+ a la cola** el género entero:
+  van mezclados, y si son más de 200, 200 al azar (cada vez, otros). El género es el del artista
+  (ver **Géneros**, abajo): se va averiguando de a un artista, así que al principio muchas están
+  en **Sin género** (ahí dice cuántos artistas faltan) y la lista se acomoda sola. En «Sin género»
+  quedan los videos sueltos y los artistas que iTunes no conoce.
 - **📻 Radio, con auriculares:** arriba a la derecha, **📻 radio** hace sonar en ese dispositivo lo
   que suena en la rockola, a la par (la letra queda en sincro): pausa, ⏭ y ⏮ los sigue sola. Cada uno
   con su volumen, así que si en la oficina prefieren silencio, con el PIN bajen la rockola a 0 y la
@@ -351,7 +358,10 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   iTunes](https://performance-partners.apple.com/search-api) (pública, sin cuenta ni clave) por el
   primer artista de cada tema, de a uno cada 4 segundos, y queda anotado. Sólo se usa si el nombre
   coincide, así un video subido por cualquiera no se lleva un género inventado; esos quedan «sin
-  género» (se vuelve a preguntar al mes). Se le manda el nombre del artista, nada más.
+  género» (se vuelve a preguntar al mes). Se le manda el nombre del artista, nada más. Se
+  pregunta por los artistas de lo que sonó (para el recap) y por los de las guardadas, aunque no
+  hayan sonado nunca (para verlas **🎸 por género**): primero los más escuchados. Con muchas
+  guardadas, la primera vez tarda (unos 15 artistas por minuto).
 - **Tiempo real con long-poll:** las páginas, la TUI y los botones se enteran de cada cambio al
   instante, sin websockets ni dependencias.
 - **Permisos:** cualquiera agrega temas, quita los suyos, chatea, crea salas y arma ♫ playlists
