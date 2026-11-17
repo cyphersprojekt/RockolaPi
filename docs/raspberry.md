@@ -174,7 +174,11 @@ Otros comandos:
 
   El celular recuerda el PIN. Para salir, tocá **🔓 Controlando**.
 - **Pantalla de la Pi:** sólo muestra. Si algún día le conectás un teclado, las teclas de la TUI
-  también funcionan.
+  también funcionan. Arriba, al lado de **♫ ROCKOLA**, un led dice si la Pi tiene internet: verde,
+  sí; rojo (y «sin internet»), no. Sin internet la música sigue con lo guardado, pero no se puede
+  buscar ni bajar nada nuevo hasta que vuelva. A la derecha, el clima (si no es el de tu ciudad,
+  poné `clima = "Tu ciudad"` en `rockola.toml`). Cada 15 segundos cambia sola entre lo que suena
+  y las estadísticas (lo más escuchado); el QR está siempre.
 - **Otra pantalla (una tele):** `http://<ip-de-la-pi>:8000/pantalla` en cualquier navegador.
 - **Con auriculares:** en la página, **📻 radio** (arriba a la derecha) hace sonar en esa compu lo
   mismo que la rockola, a la par. Si prefieren silencio en la oficina, bajen el volumen de la

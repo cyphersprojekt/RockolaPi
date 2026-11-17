@@ -29,6 +29,12 @@ modo = ""
 # Ponela si aparece la de otra red (VPN, cable vs. wifi, etc.).
 ip = ""
 
+# El clima que se ve en la barra de arriba (en la página y en la pantalla). Vacío = el de donde
+# está la rockola, según su IP pública: suele acertarle a la ciudad, pero no siempre. Si le erra,
+# poné la tuya ("Rosario", "Córdoba, Argentina") o el punto justo ("-32.95, -60.64").
+# false = no mostrarlo (y no preguntarle nada a nadie).
+clima = ""
+
 # Canciones guardadas (modo mpv). Lo que suena queda guardado: si lo vuelven a pedir suena
 # al instante, y con el modo aleatorio (🔀) suenan al azar cuando la cola se vacía.
 # Es el espacio máximo, en GB, para todas las salas juntas: al pasarlo se borran las que hace

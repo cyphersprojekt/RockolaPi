@@ -62,6 +62,8 @@ GUARDAR_GB = 16           # espacio para las canciones guardadas (0 = no guardar
 CARPETA = ""              # dónde se guardan ("" = ~/.cache/rockola)
 PREDESCARGAR = 0          # canciones de la cola que se bajan por adelantado (0 = todas)
 AZAR_AL_PRENDER = True    # al prender la Raspberry: 🔀 prendido y a sonar (con el parlante listo)
+CLIMA = ""                # el clima de la barra de arriba: "" = el de donde está la rockola (según su
+                          # IP), una ciudad ("Rosario") o False para no mostrarlo
 CONFIG = Path(__file__).parent / "rockola.toml"
 
 STATIC = Path(__file__).parent / "static"
@@ -88,6 +90,7 @@ state = {
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
     "sin_red": False,  # no hay internet: las de "saving" esperan a que vuelva (ver bucle_guardar)
     "online": None,    # si hay internet (ver bucle_internet): el led de las páginas y de la pantalla. None: todavía no se sabe
+    "weather": None,   # el clima (ver bucle_clima): { temp, text, icon, symbol, city }, o None si no se sabe
 }
 MAX_GUARDANDO = 40     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
 PRINCIPAL = "principal"
@@ -143,7 +146,7 @@ _local = threading.local()
 def cargar_config(ruta):
     """Lee rockola.toml (si existe) y pisa los valores por defecto."""
     global PORT, MAX_PER_PERSON, MAX_DURATION, VOLUME, NORMALIZAR, MPV_ARGS, PIN, IP_FIJA, MODO
-    global GUARDAR_GB, CARPETA, PREDESCARGAR, AZAR_AL_PRENDER
+    global GUARDAR_GB, CARPETA, PREDESCARGAR, AZAR_AL_PRENDER, CLIMA
     if not ruta.exists():
         return
     with open(ruta, "rb") as f:
@@ -161,6 +164,8 @@ def cargar_config(ruta):
     CARPETA = str(c.get("carpeta", CARPETA)).strip()
     PREDESCARGAR = max(0, int(c.get("predescargar", PREDESCARGAR)))
     AZAR_AL_PRENDER = bool(c.get("azar_al_prender", AZAR_AL_PRENDER))
+    clima = c.get("clima", CLIMA)
+    CLIMA = False if clima is False else str(clima).strip()
 
 
 def carpeta():
@@ -1291,6 +1296,7 @@ def public_state(sala, client=None, since=None, radio=False):
             "savingOthers": sum(not g["error"] and sala.id not in g["salas"] for g in state["saving"]),
             "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
             "online": state["online"],           # si la rockola tiene internet (el led)
+            "weather": state["weather"],         # el clima, para la barra de arriba
         }
 
 
@@ -1394,6 +1400,90 @@ def bucle_internet(cada=15, cortado=5):
             elif antes is False:
                 print("  ✓ volvió internet", flush=True)
         time.sleep(cada if hay else cortado)
+
+
+# ------------------------------------------------------------------ el clima
+# Para la barra de arriba de las páginas y de la pantalla. Lo da Open-Meteo (open-meteo.com: sin
+# cuenta ni clave). Se le manda dónde: la ciudad de `clima` en rockola.toml o, sin nada, la que
+# sale de la IP pública de la rockola (se le pregunta a ipwho.is o, si no contesta, a GeoJS).
+
+# Los códigos del tiempo son los de la OMM (los que da Open-Meteo), de menor a mayor: hasta cuál,
+# cómo se dice, el emoji (para las páginas) y un símbolo de un solo color y una celda de ancho
+# (para la terminal, donde los emojis con variantes corren lo que sigue).
+CLIMAS = (
+    (0, "despejado", "☀️", "☀"), (1, "casi despejado", "🌤️", "☀"), (2, "algo nublado", "⛅", "☁"),
+    (3, "nublado", "☁️", "☁"), (48, "niebla", "🌫️", "≡"), (57, "llovizna", "🌦️", "☂"),
+    (67, "lluvia", "🌧️", "☂"), (77, "nieve", "🌨️", "❄"), (82, "chaparrones", "🌧️", "☂"),
+    (86, "nevadas", "🌨️", "❄"), (99, "tormenta", "⛈️", "☈"),
+)
+UA = {"User-Agent": "Rockola/2.0 (rockola de oficina)"}
+
+
+def _json_de(url, timeout=10):
+    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def ubicar_clima():
+    """De dónde es el clima: (latitud, longitud, nombre del lugar). Con `clima = "Rosario"` en
+    rockola.toml, esa ciudad (o "-32.95, -60.64": el punto justo); sin nada, donde está la rockola
+    según su IP pública (da la ciudad, más o menos: si le erra, poné la tuya)."""
+    if CLIMA:
+        punto = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)", CLIMA)
+        if punto:
+            return float(punto[1]), float(punto[2]), ""
+        hay = _json_de("https://geocoding-api.open-meteo.com/v1/search?"
+                       + urlencode({"name": CLIMA, "count": 1, "language": "es"})).get("results")
+        if not hay:
+            raise ValueError(f"no encontré la ciudad «{CLIMA}» (probá con otro nombre, o con «latitud, longitud»)")
+        return float(hay[0]["latitude"]), float(hay[0]["longitude"]), str(hay[0].get("name") or CLIMA)
+    error = None
+    for url in ("https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json"):
+        try:
+            d = _json_de(url)
+            return float(d["latitude"]), float(d["longitude"]), str(d.get("city") or d.get("region") or "")
+        except Exception as e:   # no contestó, o contestó otra cosa: el otro
+            error = e
+    raise error
+
+
+def leer_clima(lat, lon):
+    """El tiempo de ahora en ese lugar: la temperatura (°C) y cómo está (texto, emoji y símbolo)."""
+    q = urlencode({"latitude": round(lat, 2), "longitude": round(lon, 2), "current": "temperature_2m,weather_code,is_day"})
+    ahora = _json_de(f"https://api.open-meteo.com/v1/forecast?{q}")["current"]
+    codigo = int(ahora["weather_code"])
+    texto, emoji, simbolo = next((c[1:] for c in CLIMAS if codigo <= c[0]), CLIMAS[-1][1:])
+    if not ahora.get("is_day") and codigo <= 1:   # de noche, despejado: la luna
+        emoji, simbolo = "🌙", "☾"
+    return {"temp": round(float(ahora["temperature_2m"])), "text": texto, "icon": emoji, "symbol": simbolo}
+
+
+def bucle_clima(cada=600, reintento=60, vence=2 * 3600):
+    """Mira el clima cada `cada` segundos y lo deja en state["weather"]: va en la barra de arriba
+    de las páginas y de la pantalla. Si no se puede (no hay internet, o no contestan), queda el
+    último hasta que tenga `vence` segundos; después, nada."""
+    donde, leido, avisado = None, 0, False
+    while True:
+        nuevo = None   # (None: esta vez no se pudo)
+        try:
+            if donde is None:
+                donde = ubicar_clima()
+                print(f"  ⛅ El clima: el de {donde[2] or 'ese punto'}"
+                      + ('' if CLIMA else ' (por la IP; se cambia con clima = "…" en rockola.toml)'), flush=True)
+            nuevo = dict(leer_clima(*donde[:2]), city=donde[2])
+            leido, avisado = time.time(), False
+        except Exception as e:   # sin internet, un servicio caído, una respuesta rara: se prueba de nuevo
+            if not avisado and state["online"] is not False:
+                print(f"  ⚠ no pude ver el clima: {e}", flush=True)
+            avisado = True
+        espera = cada if nuevo else reintento
+        with lock:
+            if nuevo is None and time.time() - leido < vence:
+                nuevo = state["weather"]
+            if nuevo != state["weather"]:
+                state["weather"] = nuevo
+                bump()
+        time.sleep(espera)
 
 
 def _se_guarda():
@@ -1932,7 +2022,8 @@ def estado_tv(sala, client="", since=None, viendo=False):
     """El estado de una sala de tv para su página, con las salas de música (para el menú)."""
     e = teles.estado(sala, client, since, viendo)
     with lock:
-        return dict(e, rooms=[s.publica() for s in salas.values()], mode=state["mode"], online=state["online"])
+        return dict(e, rooms=[s.publica() for s in salas.values()], mode=state["mode"], online=state["online"],
+                    weather=state["weather"])
 
 
 # ------------------------------------------------------------- estadísticas
@@ -2674,7 +2765,7 @@ class Handler(BaseHTTPRequestHandler):
                 with lock:
                     rooms = [s.publica() for s in salas.values()]
                 return self.send_json({"tvs": teles.publicas(), "rooms": rooms, "mode": state["mode"],
-                                       "online": state["online"]})
+                                       "online": state["online"], "weather": state["weather"]})
             if u.path == "/api/tv/search":
                 q = qs.get("q", [""])[0].strip()[:200]
                 return self.send_json(buscar_videos(q) if q else [])
@@ -2947,6 +3038,8 @@ def main():
         retomar_colas()   # (lo retoma el reproductor web, que arranca donde dice el progreso)
     threading.Thread(target=bucle_colas, daemon=True, name="colas").start()
     threading.Thread(target=bucle_internet, daemon=True, name="internet").start()
+    if CLIMA is not False:
+        threading.Thread(target=bucle_clima, daemon=True, name="clima").start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
 

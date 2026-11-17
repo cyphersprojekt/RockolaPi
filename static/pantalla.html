@@ -31,7 +31,9 @@
   @keyframes titilar { 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
   .bar-top .url { font-weight: 700; text-decoration: underline; }
-  .bar-top .clock { margin-left: auto; color: var(--dim); }
+  /* a la derecha, el clima y la hora (lo que mida el clima no mueve lo de la izquierda) */
+  .bar-top .clima { margin-left: auto; color: var(--dim); }
+  .bar-top .clock { color: var(--dim); }
   .dim { color: var(--dim); }
 
   /* Paneles con título incrustado en el borde, estilo TUI */
@@ -92,6 +94,7 @@
   <div class="bar-top">
     <span class="marca"><span class="logo">♫ ROCKOLA</span><span class="led" id="led" role="img" aria-label="Conectando…"></span></span>
     <span><span class="dim">pedí tu tema en</span> <span class="url" id="url">…</span></span>
+    <span class="clima" id="clima"></span>
     <span class="clock" id="clock"></span>
   </div>
 
@@ -261,6 +264,8 @@ fetch("/api/info").then(r => r.json()).then(i => { $("#url").textContent = i.url
       state = await r.json(); receivedAt = performance.now(); version = state.version;
       $("#conn").hidden = true;
       pintarLed(state.online ?? null);
+      // El clima, al lado de la hora (acá no hay cartelitos al pasar el mouse: va con palabras).
+      $("#clima").textContent = state.weather ? `${state.weather.icon} ${state.weather.temp}° ${state.weather.text}` : "";
       render();
     } catch {
       $("#conn").hidden = false; version = null;

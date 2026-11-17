@@ -8,9 +8,22 @@ muestra qué está sonando, quién lo pidió y qué viene después.
 
 ## Cómo se ve
 
-| ![Pedir](docs/img/web.png) | ![Controles con PIN](docs/img/web_control.png) |
+![La página de la rockola](docs/img/web.png)
+
+**La página**, acá con el PIN puesto (por eso los controles): la letra en sincro y el chat, lo que
+suena y la cola, el buscador y las canciones guardadas. Arriba, el led de internet, la sala,
+📻 radio, 📊 recap y ⬇ descargas.
+
+| ![Descargas](docs/img/descargas.png) | ![Sala de tv](docs/img/salatv.png) |
 |:---:|:---:|
-| **Pedir un tema** via web | **Con el PIN:** pausa, volumen, anterior/siguiente y la cola |
+| **⬇ Descargas:** lo que espera para bajarse, en el orden que quieras | **📺 Sala de tv:** videos de YouTube entre varios, a la par |
+| ![Recap](docs/img/recap1.png) | ![Recap, más abajo](docs/img/recap2.png) |
+| **📊 Recap:** cuánto sonó y el top de canciones, artistas y géneros | Quién pide más, a qué hora y qué día suena |
+
+![Las estadísticas, en la pantalla](docs/img/tui_recap.png)
+
+**En la pantalla de la Raspberry**, cada 15 segundos el reproductor le deja el lugar a lo más
+escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que suena están siempre.
 
 
 ## Qué tiene
@@ -19,16 +32,20 @@ muestra qué está sonando, quién lo pidió y qué viene después.
   pegar un link de YouTube. El QR de la pantalla lleva directo a la página.
 - **Cola compartida en tiempo real**, con límite de canciones por persona. Cada uno puede quitar
   las suyas.
+- **Letra en sincro:** la de la canción que suena, que se va marcando mientras se canta.
 - **Canciones guardadas y modo aleatorio:** lo que se baja queda guardado en la tarjeta (hasta 16 GB,
   se puede cambiar); si lo vuelven a pedir, suena al instante. En la página se ven todas, por
-  álbum, por artista, por género o las de recién, con su tapa, y se pueden pedir de ahí. Con **🔀 al azar**, cuando la cola se vacía suenan canciones
-  guardadas al azar.
+  álbum, por artista, por género o las de recién, con su tapa, y se pueden pedir de ahí. Con
+  **🔀 al azar**, cuando la cola se vacía suenan canciones guardadas al azar.
+- **⬇ Guardar sin pedir:** una canción o un álbum entero se bajan para que queden entre las
+  guardadas, sin pasar por la cola. Lo que espera se ve en **⬇ descargas**: ahí se cancela y, con
+  el PIN, se cambia el orden en que se bajan.
 - **♫ Playlists propias:** cualquiera arma las suyas en la rockola (quedan guardadas, por sala) y
   les suma temas con **♫+** desde la búsqueda, los álbumes, las guardadas, la cola o lo que suena.
-- **Álbumes, playlists, artistas y géneros enteros:** con el PIN, **▶ reproducir** (ya, en orden) o **+ a la cola**
-  un álbum de YouTube Music, uno de las guardadas, una playlist propia o una de YouTube (pegando el
-  link; también mixes), o todo lo guardado de un artista o de un género (mezclado). Se puede sacar
-  entero de la cola de un toque.
+- **Álbumes, playlists, artistas y géneros enteros:** con el PIN, **▶ reproducir** (ya, en orden)
+  o **+ a la cola** un álbum de YouTube Music, uno de las guardadas, una playlist propia o una de
+  YouTube (pegando el link; también mixes), o todo lo guardado de un artista o de un género
+  (mezclado). Se puede sacar entero de la cola de un toque.
 - **📻 Radio:** cada uno escucha en su compu, con auriculares, lo que suena en la rockola: el mismo
   tema en el mismo segundo, con su propio volumen. Anda aunque el parlante esté apagado o en 0.
 - **🚪 Salas:** la principal suena en el parlante de la Raspberry; las otras (las crea cualquiera
@@ -44,8 +61,10 @@ muestra qué está sonando, quién lo pidió y qué viene después.
   Queda en una base que sobrevive a los reinicios.
 - **Control con PIN desde la web:** pausa, volumen, anterior/siguiente, reordenar, mezclar la cola y
   quitar cualquier canción. El resto ve la página normal.
-- **Pantalla tipo terminal:** una TUI con la tapa del disco pixelada, la cola y el QR. Hay una versión
-  web con la misma estética (`/pantalla`) para cualquier tele o monitor.
+- **Pantalla tipo terminal:** una TUI con la tapa del disco pixelada, la cola y el QR, que cada
+  tanto muestra sola las estadísticas. Hay una versión web con la misma estética (`/pantalla`) para
+  cualquier tele o monitor.
+- **El clima** de tu ciudad, en la barra de arriba de la página y de la pantalla.
 - **Botones físicos** (volumen, anterior, play/pausa, siguiente) conectados al GPIO **sin soldar**.
   Doble toque en − / + también es anterior / siguiente.
 - **Raspberry Pi lista para usar:** un instalador, audio por jack, HDMI, USB o **parlante Bluetooth**
@@ -55,7 +74,9 @@ muestra qué está sonando, quién lo pidió y qué viene después.
 - **Robusta:** mientras suena una canción, baja de a una las que siguen en la cola (sin silencios
   entre temas, y ⏭ es instantáneo) y se recupera sola si el reproductor se cae o se cuelga. **Si se
   reinicia** (p. ej. para actualizarla o aplicar un cambio), **sigue donde estaba:** el mismo tema,
-  en el mismo segundo, con la cola de cada sala.
+  en el mismo segundo, con la cola de cada sala y lo que faltaba bajar. **Si se corta internet,
+  la música sigue** con lo guardado: un led, en la página y en la pantalla, avisa que no hay, y
+  cuando vuelve retoma las descargas.
 
 | | |
 |:---:|:---:|
@@ -134,19 +155,21 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   **▶ reproducir** (con el PIN): el disco entero, en el orden de YouTube Music, aunque falten temas
   por bajar (si YouTube no lo encuentra, suenan los guardados).
 - **♫ Armar una playlist:** en el panel de abajo a la derecha (abajo de todo en el celular),
-  **♫ playlists** (en el desplegable **ver:**) y **+ nueva playlist**. Queda elegida para sumarle temas: aparece **♫+** al lado
-  de cada tema (en la búsqueda, en un álbum abierto, en las guardadas, en lo que suena, en la cola
-  y en lo que sonó) y **♫+ todos** en un álbum o una playlist de YouTube. **♫✓** quiere decir que
-  ya está (tocalo para sacarlo); **✓ listo** termina. Abriéndola se ve en orden, se suben temas
-  (↑), se sacan (✕), se le cambia el nombre (✎) o se borra (🗑): eso, quien la armó (desde el mismo
-  navegador) o alguien con el PIN. Cualquiera pide sus temas de a uno; entera, **▶ reproducir** o
-  **+ a la cola**, con el PIN. Cada sala tiene las suyas (hasta 50, de hasta 200 temas cada una).
+  **♫ playlists** (en el desplegable **ver:**) y **+ nueva playlist**. Queda elegida para sumarle
+  temas: aparece **♫+** al lado de cada tema (en la búsqueda, en un álbum abierto, en las
+  guardadas, en lo que suena, en la cola y en lo que sonó) y **♫+ todos** en un álbum o una
+  playlist de YouTube. **♫✓** quiere decir que ya está (tocalo para sacarlo); **✓ listo** termina.
+  Abriéndola se ve en orden, se suben temas (↑), se sacan (✕), se le cambia el nombre (✎) o se
+  borra (🗑): eso, quien la armó (desde el mismo navegador) o alguien con el PIN. Cualquiera pide
+  sus temas de a uno; entera, **▶ reproducir** o **+ a la cola**, con el PIN. Cada sala tiene las
+  suyas (hasta 50, de hasta 200 temas cada una).
 - En **GUARDADAS** (abajo de todo en el celular; en la compu, a la derecha, debajo del buscador)
   están todas las que ya se bajaron, para recorrerlas. En el desplegable **ver:** se elige cómo:
   **💿 por álbum** (tocás uno y ves sus temas), **🎤 por artista**, **🎸 por género** o
-  **🕘 recientes**, separadas en páginas (ahí mismo, **♫ playlists** muestra las playlists). Con el PIN, **🗑** borra una a mano: sale de
-  las guardadas de la sala y, si ninguna otra sala la tiene, se borra el archivo (si está
-  sonando o en la cola, cuando termine). Si vuelve a sonar, se vuelve a guardar.
+  **🕘 recientes**, separadas en páginas (ahí mismo, **♫ playlists** muestra las playlists). Con el
+  PIN, **🗑** borra una a mano: sale de las guardadas de la sala y, si ninguna otra sala la tiene,
+  se borra el archivo (si está sonando o en la cola, cuando termine). Si vuelve a sonar, se vuelve
+  a guardar.
 - **🎤 Por artista:** las guardadas de cada artista, en orden alfabético (un tema de varios, como
   «Bizarrap, Quevedo», está en el de cada uno). Tocás uno y elegís qué ver: **💿 álbumes** (los
   discos en los que está, que se abren como cualquier álbum; sus temas sueltos van al final, como
@@ -227,10 +250,9 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   se corta la luz), cada sala sigue donde estaba: lo que sonaba, en el segundo en que iba (si se
   cortó la luz, unos segundos antes), y la cola tal cual, cada tema con quien lo pidió (así cada
   uno puede seguir quitando los suyos). Lo que esperaba para bajarse (**⬇ descargas**) se sigue
-  bajando. Si estaba en pausa, queda en pausa. En el reinicio diario
-  de las 6 queda todo como estaba, pero en pausa (la oficina está vacía): ⏯ lo sigue. Al prender la
-  Raspberry también, y con `azar_al_prender` sigue solo cuando el parlante está listo. El chat se
-  borra.
+  bajando. Si estaba en pausa, queda en pausa. En el reinicio diario de las 6 queda todo como
+  estaba, pero en pausa (la oficina está vacía): ⏯ lo sigue. Al prender la Raspberry también, y
+  con `azar_al_prender` sigue solo cuando el parlante está listo. El chat se borra.
 - **Si se corta internet:** la música sigue, con lo guardado (lo que ya estaba bajado y el 🔀); lo
   que no anda hasta que vuelva es buscar en YouTube y bajar temas nuevos (las descargas quedan
   esperando). El **led** al lado de **♫ ROCKOLA** lo muestra, en la página, en `/pantalla` y en la
@@ -238,6 +260,11 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   si esa página no llega a la rockola. Es el internet de la rockola, no el de tu celular: la
   rockola prueba cada 15 segundos conectarse a Google (8.8.8.8, o 1.1.1.1 de Cloudflare; si en
   esa red están bloqueados, a www.google.com), y mientras no hay, cada 5.
+- **El clima:** arriba, después del led, cómo está afuera y cuántos grados hace (en la página, el
+  detalle sale al pasar el mouse; en la pantalla y en `/pantalla` va con palabras, a la derecha).
+  Se actualiza cada 10 minutos. Sin configurar nada es el de donde está la rockola según su IP
+  pública, que suele acertarle a la ciudad pero no siempre: si le erra, poné la tuya en
+  `rockola.toml` (`clima = "Rosario"`). Con `clima = false` no se muestra.
 - **Poner una playlist de YouTube:** con el PIN, pegá su link en la búsqueda y tocá **+ a la cola**
   (o **▶ reproducir**, para que suene ya). Sus temas van al final de la cola (como mucho 200; se
   saltean los repetidos y los muy largos), así que lo que pidan después suena cuando termine la
@@ -252,9 +279,20 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   | `a` | anterior / desde el principio | `d` | quitar |
   | `+` `-` | volumen | `z` | aleatorio (🔀) |
   | `q` | salir (la música sigue) | `m` | mezclar la cola |
+  | `e` | estadísticas (ir y volver) | | |
 
-  Opciones: `--tema nord` (o `tokyo-night`, `dracula`…) y `--url http://otra-maquina:8000`.
-- **En una tele:** `http://<ip>:8000/pantalla`.
+  **Va y viene sola:** cada 15 segundos cambia entre el reproductor (lo de siempre) y las
+  estadísticas: cuánto sonó y el top de canciones, de artistas y de quién pide más. Cada vez
+  muestra otro período (hoy, los últimos 7 días, el año), salteando los que no tienen nada. El
+  QR queda en su lugar y lo que suena se sigue viendo, en chiquito, con su barra. Cuando arranca
+  otro tema vuelve al reproductor, y si tocás una tecla se queda ahí un minuto. `--ciclo 30`
+  cambia cada cuánto; `--ciclo 0`, nunca.
+
+  Otras opciones: `--tema nord` (o `tokyo-night`, `dracula`…) y `--url http://otra-maquina:8000`.
+  Arriba, al lado de **♫ ROCKOLA**, está el led de internet (ver **Si se corta internet**) y, a
+  la derecha, el clima.
+- **En una tele:** `http://<ip>:8000/pantalla` (sólo mirar: lo que suena, la cola, el QR, el led y
+  el clima).
 
 ### Dos modos
 
@@ -263,7 +301,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 | Dónde suena | en la máquina del servidor | en la pestaña `localhost:8000/player` |
 | Términos de YouTube | descargar el audio va contra los términos | usa el reproductor oficial |
 | Mantenimiento | yt-dlp se actualiza solo una vez por día | ninguno |
-| Canciones guardadas y 🔀 | sí | no |
+| Canciones guardadas, ⬇ descargas y 🔀 | sí | no |
 | 📻 Radio | sí | no |
 | 🚪 Salas | sí | no (hay una sola) |
 | 📺 Salas de tv | sí | sí |
@@ -300,6 +338,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 | `normalizar` | `false` | iguala el volumen entre canciones |
 | `modo` | automático | `mpv` o `navegador` |
 | `ip` | automática | la IP que muestran el link y el QR |
+| `clima` | automático | de dónde es el clima de la barra de arriba: vacío, el de donde está la rockola (por su IP); una ciudad (`"Rosario"`) o un punto (`"-32.95, -60.64"`); `false`, no mostrarlo |
 | `guardar_gb` | `16` | GB para canciones guardadas, entre todas las salas; al pasarlos se borran las que hace más que no suenan (0 = no guardar). Siempre deja 2 GB libres |
 | `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas, las salas (también las de tv), las ♫ playlists y las estadísticas del recap |
 | `azar_al_prender` | `true` | al prender la Raspberry o reiniciar el servicio, si en 10 s nadie pide nada: 🔀 prendido y a sonar (con un parlante Bluetooth, cuando se conecta); si estaba sonando un tema, sigue ése. No en el reinicio de las 6 |
@@ -321,7 +360,8 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── rockola.ejemplo.toml  configuración de ejemplo
 ├── pi/                   instalador de la Raspberry, salida de audio y Bluetooth
 ├── hardware/             gabinete: generador paramétrico (manifold3d) y los STL
-└── docs/                 guías e imágenes (capturas.py saca las de la web, diagrama.py el de los botones)
+└── docs/                 guías e imágenes (captura_tui.py saca la de la terminal; capturas.py, las de
+                          la web; diagrama.py, el diagrama de los botones)
 ```
 
 ## Por dentro
@@ -387,6 +427,12 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   pregunta por los artistas de lo que sonó (para el recap) y por los de las guardadas, aunque no
   hayan sonado nunca (para verlas **🎸 por género**): primero los más escuchados. Con muchas
   guardadas, la primera vez tarda (unos 15 artistas por minuto).
+- **Clima:** de [Open-Meteo](https://open-meteo.com) (gratis, sin cuenta ni clave). Se le manda
+  dónde, redondeado a un kilómetro: la ciudad de `clima` (la ubica el buscador de lugares del
+  mismo Open-Meteo) o, sin configurar, el lugar que [ipwho.is](https://ipwho.is) (o
+  [GeoJS](https://www.geojs.io), si no contesta) dice que le corresponde a la IP pública de la
+  rockola; a ésos no se les manda nada: ven de dónde viene el pedido. Lo pregunta la rockola, no
+  cada página. Si no puede (no hay internet), queda el último hasta dos horas y después nada.
 - **Tiempo real con long-poll:** las páginas, la TUI y los botones se enteran de cada cambio al
   instante, sin websockets ni dependencias.
 - **Permisos:** cualquiera agrega temas, quita los suyos, chatea, crea salas y arma ♫ playlists

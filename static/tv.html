@@ -43,12 +43,15 @@
   /* El led, al lado del logo: si la rockola tiene internet (verde), si no (rojo, titilando: la
      música sigue con lo guardado, pero no se puede buscar ni bajar) o si no se sabe (apagado:
      todavía no contestó, o esta página perdió la conexión con ella). Está siempre: no mueve la barra. */
-  .led { flex: none; width: .7em; height: .7em; margin-right: auto; border-radius: 50%; background: var(--line);
+  .led { flex: none; width: .7em; height: .7em; border-radius: 50%; background: var(--line);
          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35); }
   .led.si { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .led.no { background: var(--red); box-shadow: 0 0 6px var(--red); animation: titilar 1.2s steps(2, jump-none) infinite; }
   @keyframes titilar { 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
+  /* El clima, después del led: lo que mida (o nada, si no se sabe) se lo lleva el hueco que
+     separa esto de lo de la derecha, así que no mueve la barra. */
+  .clima { margin-right: auto; color: var(--dim); white-space: nowrap; cursor: default; }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
 
@@ -170,6 +173,7 @@
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
   <span class="led" id="led" role="img" aria-label="Conectando con la rockola…" title="Conectando con la rockola…"></span>
+  <span class="clima" id="clima"></span>
   <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
@@ -889,6 +893,7 @@ const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
 function pintarSalas(s) {
   $("#radioBtn").hidden = s.mode !== "mpv";   // (como en la página de pedidos: en modo navegador no hay radio)
   pintarLed(s.online ?? null);
+  pintarClima(s.weather);
   const firma = JSON.stringify([s.rooms, s.tvs]);
   if (firma === firmaSalas) return;
   firmaSalas = firma;
@@ -1094,6 +1099,16 @@ async function agregar(v, btn) {
     btn.disabled = false;
     toast(err.message, true);
   }
+}
+
+// El clima, al lado del led: el emoji y la temperatura (el resto, al pasar el mouse). Lo trae la
+// rockola con cada estado ({ temp, text, icon, city }); si no lo sabe, no se muestra nada.
+function pintarClima(w) {
+  const c = $("#clima");
+  const texto = w ? `${w.icon} ${w.temp}°` : "", detalle = w ? `${w.city ? w.city + ": " : ""}${w.text}, ${w.temp} °C` : "";
+  if (c.textContent === texto && c.title === detalle) return;
+  c.textContent = texto; c.title = detalle;
+  if (w) c.setAttribute("aria-label", `El clima: ${detalle}`); else c.removeAttribute("aria-label");
 }
 
 // El led de la barra: si la rockola tiene internet. `online` viene con cada estado (true, false
