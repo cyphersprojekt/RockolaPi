@@ -231,6 +231,13 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   de las 6 queda todo como estaba, pero en pausa (la oficina está vacía): ⏯ lo sigue. Al prender la
   Raspberry también, y con `azar_al_prender` sigue solo cuando el parlante está listo. El chat se
   borra.
+- **Si se corta internet:** la música sigue, con lo guardado (lo que ya estaba bajado y el 🔀); lo
+  que no anda hasta que vuelva es buscar en YouTube y bajar temas nuevos (las descargas quedan
+  esperando). El **led** al lado de **♫ ROCKOLA** lo muestra, en la página, en `/pantalla` y en la
+  terminal: verde con internet; rojo (titilando) sin internet; apagado si todavía no se sabe o
+  si esa página no llega a la rockola. Es el internet de la rockola, no el de tu celular: la
+  rockola prueba cada 15 segundos conectarse a Google (8.8.8.8, o 1.1.1.1 de Cloudflare; si en
+  esa red están bloqueados, a www.google.com), y mientras no hay, cada 5.
 - **Poner una playlist de YouTube:** con el PIN, pegá su link en la búsqueda y tocá **+ a la cola**
   (o **▶ reproducir**, para que suene ya). Sus temas van al final de la cola (como mucho 200; se
   saltean los repetidos y los muy largos), así que lo que pidan después suena cuando termine la

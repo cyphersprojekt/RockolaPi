@@ -86,7 +86,8 @@ state = {
     "mode": "navegador",
     "volume": None,    # el del parlante (sala principal)
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
-    "sin_red": False,  # no se llega a YouTube: las de "saving" esperan a que vuelva (ver bucle_guardar)
+    "sin_red": False,  # no hay internet: las de "saving" esperan a que vuelva (ver bucle_guardar)
+    "online": None,    # si hay internet (ver bucle_internet): el led de las páginas y de la pantalla. None: todavía no se sabe
 }
 MAX_GUARDANDO = 40     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
 PRINCIPAL = "principal"
@@ -1289,6 +1290,7 @@ def public_state(sala, client=None, since=None, radio=False):
             # (la fila para bajar es una sola: cuántas de otras salas hay esperando en ella)
             "savingOthers": sum(not g["error"] and sala.id not in g["salas"] for g in state["saving"]),
             "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
+            "online": state["online"],           # si la rockola tiene internet (el led)
         }
 
 
@@ -1355,13 +1357,43 @@ def add_song(sala, body):
     return item
 
 
-def hay_internet(timeout=5):
-    """¿Se llega a YouTube? Para saber si una descarga falló por la canción o porque no hay conexión."""
-    try:
-        socket.create_connection(("www.youtube.com", 443), timeout=timeout).close()
-        return True
-    except OSError:
-        return False
+# A quién se le pregunta si hay internet. Primero a Google y a Cloudflare por su IP: sin DNS de
+# por medio, contestan (o fallan) enseguida. Si ninguno contesta, a Google por nombre, por si en
+# esa red esas IP están bloqueadas.
+INTERNET = (("8.8.8.8", 443), ("1.1.1.1", 443), ("www.google.com", 443))
+
+
+def hay_internet(timeout=3):
+    """¿Hay internet? Prueba conectarse a alguno de INTERNET: como un ping, pero con una conexión
+    TCP (el ping de verdad pide permisos). Alcanza con que conteste uno."""
+    for destino in INTERNET:
+        try:
+            socket.create_connection(destino, timeout=timeout).close()
+            return True
+        except OSError:
+            pass
+    return False
+
+
+def bucle_internet(cada=15, cortado=5):
+    """Mira cada `cada` segundos si hay internet (mientras no hay, cada `cortado`: para enterarse
+    enseguida cuando vuelve) y lo deja en state["online"]. Es el led de las páginas y de la
+    pantalla: sin internet la música sigue con lo guardado, pero no se puede buscar ni bajar."""
+    while True:
+        hay = hay_internet()
+        with lock:
+            antes = state["online"]
+            if hay != antes:
+                state["online"] = hay
+                bump()
+        if hay != antes:
+            if teles:
+                teles.avisar()   # (las salas de tv esperan en otro lado: que también se enteren)
+            if not hay:
+                print("  ⚠ sin internet: sigue sonando lo guardado", flush=True)
+            elif antes is False:
+                print("  ✓ volvió internet", flush=True)
+        time.sleep(cada if hay else cortado)
 
 
 def _se_guarda():
@@ -1900,7 +1932,7 @@ def estado_tv(sala, client="", since=None, viendo=False):
     """El estado de una sala de tv para su página, con las salas de música (para el menú)."""
     e = teles.estado(sala, client, since, viendo)
     with lock:
-        return dict(e, rooms=[s.publica() for s in salas.values()], mode=state["mode"])
+        return dict(e, rooms=[s.publica() for s in salas.values()], mode=state["mode"], online=state["online"])
 
 
 # ------------------------------------------------------------- estadísticas
@@ -2641,7 +2673,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/tv/rooms":   # para elegir una (la página /tv, sin sala)
                 with lock:
                     rooms = [s.publica() for s in salas.values()]
-                return self.send_json({"tvs": teles.publicas(), "rooms": rooms, "mode": state["mode"]})
+                return self.send_json({"tvs": teles.publicas(), "rooms": rooms, "mode": state["mode"],
+                                       "online": state["online"]})
             if u.path == "/api/tv/search":
                 q = qs.get("q", [""])[0].strip()[:200]
                 return self.send_json(buscar_videos(q) if q else [])
@@ -2913,6 +2946,7 @@ def main():
     else:
         retomar_colas()   # (lo retoma el reproductor web, que arranca donde dice el progreso)
     threading.Thread(target=bucle_colas, daemon=True, name="colas").start()
+    threading.Thread(target=bucle_internet, daemon=True, name="internet").start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
 

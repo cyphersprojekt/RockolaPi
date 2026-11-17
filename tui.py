@@ -265,6 +265,12 @@ class Rockola(App):
     def pintar_cabecera(self):
         t = Text()
         t.append(" ♫ ROCKOLA ", style="bold reverse")
+        # El led: si la rockola tiene internet (verde), si no (rojo: sigue sonando lo guardado) o
+        # si no se sabe (apagado: todavía no lo miró, o no hay conexión con ella).
+        online = (self.estado or {}).get("online") if self.conectado else None
+        t.append(" ●", style="bold green" if online else "bold red" if online is False else "dim")
+        if online is False:
+            t.append(" sin internet", style="bold red")
         if not self.conectado:
             t.append(f"  ⚠ sin conexión con {self.base} · reintentando…", style="bold red")
         elif self.url_publica:

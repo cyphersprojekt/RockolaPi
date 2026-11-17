@@ -100,7 +100,16 @@
   .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 1ch; flex-wrap: wrap;
          padding: .4em max(var(--margen), calc((100% - var(--ancho)) / 2 + var(--margen)));
          background: var(--bg2); }
-  .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; margin-right: auto; }
+  .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; }
+  /* El led, al lado del logo: si la rockola tiene internet (verde), si no (rojo, titilando: la
+     música sigue con lo guardado, pero no se puede buscar ni bajar) o si no se sabe (apagado:
+     todavía no contestó, o esta página perdió la conexión con ella). Está siempre: no mueve la barra. */
+  .led { flex: none; width: .7em; height: .7em; margin-right: auto; border-radius: 50%; background: var(--line);
+         box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35); }
+  .led.si { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .led.no { background: var(--red); box-shadow: 0 0 6px var(--red); animation: titilar 1.2s steps(2, jump-none) infinite; }
+  @keyframes titilar { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
 
@@ -376,6 +385,7 @@
 <body>
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
+  <span class="led" id="led" role="img" aria-label="Conectando con la rockola…" title="Conectando con la rockola…"></span>
   <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
@@ -930,6 +940,7 @@ function render(s) {
   queuedIds = new Set([...s.queue.map(i => i.videoId), s.now?.videoId].filter(Boolean));
   const sinParlante = !!s.room && !s.room.main;   // se escucha sólo con 📻 radio
   pintarSalas(s);
+  pintarLed(s.online ?? null);
 
   const now = $("#now");
   if (s.now) {
@@ -1455,6 +1466,18 @@ function centrarLetra() {
 }
 
 // Long-poll: el servidor responde apenas cambia algo (o a los 25 s).
+// El led de la barra: si la rockola tiene internet. `online` viene con cada estado (true, false
+// o null si todavía no lo miró); sin nada: esta página no llega a la rockola.
+function pintarLed(online) {
+  const led = $("#led");
+  const [clase, texto] = online === true ? ["led si", "La rockola tiene internet"]
+    : online === false ? ["led no", "La rockola está sin internet: sigue sonando lo guardado, pero hasta que vuelva no se puede buscar en YouTube ni bajar temas nuevos"]
+    : online === null ? ["led", "Todavía no se sabe si la rockola tiene internet"]
+    : ["led", "Sin conexión con la rockola"];
+  if (led.className === clase && led.title === texto) return;
+  led.className = clase; led.title = texto; led.setAttribute("aria-label", texto);
+}
+
 async function loop() {
   let version = null;
   for (;;) {
@@ -1466,6 +1489,7 @@ async function loop() {
     } catch (err) {
       if (err.status === 404 && sala !== PRINCIPAL) return irASala(PRINCIPAL, ["Esa sala ya no existe: te llevé a la principal", true]);
       $("#now").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));
+      pintarLed();
       await new Promise(r => setTimeout(r, 3000));
       version = null;
     }

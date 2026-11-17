@@ -21,6 +21,15 @@
 
   .bar-top, .bar-bottom { display: flex; gap: 2ch; padding: 0 1ch; background: var(--bg2); white-space: nowrap; overflow: hidden; }
   .bar-top .logo { background: var(--fg); color: var(--bg); font-weight: 700; padding: 0 1ch; }
+  /* El led, al lado del logo: si la rockola tiene internet (verde), si no (rojo, titilando: sigue
+     sonando lo guardado) o si no se sabe (apagado). Como en la página de pedidos. */
+  .bar-top .marca { display: flex; align-items: center; gap: 1ch; }
+  .led { flex: none; width: .7em; height: .7em; border-radius: 50%; background: var(--line);
+         box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35); }
+  .led.si { background: var(--ok); box-shadow: 0 0 .4em var(--ok); }
+  .led.no { background: var(--red); box-shadow: 0 0 .4em var(--red); animation: titilar 1.2s steps(2, jump-none) infinite; }
+  @keyframes titilar { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
   .bar-top .url { font-weight: 700; text-decoration: underline; }
   .bar-top .clock { margin-left: auto; color: var(--dim); }
   .dim { color: var(--dim); }
@@ -81,7 +90,7 @@
 <body>
 <div class="app is-idle" id="app">
   <div class="bar-top">
-    <span class="logo">♫ ROCKOLA</span>
+    <span class="marca"><span class="logo">♫ ROCKOLA</span><span class="led" id="led" role="img" aria-label="Conectando…"></span></span>
     <span><span class="dim">pedí tu tema en</span> <span class="url" id="url">…</span></span>
     <span class="clock" id="clock"></span>
   </div>
@@ -122,6 +131,7 @@
 
   <div class="bar-bottom">
     <span class="conn" id="conn" hidden>⚠ sin conexión · reintentando…</span>
+    <span class="conn" id="sinRed" hidden>⚠ sin internet: suena lo guardado</span>
     <span class="notice" id="notice"></span>
   </div>
 </div>
@@ -212,6 +222,16 @@ function render() {
 }
 function span(cls, txt) { const e = document.createElement("span"); e.className = cls; e.textContent = txt; return e; }
 
+// El led de arriba: si la rockola tiene internet (`online`: true, false o null si todavía no lo
+// miró; sin nada: esta pantalla no llega a la rockola). Acá no hay cartelitos al pasar el mouse:
+// sin internet, además lo dice la barra de abajo.
+function pintarLed(online) {
+  const led = $("#led");
+  led.className = online === true ? "led si" : online === false ? "led no" : "led";
+  led.setAttribute("aria-label", online === true ? "Con internet" : online === false ? "Sin internet" : "No se sabe si hay internet");
+  $("#sinRed").hidden = online !== false;
+}
+
 function tick() {
   const s = state; if (!s || !s.now) return;
   const p = s.progress, d = p.d || s.now.duration || 0;
@@ -240,9 +260,11 @@ fetch("/api/info").then(r => r.json()).then(i => { $("#url").textContent = i.url
       if (!r.ok) throw new Error(r.status);
       state = await r.json(); receivedAt = performance.now(); version = state.version;
       $("#conn").hidden = true;
+      pintarLed(state.online ?? null);
       render();
     } catch {
       $("#conn").hidden = false; version = null;
+      pintarLed();
       await new Promise(r => setTimeout(r, 3000));
     }
   }
