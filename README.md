@@ -32,6 +32,10 @@ escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que s
   pegar un link de YouTube. El QR de la pantalla lleva directo a la página.
 - **Cola compartida en tiempo real**, con límite de canciones por persona. Cada uno puede quitar
   las suyas.
+- **👍 Votos:** cada uno vota las canciones de los demás y las más votadas suben en la cola; y si
+  varios votan ⏭, la que suena se saltea sola.
+- **🔥 ❤️ 😴 Reacciones** a lo que suena: se ven al toque en la página y en la pantalla, y van al
+  recap (la más festejada, la más querida, la que durmió a todos).
 - **Letra en sincro:** la de la canción que suena, que se va marcando mientras se canta.
 - **Canciones guardadas y modo aleatorio:** lo que se baja queda guardado en la tarjeta (hasta 16 GB,
   se puede cambiar); si lo vuelven a pedir, suena al instante. En la página se ven todas, por
@@ -61,6 +65,8 @@ escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que s
   Queda en una base que sobrevive a los reinicios.
 - **Control con PIN desde la web:** pausa, volumen, anterior/siguiente, reordenar, mezclar la cola y
   quitar cualquier canción. El resto ve la página normal.
+- **🎚️ Crossfade** (se prende y se apaga desde la web): cada canción va entrando mientras la
+  anterior se va, sin silencio entre las dos.
 - **Pantalla tipo terminal:** una TUI con la tapa del disco pixelada, la cola y el QR, que cada
   tanto muestra sola las estadísticas. Hay una versión web con la misma estética (`/pantalla`) para
   cualquier tele o monitor.
@@ -124,6 +130,19 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   YouTube (con Enter, sin esperar). Las guardadas suenan sin esperar la descarga. En la compu el
   panel del buscador tiene su alto aunque esté vacío, y los resultados lo van llenando (si no
   entran, se paginan): así buscar no mueve lo que está abajo.
+- **👍 Votar la cola:** al lado de cada canción de las próximas hay un **👍** (en las que pidieron
+  los demás: la tuya no la votás vos). La votada sube hasta quedar debajo de las que tienen
+  tantos votos como ella, o más; entre dos con los mismos votos, va primero la que los juntó
+  antes. Es un voto por persona y por canción, y no se saca. En la tuya ves cuántos tiene. Con el
+  PIN se sigue pudiendo ordenar a mano: a una que pusieron en su lugar con ⤒ o ↑, los votos de
+  las otras no le pasan por arriba.
+- **⏭ Saltear por votos:** debajo de lo que suena, **⏭ 0/3**: es un voto para saltearla. Cuando
+  votan 3 personas (`votos_para_saltear` en `rockola.toml`; con 0 no se vota), pasa sola a la
+  que sigue y avisa. Quien tiene el PIN la saltea sin votar, como siempre.
+- **🔥 ❤️ 😴 Reacciones:** al lado del ⏭, para decir qué te parece lo que suena: una de cada una
+  por persona y por canción. Todos ven cuántas van; en la pantalla de la Raspberry (y en
+  `/pantalla`) además aparece un instante de quién fue la última. Cuando la canción termina, sus
+  reacciones quedan con ella en «sonaron recién» y en el 📊 recap.
 - **Letra:** la de la que suena (a la izquierda en la compu; debajo de lo que suena en el
   celular), de YouTube Music o, si ahí no está o no trae los tiempos, de [LRCLIB](https://lrclib.net).
   El título dice de dónde vino (LyricFind o Musixmatch, que le dan las letras a YouTube, o
@@ -230,22 +249,40 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   persona; **👤 lo mío**, lo tuyo (con el nombre que pusiste). Cuenta como escuchada una canción que
   sonó al menos 30 segundos (las más cortas, casi enteras): las que se cortan antes suman tiempo y
   cuentan como pedidas, pero no para los rankings. En «quién pide más» no entran 🔀 ni lo que se
-  cargó entero (playlists y álbumes). Las de cada persona se juntan por el nombre, sin fijarse en mayúsculas ni acentos.
-- **Quien maneja la música:** en la misma página, **🔒 controlar** y el PIN. Aparecen ⏮ ⏸ ⏭, el
-  volumen y botones para reordenar (⤒ ↑) o quitar (✕) cualquier canción. Al lado de cada
+  cargó entero (playlists y álbumes). Entre los datos están **la más festejada** (🔥), **la más
+  querida** (❤️) y **la que durmió a todos** (😴): de cada reacción, la canción que más juntó. Las de cada persona se juntan por el nombre, sin fijarse en mayúsculas ni acentos.
+- **Quien maneja la música:** en la misma página, **🔒 controlar** y el PIN. Aparecen ⏮ ⏸ ⏭ con el
+  volumen al lado, abajo 🔀 y 🎚️ (lo que se deja prendido o apagado), y botones para reordenar
+  (⤒ ↑) o quitar (✕) cualquier canción. Al lado de cada
   **+ agregar** (en la búsqueda y en las guardadas) aparece **▶ ahora**: corta la que suena (queda
   en "sonaron recién", como con ⏭) y pone esa; la cola sigue igual.
 - **Mezclar la cola:** con el PIN, **🔀 mezclar** arriba de las próximas. Las pone en otro orden al
   azar, una vez: lo que pidan después va al final, como siempre. Sirve, por ejemplo, después de
   cargar una playlist (ojo, que mezcla también los pedidos que ya estaban).
-- **Música de fondo:** con el PIN, **🔀 al azar**. Cuando la cola se vacía, suenan canciones que ya
-  sonaron alguna vez (sin repetir las de recién); lo que pidan va primero, cuando termina la que
-  está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
+- **Música de fondo:** con el PIN, **🔀** (al azar: abajo a la derecha de los controles, chiquito).
+  Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
+  recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
   en 10 segundos nadie pidió nada, se prende solo y arranca a sonar** (con un parlante Bluetooth,
   en cuanto se conecta); se apaga con `azar_al_prender = false`. Si cuando se apagó estaba sonando
   un tema, en lugar del 🔀 sigue ése, donde iba (ver **Si se reinicia**, abajo). En el reinicio
   diario de las 6 no arranca solo: arranca cuando se termina la cola, al prenderlo de nuevo, o con
   ⏯ (también el de la botonera). **Ojo:** si se van todos, sigue sonando hasta que lo pausen.
+- **🎚️ Crossfade:** con el PIN, **🎚️** (al lado de 🔀). Prendido, cuando a una
+  canción le quedan unos segundos la que sigue arranca bajito y va subiendo mientras esa baja:
+  se pisan 6 segundos (`crossfade` en `rockola.toml`) y el volumen del conjunto no se mueve.
+  Queda como lo dejaste, también después de reiniciar. Algunas cosas a saber:
+  - Para la página, la canción que entra «ya suena» desde que arranca: la anterior pasa a
+    «sonaron recién» unos segundos antes de terminar.
+  - Es entre una canción que termina sola y la que sigue (de la cola, o del 🔀). Con ⏭, ⏮ o
+    **▶ ahora** el cambio es de golpe, como siempre; si pasa en pleno crossfade, se cortan las dos.
+    Con ⏸ esperan las dos.
+  - No hay crossfade si la que sigue todavía se está bajando, ni con canciones muy cortas (menos
+    de cuatro veces lo que dura el crossfade).
+  - Es del parlante. Por **📻 radio** se escucha un corte: la que sigue arranca esos segundos
+    antes, sin mezcla. Las salas sin parlante no tienen.
+  - Mientras está prendido hay un segundo mpv esperando (unos 30 MB de memoria), y hace falta un
+    sistema de audio que mezcle (PipeWire o PulseAudio: lo que deja `pi/instalar.sh`). Si la
+    salida no deja sonar dos cosas a la vez, se apaga solo y avisa.
 - **Si se reinicia:** al volver a arrancar (`systemctl --user restart rockola`, `./iniciar.sh`, o si
   se corta la luz), cada sala sigue donde estaba: lo que sonaba, en el segundo en que iba (si se
   cortó la luz, unos segundos antes), y la cola tal cual, cada tema con quien lo pidió (así cada
@@ -288,6 +325,9 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   otro tema vuelve al reproductor, y si tocás una tecla se queda ahí un minuto. `--ciclo 30`
   cambia cada cuánto; `--ciclo 0`, nunca.
 
+  En la cola, la columna **Votos** dice cuántos 👍 tiene cada una (▲ 2), y debajo de lo que suena
+  van las reacciones y los votos para saltearla; cuando alguien reacciona, se ve un instante quién.
+
   Otras opciones: `--tema nord` (o `tokyo-night`, `dracula`…) y `--url http://otra-maquina:8000`.
   Arriba, al lado de **♫ ROCKOLA**, está el led de internet (ver **Si se corta internet**) y, a
   la derecha, el clima.
@@ -303,6 +343,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 | Mantenimiento | yt-dlp se actualiza solo una vez por día | ninguno |
 | Canciones guardadas, ⬇ descargas y 🔀 | sí | no |
 | 📻 Radio | sí | no |
+| 🎚️ Crossfade | sí | no |
 | 🚪 Salas | sí | no (hay una sola) |
 | 📺 Salas de tv | sí | sí |
 
@@ -334,8 +375,10 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 | `puerto` | `8000` | |
 | `max_por_persona` | `3` | canciones pendientes por persona (y videos, en una sala de tv) |
 | `duracion_maxima` | `600` | segundos (0 = sin límite) |
+| `votos_para_saltear` | `3` | cuántas personas tienen que votar ⏭ para que la que suena se saltee sola (0 = no se vota) |
 | `volumen` | `80` | volumen inicial (0–130) |
 | `normalizar` | `false` | iguala el volumen entre canciones |
+| `crossfade` | `6` | segundos que se pisan dos canciones con el 🎚️ crossfade prendido (se prende desde la web; 0 = no ofrecerlo) |
 | `modo` | automático | `mpv` o `navegador` |
 | `ip` | automática | la IP que muestran el link y el QR |
 | `clima` | automático | de dónde es el clima de la barra de arriba: vacío, el de donde está la rockola (por su IP); una ciudad (`"Rosario"`) o un punto (`"-32.95, -60.64"`); `false`, no mostrarlo |
@@ -381,6 +424,21 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   sonar ya, si no estaba, y la de adelanto. Si mpv se cae o se cuelga, se reinicia y retoma la
   canción en el segundo en que iba. Para retomar, la carga en pausa, salta con `seek` (anda igual
   en todas las versiones de mpv) y recién ahí la suelta: no se oye el principio.
+- **Temas y videos:** en YouTube Music un tema puede ser el audio del disco o su video oficial,
+  que es otra grabación (con la intro del video) y a veces tiene restricción de edad: ésos no se
+  bajan sin una cuenta. Por eso, de un álbum se toman los temas de su lista «de audio», no los
+  videos (salvo los que ya estaban guardados con el id del video, para que no queden repetidos).
+  Y si igual toca bajar un video que pide confirmar la edad (un tema suelto, un link pegado, una
+  playlist), se busca el mismo tema en versión de audio (en su álbum o, si no se sabe cuál es,
+  por título y artista) y se baja ése: queda guardado como el que se pidió.
+- **Crossfade:** mpv no mezcla dos archivos, así que con el crossfade prendido hay dos mpv. Cuando
+  a la canción que suena le queda lo que dura el crossfade (y la que sigue ya está bajada), el
+  otro mpv la arranca con el volumen en 0 y pasa a ser «el que suena»: el estado, el progreso y
+  la pausa son los suyos. En lo que le queda a la anterior, el volumen de uno sube como un seno y
+  el del otro baja como un coseno (potencia constante: no se nota un bajón en el medio), con la
+  raíz cúbica de por medio porque el volumen de mpv va al cubo. Al terminar, el que tocaba la
+  anterior queda libre para el próximo cambio. Durante el crossfade el volumen que se ve en la
+  página es el del estado, no el de cada mpv.
 - **Canciones guardadas:** quedan en `~/.cache/rockola/canciones`, el audio y un `.json` con sus
   datos (título, artista, álbum, duración y tapa). La fecha del archivo marca la última vez que
   sonó: no hay un índice que se rompa si se corta la luz. En 16 GB entran unas 3000. El álbum sale
@@ -435,9 +493,10 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   cada página. Si no puede (no hay internet), queda el último hasta dos horas y después nada.
 - **Tiempo real con long-poll:** las páginas, la TUI y los botones se enteran de cada cambio al
   instante, sin websockets ni dependencias.
-- **Permisos:** cualquiera agrega temas, quita los suyos, chatea, crea salas y arma ♫ playlists
-  (las cambia quien la armó: la página la reconoce por el mismo identificador con el que quita sus
-  temas). Cargar un álbum o una playlist entera es con el PIN: si no, una persona llenaría la cola
+- **Permisos:** cualquiera agrega temas, quita los suyos, vota, reacciona, chatea, crea salas y arma
+  ♫ playlists (las cambia quien la armó: la página la reconoce por el mismo identificador con el
+  que quita sus temas; es también el que cuenta como «una persona» para los votos y las
+  reacciones: es por navegador, no por nombre). Cargar un álbum o una playlist entera es con el PIN: si no, una persona llenaría la cola
   de una, sin el límite por persona. Lo demás se hace
   desde la misma máquina o con el PIN: el de la rockola, que vale en todas las salas, o el de la
   sala (5 intentos fallidos bloquean esa IP 5 minutos). Las páginas no pueden mandar pedidos de
@@ -457,6 +516,10 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 - **Todas las canciones dicen "Salteada":** casi siempre es yt-dlp desactualizado:
   `.venv/bin/pip install -U "yt-dlp[default]"` y reiniciá.
 - **La búsqueda no anda:** `.venv/bin/pip install -U ytmusicapi`.
+- **«YouTube pide una cuenta para confirmar la edad»:** es un video con restricción de edad, que
+  sin una cuenta de un mayor no se puede bajar. Cuando es de un tema, la rockola baja sola la
+  versión de audio (la del disco), que no tiene restricción; ese aviso queda sólo si no encuentra
+  una: pasa con videos que no son un tema, o con versiones que no están en ningún disco.
 - **Los compañeros no pueden entrar:** que estén en la misma red (las redes de "invitados" suelen
   aislar los dispositivos) y que el firewall deje pasar el puerto (`sudo ufw allow 8000/tcp`).
 - Más casos en la [guía de la Raspberry](docs/raspberry.md#11-si-algo-falla) y la de [botones](docs/botones.md#si-algo-no-anda).

@@ -51,6 +51,10 @@
   .artist { font-size: 1.25em; margin-top: .2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .by { margin-top: 1em; }
   .by b { color: var(--acc); }
+  /* las reacciones a lo que suena y los votos para saltearla: un renglón que está siempre */
+  .reac { margin-top: .5em; white-space: nowrap; color: var(--dim); min-height: 1.35em; }
+  .reac b { color: var(--fg); }
+  .reac .nueva { color: var(--acc); font-weight: 700; }
   .progress { margin-top: 1em; white-space: pre; overflow: hidden; }
   .progress .on { color: var(--acc); }
   .progress .off { color: var(--line); }
@@ -76,6 +80,8 @@
   td.d, th.d { width: 7ch; text-align: right; }
   th.by, td.by { width: 16ch; }
   td.by { color: var(--acc); }
+  th.v, td.v { width: 7ch; text-align: right; }   /* los 👍 de la cola */
+  td.v { color: var(--acc); font-weight: 700; }
   .empty-q { color: var(--dim); padding: .4em 1ch; }
 
   .bar-bottom .notice { color: var(--warn); overflow: hidden; text-overflow: ellipsis; }
@@ -107,6 +113,7 @@
         <div class="title" id="title"></div>
         <div class="artist" id="artist"></div>
         <div class="by"><span class="dim" id="byLbl">pedida por</span> <b id="by"></b></div>
+        <div class="reac" id="reac"></div>
         <div class="progress" id="progress"></div>
         <div class="vol" id="vol"></div>
       </div>
@@ -126,7 +133,7 @@
   <div class="panel queue">
     <span class="ttl" id="queueTitle">PRÓXIMAS</span>
     <table>
-      <thead><tr><th class="n">#</th><th>Canción</th><th>Artista</th><th class="d">Dur.</th><th class="by">Pidió</th></tr></thead>
+      <thead><tr><th class="n">#</th><th>Canción</th><th>Artista</th><th class="d">Dur.</th><th class="by">Pidió</th><th class="v">Votos</th></tr></thead>
       <tbody id="queue"></tbody>
     </table>
     <div class="empty-q" id="emptyQ">La cola está vacía.</div>
@@ -200,6 +207,7 @@ function render() {
     $("#byLbl").textContent = s.now.azar ? "" : "pedida por";
     $("#by").textContent = s.now.azar ? "🔀 al azar" : s.now.by;
     if (artFor !== s.now.thumb) { artFor = s.now.thumb; drawArt(s.now.thumb); }
+    pintarReacciones(s);
     if (s.volume != null) {
       const n = 20, v = Math.min(n, Math.round(n * s.volume / 130));
       $("#vol").innerHTML = "";
@@ -214,7 +222,8 @@ function render() {
   $("#emptyQ").hidden = q.length > 0;
   $("#queue").replaceChildren(...q.map((it, i) => {
     const tr = document.createElement("tr");
-    for (const [cls, txt] of [["n", i + 1], ["", it.title], ["", it.artist], ["d", fmt(it.duration)], ["by", it.by]]) {
+    for (const [cls, txt] of [["n", i + 1], ["", it.title], ["", it.artist], ["d", fmt(it.duration)], ["by", it.by],
+                              ["v", it.votes ? `👍 ${it.votes}` : ""]]) {
       const td = document.createElement("td"); td.className = cls; td.textContent = txt; tr.append(td);
     }
     return tr;
@@ -224,6 +233,21 @@ function render() {
   lastNotice = s.notice ? s.notice.id : 0;
 }
 function span(cls, txt) { const e = document.createElement("span"); e.className = cls; e.textContent = txt; return e; }
+
+// Las reacciones a lo que suena (con cuántas van), los votos para saltearla y, por unos segundos,
+// la última reacción que llegó y de quién.
+let reaccionVista = null, reaccionNueva = null;   // el número de la última que llegó; { hasta, emoji, by }
+function pintarReacciones(s) {
+  const r = s.reactions || { counts: {} }, ultima = r.last;
+  if (ultima && reaccionVista !== null && ultima.n !== reaccionVista) reaccionNueva = { hasta: performance.now() + 6000, ...ultima };
+  reaccionVista = ultima ? ultima.n : 0;
+  if (reaccionNueva && performance.now() >= reaccionNueva.hasta) reaccionNueva = null;
+  const negrita = n => { const b = document.createElement("b"); b.textContent = n; return b; };
+  const partes = ["🔥", "❤️", "😴"].flatMap(e => [`${e} `, r.counts[e] ? negrita(r.counts[e]) : "0", "   "]);
+  if (s.skip) partes.push(`⏭ ${s.skip.votes}/${s.skip.needed}`);
+  if (reaccionNueva) partes.push("   ← ", span("nueva", `${reaccionNueva.emoji} ${reaccionNueva.by}`));
+  $("#reac").replaceChildren(...partes);
+}
 
 // El led de arriba: si la rockola tiene internet (`online`: true, false o null si todavía no lo
 // miró; sin nada: esta pantalla no llega a la rockola). Acá no hay cartelitos al pasar el mouse:
@@ -245,6 +269,7 @@ function tick() {
   const cols = charsThatFit(el) - times.length;
   const on = d ? Math.round(cols * t / d) : 0;
   el.replaceChildren(span("on", "━".repeat(on)), span("off", "─".repeat(Math.max(0, cols - on))), document.createTextNode(times));
+  if (reaccionNueva) pintarReacciones(s);   // (que se vaya sola cuando pasaron sus segundos)
 }
 setInterval(tick, 500);
 addEventListener("resize", render);

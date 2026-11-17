@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 GB = 1024 ** 3
@@ -47,6 +48,13 @@ class _Trabajo:
         self.ruta = None
         self.error = None
         self.datos = datos   # título, artista, etc. (para guardarla)
+
+
+def _pide_edad(error):
+    """¿Es el error de yt-dlp para un video con restricción de edad? («Sign in to confirm your
+    age»: YouTube lo da sólo con una cuenta de un mayor.)"""
+    texto = str(error).lower()
+    return "confirm your age" in texto or "age-restricted" in texto or "inappropriate for some users" in texto
 
 
 def _para_buscar(texto):
@@ -100,7 +108,7 @@ class Descargas:
     `al_guardar()` se llama (sin ningún lock tomado) cada vez que queda guardada una nueva.
     """
 
-    def __init__(self, carpeta=None, limite=0, al_guardar=None, sala_vieja="principal"):
+    def __init__(self, carpeta=None, limite=0, al_guardar=None, sala_vieja="principal", otra_version=None):
         self.carpeta = Path(carpeta or Path(tempfile.gettempdir()) / "rockola")
         self.carpeta.mkdir(parents=True, exist_ok=True)
         self.limite = max(0, int(limite))
@@ -114,6 +122,7 @@ class Descargas:
         self.sin_lugar = False   # `anticipar` frenó porque el disco está casi lleno
         self.version = 0     # sube cuando cambian las guardadas (para refrescar la lista)
         self.al_guardar = al_guardar
+        self.otra_version = otra_version   # otra_version(video_id, datos) -> otro id con el mismo tema (ver _bajar)
         self._leer_carpeta()
 
     def _leer_carpeta(self):
@@ -201,7 +210,8 @@ class Descargas:
 
         opts = {
             "format": "bestaudio/best",
-            "outtmpl": str(self.carpeta / "%(id)s.%(ext)s"),
+            # (con el id pedido, se baje de donde se baje: ver `bajar`, abajo)
+            "outtmpl": str(self.carpeta / f"{video_id}.%(ext)s"),
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
@@ -214,9 +224,23 @@ class Descargas:
             "match_filter": match_filter_func("!is_live"),  # nada de transmisiones en vivo
             "max_filesize": 60 * 1024 * 1024,
         }
-        try:
+        def bajar(de):
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+                return ydl.extract_info(f"https://www.youtube.com/watch?v={de}", download=True)
+
+        try:
+            try:
+                info = bajar(video_id)
+            except Exception as e:
+                # Un video con restricción de edad no se baja sin una cuenta. Si es de un tema, casi
+                # siempre está también el tema de audio (el del disco), que no la tiene: se baja
+                # ése, y queda guardado como el que se pidió.
+                otra = self._otra(video_id, trabajo.datos) if _pide_edad(e) else None
+                if not otra:
+                    raise
+                print(f"  ↪ “{(trabajo.datos or {}).get('title') or video_id}”: el video pide confirmar la edad; "
+                      "bajo la versión de audio", flush=True)
+                info = bajar(otra)
             ruta = (info.get("requested_downloads") or [{}])[0].get("filepath")
             if not ruta or not os.path.exists(ruta):
                 raise ErrorDescarga("no se pudo bajar (¿transmisión en vivo o archivo enorme?)")
@@ -227,9 +251,19 @@ class Descargas:
             trabajo.ruta = ruta
         except Exception as e:  # yt-dlp tira DownloadError con mensajes largos
             msg = str(e).replace("ERROR: ", "").split("\n")[0]
+            if _pide_edad(e):
+                msg = "YouTube pide una cuenta para confirmar la edad, y no encontré otra versión del tema"
             trabajo.error = msg[:160] or type(e).__name__
         finally:
             trabajo.listo.set()
+
+    def _otra(self, video_id, datos):
+        """Otro video de YouTube con el mismo tema (lo busca quien armó las Descargas), o None."""
+        try:
+            otra = self.otra_version(video_id, datos or {}) if self.otra_version else None
+        except Exception:   # (no encontrarla no es un error nuevo: queda el de la edad)
+            otra = None
+        return otra if otra and otra != video_id else None
 
     def pedir(self, video_id, datos=None):
         """Arranca la descarga en segundo plano (si no estaba ya, o guardada).
@@ -702,9 +736,10 @@ class Descargas:
 
 # ---------------------------------------------------------------------- mpv
 
-def _ruta_socket():
-    """Ruta para el socket IPC. Los sockets Unix aceptan rutas de ~108 bytes como mucho."""
-    nombre = f"rockola-mpv-{os.getpid()}.sock"
+def _ruta_socket(numero=0):
+    """Ruta para el socket IPC. Los sockets Unix aceptan rutas de ~108 bytes como mucho.
+    `numero`: cuál de los mpv es (con el crossfade hay dos, cada uno con su socket)."""
+    nombre = f"rockola-mpv-{os.getpid()}{f'-{numero}' if numero else ''}.sock"
     for base in (os.environ.get("XDG_RUNTIME_DIR"), tempfile.gettempdir(), "/tmp"):
         if base and os.path.isdir(base) and len(os.path.join(base, nombre).encode()) < 100:
             return os.path.join(base, nombre)
@@ -719,6 +754,18 @@ def _morir_con_el_padre():
         ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
     except Exception:
         pass
+
+
+# Ojo con PR_SET_PDEATHSIG: el «padre» es el hilo que creó el proceso, no el programa. Si a mpv lo
+# lanza un hilo de paso (el de un pedido de la web que lo encuentra caído, el de un crossfade),
+# recibe el SIGTERM apenas ese hilo termina. Por eso se lanza siempre desde este, que no termina
+# hasta que se cierra la rockola.
+_LANZADOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mpv-lanzador")
+
+
+def _lanzar(cmd, **opciones):
+    """subprocess.Popen, pero desde el hilo que queda (ver arriba)."""
+    return _LANZADOR.submit(subprocess.Popen, cmd, **opciones).result()
 
 
 class ErrorMpv(Exception):
@@ -737,9 +784,12 @@ class Mpv:
 
     `pedido` es lo que le pedimos que suene (lo usa el Director para decidir).
     `actual` es lo que mpv confirmó que está sonando (lo usan los eventos).
+
+    Casi siempre hay uno solo. Con el crossfade prendido el Director levanta otro (`numero` 1):
+    mientras uno termina una canción, el otro arranca la que sigue.
     """
 
-    def __init__(self, al_terminar, al_cambiar, volumen=80, args_extra=(), al_reiniciar=None):
+    def __init__(self, al_terminar, al_cambiar, volumen=80, args_extra=(), al_reiniciar=None, numero=0):
         if not shutil.which("mpv"):
             raise ErrorMpv("No encuentro mpv. Instalalo con: sudo apt install mpv")
         self.al_terminar = al_terminar
@@ -750,7 +800,7 @@ class Mpv:
         self.arrancado = False
         self.timeouts = 0
         self.args_extra = list(args_extra)
-        self.socket_path = _ruta_socket()
+        self.socket_path = _ruta_socket(numero)
         self.proc = None
         self.sock = None
         self.log = None
@@ -782,8 +832,8 @@ class Mpv:
                f"--input-ipc-server={self.socket_path}", *self.args_extra]
         # stderr a un archivo (no a un pipe): si nadie lee un pipe, se llena y mpv se traba.
         self.log = tempfile.TemporaryFile()
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                     stderr=self.log, preexec_fn=_morir_con_el_padre)
+        self.proc = _lanzar(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=self.log, preexec_fn=_morir_con_el_padre)
         limite = time.time() + 10
         while not os.path.exists(self.socket_path):
             if self.proc.poll() is not None:

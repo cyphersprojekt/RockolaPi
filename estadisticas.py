@@ -56,6 +56,18 @@ CREATE TABLE IF NOT EXISTS generos (
     genero        TEXT NOT NULL,     -- '' = iTunes no lo conoce
     consultado    REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reacciones (
+    id       INTEGER PRIMARY KEY,
+    sala     TEXT NOT NULL,
+    cuando   REAL NOT NULL,     -- cuándo dejó de sonar la canción (segundos unix)
+    video_id TEXT NOT NULL,
+    titulo   TEXT NOT NULL,
+    artista  TEXT NOT NULL,
+    tapa     TEXT NOT NULL,
+    emoji    TEXT NOT NULL,     -- 🔥, ❤️ o 😴
+    cuantas  INTEGER NOT NULL   -- cuántas personas reaccionaron así esa vez que sonó
+);
+CREATE INDEX IF NOT EXISTS reacciones_sala ON reacciones (sala, cuando);
 PRAGMA user_version = 1;
 """
 
@@ -210,6 +222,17 @@ class Estadisticas:
             _junto(_primer_artista(artista)), str(item.get("album") or "")[:200], str(item.get("thumb") or "")[:500],
             duracion, round(escuchado, 1), por, _clave_por(por), origen)))
 
+    def anotar_reacciones(self, sala, item, cuentas):
+        """`item` terminó de sonar en `sala` con esas reacciones: {"🔥": 3, "❤️": 1}."""
+        if not item.get("videoId"):
+            return
+        ahora = time.time()
+        for emoji, n in cuentas.items():
+            if isinstance(n, int) and n > 0:
+                self.fila.put(("reaccion", (str(sala), ahora, str(item["videoId"]), str(item.get("title") or "")[:200],
+                                            str(item.get("artist") or "")[:200], str(item.get("thumb") or "")[:500],
+                                            str(emoji)[:8], n)))
+
     def borrar_sala(self, sala):
         """Al borrar una sala, se van sus estadísticas (si se crea otra con el mismo nombre, que
         no herede las de la anterior)."""
@@ -232,8 +255,12 @@ class Estadisticas:
                                 clave_artista, album, tapa, duracion, escuchado, por, clave_por, origen)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", t[1])
                             nuevas = True
+                        elif t and t[0] == "reaccion":
+                            self.db.execute("""INSERT INTO reacciones (sala, cuando, video_id, titulo, artista, tapa,
+                                emoji, cuantas) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", t[1])
                         elif t and t[0] == "borrar_sala":
                             self.db.execute("DELETE FROM escuchas WHERE sala = ?", (t[1],))
+                            self.db.execute("DELETE FROM reacciones WHERE sala = ?", (t[1],))
             except sqlite3.Error as e:
                 print(f"  ⚠ no pude anotar en las estadísticas: {e}", flush=True)
             if nuevas:
@@ -378,6 +405,14 @@ class Estadisticas:
                 SELECT video_id, titulo, artista, tapa, MAX(cuando), COUNT(*)
                 FROM escuchas WHERE {donde} AND NOT ({VALE})
                 GROUP BY video_id HAVING COUNT(*) >= 2 ORDER BY 6 DESC LIMIT 1""")
+            # Las reacciones (🔥 ❤️ 😴) son de todos: con `persona` no se muestran. De cada una, la
+            # canción que más juntó en el período (la primera de cada emoji, en este orden).
+            reacciones = [] if persona else self.db.execute(f"""
+                SELECT emoji, video_id, titulo, artista, tapa, SUM(cuantas), MAX(cuando)
+                FROM reacciones WHERE sala IN ({', '.join('?' * len(salas))})
+                    AND cuando >= ? AND cuando < ?
+                GROUP BY emoji, video_id ORDER BY 6 DESC, 7 DESC""",
+                [*salas, desde if desde is not None else 0, hasta if hasta is not None else 1e18]).fetchall()
             anios = [a for (a,) in self.db.execute(f"""
                 SELECT DISTINCT strftime('%Y', cuando, 'unixepoch', 'localtime') FROM escuchas
                 WHERE {de_siempre[0]} ORDER BY 1 DESC""", de_siempre[1])]
@@ -394,6 +429,9 @@ class Estadisticas:
         sin_genero = sum(n for g, n, _ in generos if not g)
         cancion = lambda f: {"videoId": f[0], "title": f[1], "artist": f[2], "thumb": f[3]}
         semana = dict(dias)
+        mas_reacciones = {}
+        for emoji, *resto in reacciones:
+            mas_reacciones.setdefault(emoji, resto)
         return {
             "person": (nombres.get(_clave_por(persona)) or " ".join(str(persona).split())) if persona else None,
             "years": anios,
@@ -411,4 +449,6 @@ class Estadisticas:
             "weekdays": [round(semana.get(d % 7, 0)) for d in range(1, 8)],   # de lunes a domingo
             "topDay": {"date": record[0][0], "seconds": round(record[0][1]), "plays": record[0][2]} if record else None,
             "skipped": dict(cancion(salteada[0]), times=salteada[0][5]) if salteada else None,
+            # la que más juntó de cada reacción: [{"emoji": "🔥", videoId, title, artist, thumb, "count": 7}]
+            "reactions": [dict(cancion(f), emoji=emoji, count=f[4]) for emoji, f in mas_reacciones.items()],
         }

@@ -173,6 +173,8 @@ class Rockola(App):
         self.recap = None             # las estadísticas que se están mostrando (lo de /api/stats)
         self.periodo = 0              # cuál de PERIODOS toca la próxima vez
         self.sonando = None           # el id de lo que suena (cuando cambia, se vuelve al reproductor)
+        self.reaccion_vista = None    # el número de la última reacción que llegó (None: todavía ninguna)
+        self.reaccion = None          # (hasta cuándo, emoji, quién): la que se está mostrando un instante
         self.estado = None
         self.recibido = time.monotonic()
         self.url_publica = ""
@@ -285,6 +287,10 @@ class Rockola(App):
         if aviso and self.ultimo_aviso is not None and aviso["id"] != self.ultimo_aviso:
             self.notify(aviso["text"], severity="warning", timeout=8, markup=False)
         self.ultimo_aviso = aviso["id"] if aviso else 0
+        ultima = (s.get("reactions") or {}).get("last")
+        if ultima and self.reaccion_vista is not None and ultima["n"] != self.reaccion_vista:
+            self.reaccion = (time.monotonic() + 6, ultima["emoji"], ultima["by"])   # nueva: unos segundos a la vista
+        self.reaccion_vista = ultima["n"] if ultima else 0
         ahora = (s.get("now") or {}).get("id")
         if self.vista == "recap" and ahora != self.sonando:
             self.mostrar("reproductor")   # empezó otro tema: que se vea en grande
@@ -435,10 +441,12 @@ class Rockola(App):
         t.append(now["title"] + "\n", style="bold")
         t.append(now["artist"] + "\n\n", style="")
         if now.get("azar"):
-            t.append("🔀 al azar, de las guardadas\n\n", style="bold")
+            t.append("🔀 al azar, de las guardadas\n", style="bold")
         else:
             t.append("pedida por ", style="dim")
-            t.append(now["by"] + "\n\n", style="bold")
+            t.append(now["by"] + "\n", style="bold")
+        t.append_text(self.renglon_de_reacciones(s))
+        t.append("\n\n")
 
         # progreso: interpolado entre mensajes del servidor
         d = p.get("d") or now.get("duration") or 0
@@ -460,6 +468,25 @@ class Rockola(App):
             t.append("▯" * (n - v), style="dim")
             t.append(f" {vol}%", style="dim")
         info.update(t)
+
+    def renglon_de_reacciones(self, s):
+        """Las reacciones a lo que suena (🔥 ♥ 😴, con cuántas van), los votos para saltearla y,
+        por unos segundos, la última que llegó y de quién. Siempre el mismo renglón."""
+        r, sk = s.get("reactions") or {}, s.get("skip")
+        t = Text()
+        # (el corazón, con un símbolo de una celda: el emoji con variante corre lo que sigue)
+        for emoji, se_ve, estilo in (("🔥", "🔥", ""), ("❤️", "♥", "bold red"), ("😴", "😴", "")):
+            n = (r.get("counts") or {}).get(emoji, 0)
+            t.append(se_ve, style=estilo)
+            t.append(f" {n}   ", style="bold" if n else "dim")
+        if sk:   # (con palabras: en la pared, «1/3» solo no dice nada)
+            t.append(f"saltear {sk['votes']}/{sk['needed']}", style="bold" if sk["votes"] else "dim")
+        if self.reaccion and time.monotonic() < self.reaccion[0]:
+            _, emoji, quien = self.reaccion
+            t.append("   ← ", style="dim")
+            t.append("♥" if emoji == "❤️" else emoji, style="bold red" if emoji == "❤️" else "")
+            t.append(f" {quien}", style=f"bold {self.acento}")
+        return t
 
     def pintar_resumen(self):
         """Arriba, en la vista de las estadísticas: cuánto sonó en el período y, en chiquito,
@@ -557,26 +584,29 @@ class Rockola(App):
         titulo = f"PRÓXIMAS · {len(cola)} · {fmt(total)}" if cola else "PRÓXIMAS · la cola está vacía"
         self.query_one("#titulo-cola", Static).update(titulo)
 
-        firma = (tuple((i["id"], i["by"]) for i in cola), self.size.width)
+        firma = (tuple((i["id"], i["by"], i.get("votes")) for i in cola), self.size.width)
         if firma == self.firma_cola:
             return
         self.firma_cola = firma
         tabla = self.query_one(DataTable)
         elegida = self.id_elegido()
         tabla.clear(columns=True)
-        libre = max(20, self.size.width - 2 - 4 - 6 - 14 - 10)  # #, dur, pidió y separaciones
+        libre = max(20, self.size.width - 2 - 4 - 6 - 14 - 6 - 10)  # #, dur, pidió, votos y separaciones
         w_tit, w_art = int(libre * 0.6), libre - int(libre * 0.6)
         tabla.add_column("#", width=3)
         tabla.add_column("Canción", width=w_tit)
         tabla.add_column("Artista", width=w_art)
         tabla.add_column("Dur.", width=5)
         tabla.add_column("Pidió", width=12)
+        tabla.add_column("Votos", width=5)   # los 👍 que le pusieron desde la web (la suben en la cola)
         ids = []
         for n, it in enumerate(cola, 1):
             # Text(...) y no str: DataTable interpreta los str como markup, y un
             # compañero llamado "[/]" rompería la pantalla.
+            votos = it.get("votes") or 0
             tabla.add_row(Text(str(n)), Text(cortar(it["title"], w_tit)), Text(cortar(it["artist"], w_art)),
-                          Text(fmt(it["duration"])), Text(cortar(it["by"], 12)), key=it["id"])
+                          Text(fmt(it["duration"])), Text(cortar(it["by"], 12)),
+                          Text(f"▲ {votos}" if votos else "", style=f"bold {self.acento}"), key=it["id"])
             ids.append(it["id"])
         if elegida in ids:
             tabla.move_cursor(row=ids.index(elegida))

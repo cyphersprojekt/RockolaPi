@@ -22,6 +22,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -62,6 +63,9 @@ GUARDAR_GB = 16           # espacio para las canciones guardadas (0 = no guardar
 CARPETA = ""              # dónde se guardan ("" = ~/.cache/rockola)
 PREDESCARGAR = 0          # canciones de la cola que se bajan por adelantado (0 = todas)
 AZAR_AL_PRENDER = True    # al prender la Raspberry: 🔀 prendido y a sonar (con el parlante listo)
+VOTOS_SALTEAR = 3         # cuántos tienen que votar ⏭ para que la que suena se saltee sola (0 = no se vota)
+CROSSFADE = 6             # segundos que se pisan dos canciones con el crossfade prendido (se prende
+                          # desde la web; 0 = no hay crossfade)
 CLIMA = ""                # el clima de la barra de arriba: "" = el de donde está la rockola (según su
                           # IP), una ciudad ("Rosario") o False para no mostrarlo
 CONFIG = Path(__file__).parent / "rockola.toml"
@@ -87,11 +91,13 @@ state = {
     "version": 0,      # sube con cada cambio, en cualquier sala (el Director lo mira)
     "mode": "navegador",
     "volume": None,    # el del parlante (sala principal)
+    "crossfade": False,  # si las canciones se pisan al cambiar (se prende desde la web; ver Director.fundir)
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
     "sin_red": False,  # no hay internet: las de "saving" esperan a que vuelva (ver bucle_guardar)
     "online": None,    # si hay internet (ver bucle_internet): el led de las páginas y de la pantalla. None: todavía no se sabe
     "weather": None,   # el clima (ver bucle_clima): { temp, text, icon, symbol, city }, o None si no se sabe
 }
+REACCIONES = ("🔥", "❤️", "😴")   # con las que se reacciona a la que suena
 MAX_GUARDANDO = 40     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
 PRINCIPAL = "principal"
 MAX_SALAS = 8          # contando la principal
@@ -116,6 +122,12 @@ class Sala:
         self.notice = None                 # {"id", "text"}: último aviso (p. ej. una canción salteada)
         self.shuffle = False               # con la cola vacía, suenan guardadas al azar (modo mpv)
         self.owners = {}                   # item id -> client id (quién la pidió, para poder quitarla)
+        self.votos = {}                    # item id -> [client ids]: los 👍 de cada una de la cola
+        self.fijas = set()                 # ids de las que puso en su lugar alguien con el PIN (⤒ ↑):
+                                           # una con más votos no les pasa por arriba
+        self.saltear = []                  # client ids que votaron saltear la que suena
+        self.reacciones = {}               # emoji -> [client ids]: las reacciones a la que suena
+        self.reaccion = None               # {"n", "emoji", "by"}: la última (las pantallas la muestran un instante)
         self.chat = []                     # [{"id", "by", "text", "at", "client"}]
         self.oyentes = {}                  # client -> cuándo se lo vio con la 📻 radio prendida
         self.reanudar = None               # {"id", "t", "pausada"}: la que sonaba antes de reiniciar,
@@ -146,7 +158,7 @@ _local = threading.local()
 def cargar_config(ruta):
     """Lee rockola.toml (si existe) y pisa los valores por defecto."""
     global PORT, MAX_PER_PERSON, MAX_DURATION, VOLUME, NORMALIZAR, MPV_ARGS, PIN, IP_FIJA, MODO
-    global GUARDAR_GB, CARPETA, PREDESCARGAR, AZAR_AL_PRENDER, CLIMA
+    global GUARDAR_GB, CARPETA, PREDESCARGAR, AZAR_AL_PRENDER, CLIMA, CROSSFADE, VOTOS_SALTEAR
     if not ruta.exists():
         return
     with open(ruta, "rb") as f:
@@ -164,6 +176,8 @@ def cargar_config(ruta):
     CARPETA = str(c.get("carpeta", CARPETA)).strip()
     PREDESCARGAR = max(0, int(c.get("predescargar", PREDESCARGAR)))
     AZAR_AL_PRENDER = bool(c.get("azar_al_prender", AZAR_AL_PRENDER))
+    CROSSFADE = max(0.0, min(15.0, float(c.get("crossfade", CROSSFADE))))
+    VOTOS_SALTEAR = max(0, int(c.get("votos_para_saltear", VOTOS_SALTEAR)))
     clima = c.get("clima", CLIMA)
     CLIMA = False if clima is False else str(clima).strip()
 
@@ -388,7 +402,8 @@ def set_radio(sala, body):
 # (por si se corta la luz) y al apagar la rockola. El chat no: se borra. Ahí quedan también las
 # que esperan para bajarse (⬇), en su orden: al volver a arrancar se siguen bajando.
 
-CLAVES_ITEM = ("id", "videoId", "title", "artist", "duration", "thumb", "album", "by", "playlist", "azar")
+CLAVES_ITEM = ("id", "videoId", "title", "artist", "duration", "thumb", "album", "by", "playlist", "azar",
+               "reacciones")
 CLAVES_A_BAJAR = ("videoId", "title", "artist", "datos", "album", "salas", "clientes")   # de state["saving"]
 MAX_COLA_GUARDADA = 2000
 lock_colas = threading.Lock()   # (escriben el hilo de bucle_colas y main, al apagar)
@@ -408,6 +423,8 @@ def foto_de_colas():
             "queue": s.queue,
             "history": s.history,
             "owners": {k: v for k, v in s.owners.items() if k in en_cola},
+            "votes": {k: v for k, v in s.votos.items() if k in en_cola and v},
+            "pinned": [k for k in s.fijas if k in en_cola],
         }
     # Las que esperan para bajarse (también la que se está bajando: si se corta, se baja de nuevo).
     # Las que fallaron no: son un aviso que dura un minuto.
@@ -466,6 +483,11 @@ def _item_guardado(i):
     item["duration"] = duracion
     if not isinstance(item.get("playlist", {}), dict):
         del item["playlist"]
+    if "reacciones" in item:   # (las que tuvo una que ya sonó: {"🔥": 3})
+        r = item["reacciones"] if isinstance(item["reacciones"], dict) else {}
+        item["reacciones"] = {e: int(r[e]) for e in REACCIONES if isinstance(r.get(e), int) and r[e] > 0}
+        if not item["reacciones"]:
+            del item["reacciones"]
     return item
 
 
@@ -520,6 +542,10 @@ def retomar_colas(en_pausa=False):
             en_cola = {i["id"] for i in s.queue}
             duenos = d.get("owners") if isinstance(d.get("owners"), dict) else {}
             s.owners = {k: str(v)[:64] for k, v in duenos.items() if k in en_cola}
+            votos = d.get("votes") if isinstance(d.get("votes"), dict) else {}
+            s.votos = {k: [str(c)[:64] for c in v if isinstance(c, str)] for k, v in votos.items()
+                       if k in en_cola and isinstance(v, list)}
+            s.fijas = {k for k in (d.get("pinned") if isinstance(d.get("pinned"), list) else []) if k in en_cola}
             now = _item_guardado(d.get("now"))
             if now:
                 try:
@@ -942,6 +968,66 @@ def _canciones(temas, tapa=""):
     return canciones, no_disponibles
 
 
+DE_AUDIO = "MUSIC_VIDEO_TYPE_ATV"   # en YouTube Music: un tema de audio (lo demás son videos)
+
+
+def _temas_de_audio(a):
+    """Los temas de un álbum (lo que devuelve ytmusicapi), en su versión de audio. YouTube Music
+    a veces pone, en lugar del tema del disco, su video oficial: es otra grabación (con la
+    intro del video) y puede tener restricción de edad, y entonces no se baja. El álbum trae
+    aparte su lista «de audio»: de ahí sale el tema del disco. Los que ya están guardados con el
+    id del video quedan así (si no, ese tema aparecería dos veces entre las guardadas)."""
+    from reproductor import _para_buscar
+
+    temas = a.get("tracks") or []
+    cambia = lambda t: (t.get("videoId") and t.get("videoType") not in (None, DE_AUDIO)
+                        and not (director and director.descargas.datos(t["videoId"])))
+    if not a.get("audioPlaylistId") or not any(cambia(t) for t in temas):
+        return temas
+    try:
+        de_audio = [x for x in yt().get_playlist(a["audioPlaylistId"], limit=len(temas) + 20).get("tracks") or []
+                    if VIDEO_ID.match(x.get("videoId") or "") and x.get("videoType") == DE_AUDIO]
+    except Exception:   # sin la lista de audio quedan como vinieron
+        return temas
+    clave = lambda t: _para_buscar(t.get("title")).strip()
+    por_titulo = {}
+    for x in de_audio:
+        por_titulo.setdefault(clave(x), x["videoId"])
+    return [dict(t, videoId=por_titulo.get(clave(t), t["videoId"])) if cambia(t) else t for t in temas]
+
+
+def version_de_audio(video_id, datos):
+    """El id de otro video de YouTube con el mismo tema, en versión de audio: para cuando el que
+    se pidió es un video con restricción de edad, que sin una cuenta no se baja (lo llama
+    Descargas). Primero en su álbum (ahí está seguro, si el álbum es ése); si no, entre los temas
+    que YouTube Music encuentra con ese título y ese artista. None si no aparece."""
+    from reproductor import _para_buscar, _primer_artista
+
+    datos = datos if datos.get("title") else meta_cache.get(video_id) or {}
+    titulo, artista = str(datos.get("title") or ""), str(datos.get("artist") or "")
+    clave, primero = _para_buscar(titulo).strip(), _para_buscar(_primer_artista(artista)).strip()
+    if not clave:
+        return None
+    if datos.get("album"):
+        try:
+            for c in get_album(album_llamado(datos["album"], artista))["songs"]:
+                if c["videoId"] != video_id and _para_buscar(c["title"]).strip() == clave:
+                    return c["videoId"]
+        except Exception:   # no está el álbum, o YouTube no contesta: se prueba buscando el tema
+            pass
+    # (el título primero: con el artista adelante YouTube Music a veces no trae el tema del disco)
+    for buscar in (f"{titulo} {_primer_artista(artista)}", f"{_primer_artista(artista)} {titulo}"):
+        iguales = []
+        for r in yt().search(buscar, filter="songs", limit=20):
+            suyos = _para_buscar(", ".join(a["name"] for a in r.get("artists") or [] if a.get("name")))
+            if (r.get("videoType") == DE_AUDIO and VIDEO_ID.match(r.get("videoId") or "") and r["videoId"] != video_id
+                    and _para_buscar(r.get("title")).strip() == clave and primero and primero in suyos):
+                iguales.append((abs((r.get("duration_seconds") or 0) - (datos.get("duration") or 0)), r["videoId"]))
+        if iguales:
+            return min(iguales)[1]   # (si hay varias, la que dura más parecido)
+    return None
+
+
 def get_album(bid):
     """Los temas de un álbum de YouTube Music (su browseId, «MPRE…», viene de buscar_albumes)."""
     hit = albumes.get(bid)
@@ -953,7 +1039,7 @@ def get_album(bid):
         tapa = _thumb(a.get("thumbnails"))
         artista = ", ".join(x["name"] for x in a.get("artists") or [] if x.get("name"))
         # get_album ya les pone a los temas el nombre del álbum (y su artista, si no tienen).
-        canciones, no_disponibles = _canciones(a.get("tracks") or [], tapa)
+        canciones, no_disponibles = _canciones(_temas_de_audio(a), tapa)
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         raise ApiError(404, "No pude abrir ese álbum")
     datos = {"browseId": bid, "title": titulo[:120] or "Álbum", "artist": artista[:60], "thumb": tapa,
@@ -1270,13 +1356,24 @@ def public_state(sala, client=None, since=None, radio=False):
             "rooms": [s.publica() for s in salas.values()],
             "tvs": teles.publicas(),   # las salas de tv (📺): otra página, /tv
             "now": sala.now,
-            "queue": [dict(i, mine=bool(client) and sala.owners.get(i["id"]) == client)
+            "queue": [dict(i, mine=bool(client) and sala.owners.get(i["id"]) == client,
+                           votes=len(sala.votos.get(i["id"], ())),
+                           voted=bool(client) and client in sala.votos.get(i["id"], ()))
                       for i in sala.queue],
+            # Saltear por votos: cuántos van, cuántos hacen falta y si este ya votó (None: no se vota).
+            "skip": {"votes": len(sala.saltear), "needed": VOTOS_SALTEAR,
+                     "voted": bool(client) and client in sala.saltear} if VOTOS_SALTEAR and sala.now else None,
+            # Las reacciones a la que suena: cuántas de cada una, cuáles puso este y la última de todas.
+            "reactions": {"counts": {e: len(sala.reacciones.get(e, ())) for e in REACCIONES},
+                          "mine": [e for e in REACCIONES if client and client in sala.reacciones.get(e, ())],
+                          "last": sala.reaccion},
             "history": sala.history[-10:][::-1],
             "progress": progreso_ahora(sala),
             # (sin parlante: hasta que la que suena esté bajada y arranque, "cargando")
             "loading": sala.loading or (not sala.principal and sala.now is not None and not sala.lista),
             "volume": state["volume"] if sala.principal else None,
+            # (None: acá no hay crossfade; sólo en la sala del parlante, en modo mpv)
+            "crossfade": state["crossfade"] if director and sala.principal and CROSSFADE else None,
             "notice": sala.notice,
             "shuffle": sala.shuffle,
             # Sin parlante: la pausaron (con el PIN), o está en espera porque nadie la escucha.
@@ -1703,6 +1800,77 @@ def remove_song(sala, body, is_local):
             raise ApiError(403, "Sólo podés quitar tus propias canciones")
         sala.queue = [i for i in sala.queue if i["id"] != item_id]
         sala.owners.pop(item_id, None)
+        sala.votos.pop(item_id, None)
+        sala.fijas.discard(item_id)
+        bump(sala)
+
+
+def votar(sala, body):
+    """👍 a una de la cola: sube hasta quedar debajo de las que tienen tantos votos como ella (o
+    más). Un voto por persona y por canción, y no a la que pidió uno mismo: si no, cada uno
+    subiría la suya. A las que puso en su lugar alguien con el PIN (⤒ ↑) no les pasa por arriba."""
+    item_id, client = str(body.get("id", "")), str(body.get("client", ""))[:64]
+    if not client:
+        raise ApiError(400, "Falta el identificador; recargá la página")
+    with lock:
+        q = sala.queue
+        i = next((k for k, x in enumerate(q) if x["id"] == item_id), None)
+        if i is None:
+            raise ApiError(404, "Esa canción ya no está en la cola")
+        if sala.owners.get(item_id) == client:
+            raise ApiError(409, "Es la que pediste vos: la votan los demás")
+        votos = sala.votos.setdefault(item_id, [])
+        if client in votos:
+            raise ApiError(409, "Ya la votaste")
+        votos.append(client)
+        cuantos = lambda x: len(sala.votos.get(x["id"], ()))
+        j = i
+        while j > 0 and q[j - 1]["id"] not in sala.fijas and cuantos(q[j - 1]) < len(votos):
+            j -= 1
+        q.insert(j, q.pop(i))
+        bump(sala)
+
+
+def votar_saltear(sala, body):
+    """Un voto para saltear la que suena. Con VOTOS_SALTEAR (de personas distintas) pasa a la
+    siguiente, como con ⏭. `id`: cuál es, para que un voto que llega tarde no caiga en otra."""
+    client = str(body.get("client", ""))[:64]
+    if not client:
+        raise ApiError(400, "Falta el identificador; recargá la página")
+    if not VOTOS_SALTEAR:
+        raise ApiError(409, "Acá no se saltea por votos (votos_para_saltear = 0 en rockola.toml)")
+    with lock:
+        now = sala.now
+        if not now or now["id"] != str(body.get("id", "")):
+            raise ApiError(409, "Esa canción ya no está sonando")
+        if client in sala.saltear:
+            raise ApiError(409, "Ya votaste saltearla")
+        sala.saltear.append(client)
+        alcanza = len(sala.saltear) >= VOTOS_SALTEAR
+        bump(sala)
+    if alcanza and advance(sala, {"finished": now["id"]}):
+        avisar(f"Salteada “{now['title']}”: la votaron {VOTOS_SALTEAR}", sala)
+
+
+def reaccionar(sala, body):
+    """Una reacción (🔥 ❤️ 😴) a la que suena: una de cada una por persona y por canción. Se ven al
+    lado del tema y, un instante, en las pantallas; cuando la canción termina quedan en las
+    estadísticas (ver _sonar)."""
+    emoji, client = str(body.get("emoji", "")), str(body.get("client", ""))[:64]
+    name = str(body.get("by", "")).strip()[:30] or "Alguien"
+    if not client:
+        raise ApiError(400, "Falta el identificador; recargá la página")
+    if emoji not in REACCIONES:
+        raise ApiError(400, "Esa reacción no existe")
+    with lock:
+        now = sala.now
+        if not now or now["id"] != str(body.get("id", "")):
+            raise ApiError(409, "Esa canción ya no está sonando")
+        quienes = sala.reacciones.setdefault(emoji, [])
+        if client in quienes:
+            raise ApiError(409, "Ya reaccionaste así a esta canción")
+        quienes.append(client)
+        sala.reaccion = {"n": (sala.reaccion or {}).get("n", 0) + 1, "emoji": emoji, "by": name}
         bump(sala)
 
 
@@ -1728,12 +1896,20 @@ def _sonar(sala, item):
     """Que suene `item` (o nada): la que sonaba pasa a "sonaron recién" (y a las estadísticas,
     con lo que llegó a sonar). Con el lock tomado."""
     if sala.now:
+        cuentas = {e: len(sala.reacciones[e]) for e in REACCIONES if sala.reacciones.get(e)}
         if stats and salas.get(sala.id) is sala:   # (si la borraron, sus estadísticas ya se fueron)
             stats.anotar(sala.id, sala.now, progreso_ahora(sala)["t"])
-        sala.history = (sala.history + [sala.now])[-30:]
+            if cuentas:
+                stats.anotar_reacciones(sala.id, sala.now, cuentas)
+        # (las reacciones que tuvo quedan con ella en «sonaron recién»)
+        sala.history = (sala.history + [dict(sala.now, reacciones=cuentas) if cuentas else sala.now])[-30:]
     sala.now = item
+    sala.saltear, sala.reacciones = [], {}   # los votos para saltear y las reacciones eran de la otra
     if item:
+        item.pop("reacciones", None)         # (si vuelve a sonar, empieza de cero)
         sala.owners.pop(item["id"], None)
+        sala.votos.pop(item["id"], None)
+        sala.fijas.discard(item["id"])
     sala.progress = {"t": 0, "d": 0, "playing": False}
     sala.trabajo, sala.lista = None, False   # (sin parlante: Director.mover la baja y la arranca)
     sala.reanudar = None
@@ -1790,6 +1966,21 @@ def set_shuffle(sala, body):
         arrancar_al_azar(sala)
 
 
+def set_crossfade(sala, body):
+    """Prende o apaga el crossfade (con el PIN): con él, cuando a una canción le quedan unos
+    segundos, la que sigue va entrando mientras esa se va. Queda guardado."""
+    if not director or not sala.principal:
+        raise ApiError(409, "El crossfade es de la sala que suena en el parlante (en modo mpv)")
+    if not CROSSFADE:
+        raise ApiError(409, "El crossfade está sacado (crossfade = 0 en rockola.toml)")
+    on = bool(body.get("on"))
+    with lock:
+        state["crossfade"] = on
+        bump(sala)
+    guardar_ajustes(crossfade=on)
+    director.con_crossfade(on)
+
+
 def skip(sala):
     """⏭ sin saber cuál está sonando (lo usan los botones físicos)."""
     with lock:
@@ -1816,7 +2007,10 @@ def previous(sala):
         anterior = sala.history.pop()
         if sala.now:
             sala.queue.insert(0, sala.now)
+            sala.fijas.add(sala.now["id"])   # (vuelve primera: que siga después de la anterior)
         sala.now = anterior
+        anterior.pop("reacciones", None)     # (suena de nuevo: las reacciones y los votos, de cero)
+        sala.saltear, sala.reacciones = [], {}
         sala.progress = {"t": 0, "d": 0, "playing": False}
         sala.trabajo, sala.lista, sala.reanudar = None, False, None
         bump(sala)
@@ -1842,6 +2036,7 @@ def move_first(sala, body):
     item_id = str(body.get("id", ""))
     with lock:
         sala.queue.sort(key=lambda i: i["id"] != item_id)  # sort estable: sólo sube esa
+        sala.fijas.add(item_id)   # (la pusieron ahí a mano: los votos no le pasan por arriba)
         bump(sala)
 
 
@@ -1859,6 +2054,7 @@ def move_to(sala, body):
             return
         item = q.pop(idx)
         q.insert(max(0, min(len(q), to)), item)
+        sala.fijas.add(item_id)   # (la pusieron ahí a mano: los votos no le pasan por arriba)
         bump(sala)
 
 
@@ -1871,6 +2067,7 @@ def mezclar_cola(sala):
         antes = [i["id"] for i in q]
         while [i["id"] for i in q] == antes:   # que se note: nunca el mismo orden
             random.shuffle(q)
+        sala.fijas.clear()   # (ya ninguna está donde la habían puesto)
         bump(sala)
 
 
@@ -2076,15 +2273,23 @@ class Director:
     """
 
     def __init__(self):
-        from reproductor import Descargas, Mpv
-        args = list(MPV_ARGS)
+        from reproductor import Descargas
+        self.args_mpv = list(MPV_ARGS)
         if NORMALIZAR:
-            args.append("--af=lavfi=[dynaudnorm=f=500:g=31:p=0.95]")
+            self.args_mpv.append("--af=lavfi=[dynaudnorm=f=500:g=31:p=0.95]")
         self.descargas = Descargas(carpeta() / "canciones", limite=GUARDAR_GB * 1024 ** 3,
-                                   al_guardar=self.al_guardar, sala_vieja=PRINCIPAL)
-        self.mpv = Mpv(self.al_terminar, self.al_cambiar, VOLUME, args, al_reiniciar=self.al_reiniciar)
-        self.mpv.iniciar()
+                                   al_guardar=self.al_guardar, sala_vieja=PRINCIPAL,
+                                   otra_version=version_de_audio)
+        self.numeros = itertools.count(1)
+        # Para el crossfade (ver fundir): otro mpv, que se levanta recién cuando se prende. En un
+        # crossfade arranca la canción que sigue y pasa a ser `self.mpv`; el que tocaba la
+        # anterior queda de `otro`, para el próximo.
+        self.otro = None
+        self.lock_otro = threading.Lock()   # (levantarlo o cerrarlo, de a uno)
+        self.fundido = None                 # el crossfade en curso: {"sale": id, "entra": id}
         self.pausado = False
+        self.mpv = self._mpv(VOLUME)   # el que toca lo que suena
+        self.mpv.iniciar()             # (desde acá llegan sus avisos: lo de arriba ya tiene que estar)
         self.ultimo_error = None
         with lock:
             state["volume"] = VOLUME
@@ -2101,16 +2306,51 @@ class Director:
         threading.Thread(target=self.bucle_guardar, daemon=True, name="guardar").start()
         threading.Thread(target=self.bucle_salas, daemon=True, name="salas").start()
 
+    def _mpv(self, volumen, numero=0):
+        """Un mpv cuyos avisos dicen de cuál vienen (con el crossfade hay dos)."""
+        from reproductor import Mpv
+        m = Mpv(lambda item, error: self.al_terminar(item, error, m),
+                lambda nombre, valor: self.al_cambiar(nombre, valor, m),
+                volumen, self.args_mpv, al_reiniciar=lambda: self.al_reiniciar(m), numero=numero)
+        return m
+
     def cerrar(self):
-        self.mpv.cerrar()
+        for m in (self.mpv, self.otro):
+            if m is not None:
+                m.cerrar()
 
     # --- eventos de mpv (llegan desde el hilo lector del socket: nada lento acá)
 
-    def al_terminar(self, item_id, error):
+    def al_terminar(self, item_id, error, mpv=None):
+        if mpv is not None and mpv is not self.mpv:
+            return   # el que se va en un crossfade: su canción ya pasó a «sonaron recién»
         p = self.principal
         with lock:
             now = p.now
             titulo = now["title"] if now and now["id"] == item_id else "?"
+            f = self.fundido
+            entraba = bool(error) and f is not None and f["entra"] == item_id and not f.get("fallo")
+            if entraba:
+                f["fallo"] = True   # (una sola vez: si vuelve a fallar, es la canción)
+        if entraba:
+            # La que entraba en un crossfade no pudo sonar mientras sonaba la otra: casi seguro la
+            # salida de audio no deja sonar dos cosas a la vez (pasa sin PipeWire ni PulseAudio).
+            # Se calla la que se iba, para soltar la salida; la que entraba se carga de nuevo
+            # (el Director ve que mpv no tiene nada pedido); y el crossfade queda apagado, para
+            # que no pase con cada tema.
+            from reproductor import ErrorMpv
+            try:
+                self.otro.detener()
+            except ErrorMpv:
+                pass
+            with mpv.lock:
+                mpv.pedido = None
+            with lock:
+                state["crossfade"] = False
+                bump(p)
+            guardar_ajustes(crossfade=False)
+            avisar("Apagué el crossfade: esta salida de audio no deja sonar dos canciones a la vez", p)
+            return
         # Primero avanzar y después avisar: si no, el aviso despierta a la pre-descarga
         # con la canción fallida todavía como actual, y la vuelve a bajar.
         if advance(p, {"finished": item_id}) and error:
@@ -2122,19 +2362,23 @@ class Director:
             bump()
         averiguar_generos()   # (el de su artista, si todavía no se sabe)
 
-    def al_reiniciar(self):
+    def al_reiniciar(self, mpv=None):
         """mpv se cayó y se levantó de nuevo: lo que sonaba se perdió.
 
         El aviso cambia el estado, así que el Director se despierta y la vuelve a cargar, en el
         segundo en que iba (el último que se midió).
         """
+        if mpv is not None and mpv is not self.mpv:
+            return   # (el otro: a lo sumo se perdió la cola de la que se iba)
         p = self.principal
         with lock:
             if p.now is not None and p.reanudar is None and p.progress["t"]:
                 p.reanudar = {"id": p.now["id"], "t": p.progress["t"], "pausada": self.pausado}
         avisar("El reproductor se reinició; retomando la canción", p)
 
-    def al_cambiar(self, nombre, valor):
+    def al_cambiar(self, nombre, valor, mpv=None):
+        if mpv is not None and mpv is not self.mpv:
+            return   # el otro mpv: lo suyo no es lo que suena
         p = self.principal
         with lock:
             if nombre == "pause":
@@ -2145,7 +2389,8 @@ class Director:
                     medir(pr, progreso_ahora(p)["t"])   # al pausar, que quede donde iba de verdad
                     pr["playing"] = sonando
                     bump(p)
-            elif nombre == "volume" and valor is not None:
+            elif nombre == "volume" and valor is not None and not self.fundiendo():
+                # (durante un crossfade los dos mpv van subiendo y bajando: el volumen es el del estado)
                 v = round(valor)
                 if state["volume"] != v:
                     state["volume"] = v
@@ -2352,17 +2597,18 @@ class Director:
         sin_archivo = 0
         while True:
             time.sleep(1)
-            pedido = self.mpv.pedido
+            mpv = self.mpv   # (uno solo en toda la vuelta: un crossfade los cambia de lugar)
+            pedido = mpv.pedido
             if pedido is None:
                 sin_archivo = 0
                 continue
             try:
-                if not self.mpv.esta_vivo():
+                if not mpv.esta_vivo():
                     # mpv se cayó o se colgó: levantarlo (al_reiniciar hace que el
                     # Director vuelva a cargar la canción, en vez de saltearla).
-                    self.mpv.asegurar()
+                    mpv.asegurar()
                     continue
-                t = self.mpv.posicion()
+                t = mpv.posicion()
             except ErrorMpv:
                 continue  # no respondió: si se repite, Mpv lo da por colgado y se reinicia
             if t is None:
@@ -2377,6 +2623,149 @@ class Director:
             with lock:
                 if p.now and p.now["id"] == pedido:
                     medir(p.progress, t)
+            self.quizas_fundir(pedido, t)
+
+    # --- el volumen (el del estado; casi siempre es, tal cual, el de mpv)
+
+    def fundiendo(self):
+        """¿Hay un crossfade andando (los dos mpv sonando, uno subiendo y el otro bajando)?"""
+        f = self.fundido
+        return f is not None and f["entra"] is not None
+
+    def fijar_volumen(self, valor):
+        if not self.fundiendo():
+            return self.mpv.fijar_volumen(valor)
+        with lock:   # en pleno crossfade: queda en el estado, y fundir() lo va aplicando
+            state["volume"] = round(max(0.0, min(130.0, float(valor))))
+            bump(self.principal)
+
+    def cambiar_volumen(self, delta):
+        if not self.fundiendo():
+            return self.mpv.cambiar_volumen(delta)
+        self.fijar_volumen((state["volume"] or 0) + delta)
+
+    # --- crossfade: la que sigue va entrando mientras la que suena se va
+
+    def con_crossfade(self, on):
+        """Se prendió o se apagó desde la web: que el segundo mpv esté listo, o que se vaya."""
+        threading.Thread(target=self._otro_listo if on else self._soltar_otro, daemon=True, name="crossfade").start()
+
+    def _otro_listo(self):
+        """El segundo mpv, andando. Devuelve False si no se pudo levantar."""
+        from reproductor import ErrorMpv
+        with self.lock_otro:
+            try:
+                if self.otro is None:
+                    self.otro = self._mpv(0, next(self.numeros))
+                self.otro.asegurar()
+                return True
+            except ErrorMpv as e:
+                print(f"  ⚠ crossfade: no pude levantar el segundo mpv: {e}", flush=True)
+                return False
+
+    def _soltar_otro(self):
+        """Con el crossfade apagado el segundo mpv no hace falta (en una Pi, es memoria)."""
+        with self.lock_otro:
+            if self.otro is not None and self.fundido is None and not state["crossfade"]:
+                self.otro.cerrar()
+                self.otro = None
+
+    def quizas_fundir(self, now_id, t):
+        """Cada segundo, desde bucle_progreso: si a la que suena le queda lo que dura el
+        crossfade y hay con qué seguir, lo arranca (en otro hilo: ver fundir)."""
+        if not (state["crossfade"] and CROSSFADE) or self.fundido is not None:
+            return
+        p = self.principal
+        with lock:
+            now = p.now
+            if self.fundido is not None or self.pausado or p.loading or not now or now["id"] != now_id:
+                return
+            d = p.progress.get("d") or now["duration"]
+            if d < 4 * CROSSFADE or not 1.5 <= d - t <= CROSSFADE + 1:
+                return   # es muy corta, o todavía no es el momento (o ya es tarde)
+            if p.queue:
+                if not self.descargas.lista(p.queue[0]["videoId"]):
+                    return   # la que sigue no terminó de bajar: esta vez, sin crossfade
+            elif not p.shuffle:
+                return   # no sigue nada
+            self.fundido = {"sale": now_id, "entra": None}
+        threading.Thread(target=self.fundir, args=(now_id,), daemon=True, name="crossfade").start()
+
+    def fundir(self, sale_id):
+        """Un crossfade. El otro mpv arranca la canción que sigue, callado, y pasa a ser «el
+        mpv» (para el estado ya suena esa: la anterior queda en «sonaron recién»). Después, en
+        lo que le queda a la anterior, uno sube y el otro baja, sin que el volumen del conjunto
+        se note cambiar. Si en el medio saltean, vuelven atrás o ponen otra, se corta ahí: la
+        anterior calla y la que haya quedado sigue al volumen de siempre. Con ⏸ esperan los dos."""
+        from reproductor import ErrorMpv
+        p = self.principal
+        entra = sale = None
+        try:
+            if not self._otro_listo():
+                return
+            self.otro.fijar_volumen(0)
+            with lock:   # todo junto, para que nadie vea un estado a medias (ni se cruce un ⏭)
+                now = p.now
+                if self.pausado or not now or now["id"] != sale_id or self.mpv.pedido != sale_id:
+                    return
+                sig = p.queue[0] if p.queue else cancion_al_azar(p)
+                if sig is None or not self.descargas.lista(sig["videoId"]):
+                    return
+                if p.queue:
+                    p.queue.pop(0)
+                d = p.progress.get("d") or now["duration"]
+                largo = max(0.5, min(CROSSFADE + 1, d - progreso_ahora(p)["t"] - 0.25))
+                sale, entra = self.mpv, self.otro
+                self.mpv, self.otro = entra, sale
+                self.fundido = {"sale": sale_id, "entra": sig["id"]}
+                _sonar(p, sig)   # (como advance: el Director ve otra canción y la carga, en `entra`)
+
+            def sigue():   # ¿sigue siendo esa la que suena? (si no: ⏭, ⏮, ▶ ahora…)
+                with lock:
+                    return p.now is not None and p.now["id"] == sig["id"]
+
+            espera = time.monotonic() + 5
+            while entra.actual != sig["id"]:   # que el Director la cargue y mpv la arranque
+                if not sigue() or time.monotonic() > espera:
+                    return
+                time.sleep(0.02)
+            # Uno baja como un coseno y el otro sube como un seno: así la potencia de los dos
+            # juntos no cambia. La raíz cúbica es porque el volumen de mpv va al cubo.
+            hecho, antes, sale_en_pausa = 0.0, time.monotonic(), False
+            while hecho < largo and sigue() and entra.pedido == sig["id"]:
+                if self.pausado != sale_en_pausa:   # ⏸ (o ▶): el que se va, lo mismo
+                    sale.comando("set_property", "pause", self.pausado)
+                    sale_en_pausa = self.pausado
+                ahora = time.monotonic()
+                if not self.pausado:   # (en pausa el crossfade no avanza)
+                    hecho = min(largo, hecho + ahora - antes)
+                    k, volumen = hecho / largo, state["volume"] or 0
+                    entra.comando("set_property", "volume", volumen * math.sin(k * math.pi / 2) ** (1 / 3))
+                    sale.comando("set_property", "volume", volumen * math.cos(k * math.pi / 2) ** (1 / 3))
+                antes = ahora
+                time.sleep(0.05)
+        except ErrorMpv as e:   # alguno de los dos no contestó: se termina acá (abajo queda todo en orden)
+            print(f"  ⚠ crossfade: {e}", flush=True)
+        finally:
+            if sale is not None:   # llegaron a cambiar de lugar: que quede todo en orden, pase lo que pase
+                volumen = state["volume"] or 0
+                entra.volumen = volumen   # (si justo se cayó, que al levantarse arranque con el de siempre)
+                # (con `comando`, no con fijar_volumen: si la rockola se está cerrando, que no lo levante de nuevo)
+                for hacer in (sale.detener, lambda: sale.comando("set_property", "pause", False),
+                              lambda: entra.comando("set_property", "volume", volumen)):
+                    try:
+                        hacer()
+                    except ErrorMpv:
+                        pass
+            time.sleep(0.3)   # (que lleguen los últimos avisos de volumen de mpv antes de volver a escucharlos)
+            self.fundido = None
+            if sale is not None and round(entra.volumen) != (state["volume"] or 0):
+                try:   # (cambiaron el volumen justo en ese ratito: que mpv quede como dice el estado)
+                    entra.comando("set_property", "volume", state["volume"] or 0)
+                except ErrorMpv:
+                    pass
+            if not state["crossfade"]:
+                self._soltar_otro()
 
     # --- reconciliar: hacer que suene lo que dice la sala principal
 
@@ -2872,6 +3261,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat":
                 chatear(sala, body)
                 return self.send_json(public_state(sala, client))
+            if path in ("/api/vote", "/api/vote-skip", "/api/react"):   # 👍 en la cola, ⏭ por votos, 🔥 ❤️ 😴
+                {"/api/vote": votar, "/api/vote-skip": votar_saltear, "/api/react": reaccionar}[path](sala, body)
+                return self.send_json(public_state(sala, client))
             if path == "/api/radio":   # 📻 prendida o apagada (para saber si alguien escucha)
                 set_radio(sala, body)
                 return self.send_json(public_state(sala, client))
@@ -2922,6 +3314,8 @@ class Handler(BaseHTTPRequestHandler):
                 set_shuffle(sala, body)
             elif path == "/api/shuffle-queue":
                 mezclar_cola(sala)
+            elif path == "/api/crossfade":
+                set_crossfade(sala, body)
             elif path == "/api/pause":
                 pause(sala)
             elif path == "/api/volume":
@@ -2930,9 +3324,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not director:
                     raise ApiError(409, "En modo navegador, pausa y volumen se manejan desde /player")
                 if "value" in body:
-                    director.mpv.fijar_volumen(float(body["value"]))
+                    director.fijar_volumen(float(body["value"]))
                 else:
-                    director.mpv.cambiar_volumen(float(body.get("delta") or 0))
+                    director.cambiar_volumen(float(body.get("delta") or 0))
             else:
                 raise ApiError(404, "No existe")
             return self.send_json(public_state(sala, client))
@@ -3002,6 +3396,7 @@ def main():
         sys.exit(f"Modo desconocido: {modo!r} (tiene que ser mpv o navegador)")
     state["mode"] = modo
     salas[PRINCIPAL].shuffle = modo == "mpv" and bool(leer_ajustes().get("aleatorio"))
+    state["crossfade"] = modo == "mpv" and CROSSFADE > 0 and bool(leer_ajustes().get("crossfade"))
 
     from estadisticas import Estadisticas
     try:
@@ -3026,6 +3421,8 @@ def main():
         except ErrorMpv as e:
             sys.exit(f"Error: {e}")
         director.arrancar()
+        if state["crossfade"]:
+            director.con_crossfade(True)   # (el segundo mpv, ya listo para el primer cambio de tema)
         averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
         # Al prender la Raspberry o reiniciar el servicio (p. ej. al actualizar), si nadie pide
         # nada: 🔀 y que suene sola. En el reinicio diario de las 6, no: la oficina está vacía.

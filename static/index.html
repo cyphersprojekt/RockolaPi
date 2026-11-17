@@ -215,13 +215,32 @@
   .barra .off { color: var(--line); }
   .vacio { color: var(--dim); padding: .3em 0; }
 
+  /* Debajo de lo que suena: las reacciones (🔥 ❤️ 😴) y el voto para saltearla. El renglón está
+     siempre que suena algo, con sus números (también en 0): que alguien reaccione no mueve nada. */
+  .reacciones { display: flex; flex-wrap: wrap; align-items: center; gap: .6ch; margin-top: .6em; }
+  .reacciones button { padding: .1em .8ch; }
+  .reacciones .n { margin-left: .6ch; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .reacciones button.on .n { color: inherit; }
+  .reacciones .saltear { margin-left: auto; }
+  .reacciones button.salta { animation: saltito .5s ease-out; }   /* la que acaba de sumar una */
+  @keyframes saltito { 30% { transform: scale(1.35); } }
+  @media (prefers-reduced-motion: reduce) { .reacciones button.salta { animation: none; } }
+  /* 👍 en la cola (el botón, o cuántos tiene la propia) */
+  .voto .n, .votos { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .voto.on .n { color: inherit; }
+  .votos { align-self: center; white-space: nowrap; }
+
   /* controles con PIN */
   .controles { display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; margin-top: .9em;
                padding-top: .8em; border-top: 1px dashed var(--line); }
-  .vol { display: flex; align-items: center; gap: 1ch; flex: 1; min-width: 230px; }
+  .vol { display: flex; align-items: center; gap: 1ch; flex: 1; min-width: 200px; }
   .vol input[type=range] { flex: 1; padding: 0; border: 0; background: none; accent-color: var(--acc); height: 26px; }
   .vol output { width: 4.5ch; text-align: right; color: var(--dim); }
-  .biblio { flex-basis: 100%; font-size: .87em; }
+  .controles .abajo { flex-basis: 100%; display: flex; align-items: center; gap: 1.5ch; }
+  .biblio { flex: 1; min-width: 0; font-size: .87em; }
+  .modos { display: flex; gap: .6ch; flex: none; margin-left: auto; }
+  .modos button { padding: .05em .7ch; font-size: .87em; }
+  #borrarSalaBtn { margin-left: auto; }   /* (sala sin parlante: no hay volumen; va contra el borde) */
   form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
   form.pin input { width: 11ch; letter-spacing: .2em; }
 
@@ -454,11 +473,10 @@
     <div id="now" class="now"><div class="vacio">conectando…</div></div>
     <div id="salaHint" class="hint" hidden></div>
     <div id="controls" class="controles" hidden>
-      <button id="prevBtn" type="button" title="Anterior (o desde el principio)">⏮</button>
-      <button id="playBtn" class="primario" type="button">⏸ pausa</button>
-      <button id="skipBtn" type="button" title="Siguiente">⏭</button>
-      <button id="shufBtn" type="button" aria-pressed="false"
-              title="Aleatorio: cuando la cola se vacía, suenan canciones guardadas al azar">🔀 al azar</button>
+      <!-- Un renglón: ⏮ ⏸ ⏭ y, de ahí hasta el borde, el volumen. -->
+      <button id="prevBtn" type="button" title="Anterior (o desde el principio)" aria-label="Anterior">⏮</button>
+      <button id="playBtn" class="primario" type="button" title="Pausa" aria-label="Pausa">⏸</button>
+      <button id="skipBtn" type="button" title="Siguiente" aria-label="Siguiente">⏭</button>
       <div class="vol" id="volBox">
         <button type="button" id="volDown" aria-label="Bajar volumen">−</button>
         <input type="range" id="vol" min="0" max="130" step="1" aria-label="Volumen">
@@ -467,7 +485,17 @@
       </div>
       <button id="borrarSalaBtn" type="button" hidden
               title="Borrar esta sala: se pierden su cola y su chat (las canciones bajadas quedan)">🗑 borrar sala</button>
-      <div class="dim biblio" id="biblio"></div>
+      <!-- Abajo: cuántas hay guardadas y, a la derecha, lo que se deja prendido o apagado (🔀 al
+           azar, 🎚️ crossfade): chiquitos y sólo con el ícono (qué es cada uno, al pasar el mouse). -->
+      <div class="abajo" id="controlesAbajo">
+        <div class="dim biblio" id="biblio"></div>
+        <div class="modos">
+          <button id="shufBtn" type="button" aria-pressed="false" aria-label="Al azar"
+                  title="Al azar: cuando la cola se vacía, suenan canciones guardadas al azar">🔀</button>
+          <button id="fundirBtn" type="button" aria-pressed="false" aria-label="Crossfade" hidden
+                  title="Crossfade: cuando a una canción le quedan unos segundos, la que sigue va entrando mientras esa se va, sin silencio entre las dos">🎚️</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -817,6 +845,12 @@ $("#shufBtn").onclick = async () => {
     toast(`Prendido. Todavía no hay canciones guardadas${(last.rooms || []).length > 1 ? " en esta sala" : ""}: se van guardando a medida que suenan.`);
 };
 
+$("#fundirBtn").onclick = async () => {
+  const on = !last?.crossfade;
+  await control("/api/crossfade", { on });
+  if (!!last?.crossfade === on) toast(on ? "Crossfade prendido: cada canción va entrando mientras la anterior se va" : "Crossfade apagado");
+};
+
 const gb = b => (b / 1024 ** 3).toLocaleString("es", { maximumFractionDigits: b < 10 * 1024 ** 3 ? 1 : 0 });
 const tamano = b => b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${gb(b)} GB`;
 const quien = it => it.azar ? el("span", { class: "quien" }, "🔀 al azar")
@@ -913,7 +947,7 @@ document.fonts?.ready.then(reacomodar);
 function accionesCola(it, i) {
   if (admin) {
     return el("div", { class: "acts" },
-      botonLista(it),
+      botonLista(it), botonVoto(it),
       i > 0 && el("button", { title: "Que suene a continuación", "aria-label": "Mover al principio",
                               onclick: () => control("/api/move", { id: it.id, to: 0 }) }, "⤒"),
       i > 0 && el("button", { title: "Subir un lugar", "aria-label": "Subir un lugar",
@@ -921,7 +955,8 @@ function accionesCola(it, i) {
       el("button", { title: "Quitar de la cola", "aria-label": "Quitar",
                      onclick: () => removeSong(it.id) }, "✕"));
   }
-  return el("div", { class: "acts" }, botonLista(it), it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar"));
+  return el("div", { class: "acts" }, botonLista(it), botonVoto(it),
+            it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar"));
 }
 
 // ---------- estado ----------
@@ -932,6 +967,7 @@ function ponerTitulo(enRecap = recapVista.abierta()) {
 }
 
 let current = null, progress = null, progressAt = 0, last = null;
+let avisoVisto = null;   // el id del último aviso de la rockola que se vio (null: todavía no llegó el estado)
 let queuedIds = new Set();
 // Por dónde va la rockola ahora, en segundos: el servidor lo dice con cada estado y, entre uno y
 // otro, se adelanta lo que pasó.
@@ -946,6 +982,10 @@ function render(s) {
   pintarSalas(s);
   pintarLed(s.online ?? null);
   pintarClima(s.weather);
+  // Los avisos de la rockola (una canción salteada, por votos o porque no se pudo bajar; el
+  // crossfade que se apagó…): los que llegan con la página abierta se muestran abajo.
+  if (s.notice && avisoVisto !== null && s.notice.id !== avisoVisto) toast(s.notice.text, true);
+  avisoVisto = s.notice ? s.notice.id : 0;
 
   const now = $("#now");
   if (s.now) {
@@ -969,6 +1009,7 @@ function render(s) {
       el("div", { class: "sub" }, s.now.artist),
       el("div", { class: "sub" }, quien(s.now)),
       el("div", { class: "barra", id: "bar" }),
+      filaReacciones(s),
       armando && el("div", { class: "en-lista" }, botonLista(s.now)));   // ♫+: sumarla a la que se está armando
     const vieja = now.querySelector(":scope > .info");
     if (vieja) vieja.replaceWith(info); else now.append(info);
@@ -999,15 +1040,23 @@ function render(s) {
   $("#playBtn").hidden = !conMpv;
   $("#volBox").hidden = !conMpv || s.volume == null;
   $("#borrarSalaBtn").hidden = !sinParlante;
-  $("#playBtn").textContent = s.now && (sinParlante ? !s.paused : s.progress.playing) ? "⏸ pausa" : "▶ seguir";
+  const suena = s.now && (sinParlante ? !s.paused : s.progress.playing);
+  $("#playBtn").textContent = suena ? "⏸" : "▶";
+  $("#playBtn").title = suena ? "Pausa" : "Seguir";
+  $("#playBtn").setAttribute("aria-label", $("#playBtn").title);
   const alAzar = s.shuffle && s.library?.songs > 0;   // ▶ sin nada sonando arranca una al azar
   $("#playBtn").disabled = !s.now && !alAzar;
   $("#skipBtn").disabled = !s.now;
   $("#shufBtn").hidden = !conMpv;
   $("#shufBtn").classList.toggle("on", !!s.shuffle);
   $("#shufBtn").setAttribute("aria-pressed", String(!!s.shuffle));
+  // El crossfade es del parlante: en las salas sin parlante (y en modo navegador) no hay (null).
+  $("#fundirBtn").hidden = !conMpv || s.crossfade == null;
+  $("#fundirBtn").classList.toggle("on", !!s.crossfade);
+  $("#fundirBtn").setAttribute("aria-pressed", String(!!s.crossfade));
   const lib = s.library;
   $("#biblio").hidden = !lib;
+  $("#controlesAbajo").hidden = !lib && !conMpv;   // (en modo navegador ahí no hay nada)
   const variasSalas = (s.rooms || []).length > 1;   // el lugar es uno solo, para todas
   if (lib) $("#biblio").textContent = !lib.limit ? "No se guardan canciones (guardar_gb = 0 en rockola.toml)."
     : `${lib.songs} ${lib.songs === 1 ? "canción guardada" : "canciones guardadas"}${variasSalas ? " en esta sala" : ""}`
@@ -1031,7 +1080,9 @@ function render(s) {
         pag: pagCola, nombre: "Páginas de la cola", alCambiar: () => render(last) });
 
   // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo.
-  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it)),
+  // (las que tuvieron reacciones las muestran: «pedida por Juli · 🔥 3  ❤️ 1»)
+  const reacciones = it => it.reacciones && " · " + REACCIONES.filter(([e]) => it.reacciones[e]).map(([e]) => `${e} ${it.reacciones[e]}`).join("  ");
+  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it), reacciones(it)),
                                                          action: armando && el("div", { class: "acts" }, botonLista(it)) }),
               { vacio: "Todavía nada.", paginar: false });
 
@@ -1041,6 +1092,49 @@ function render(s) {
   });
   descargasVista.alEstado(s);
   seguirGuardando(s);
+}
+
+// Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción;
+// la cuenta la ven todos, y un instante las pantallas) y, si se puede, el voto para saltearla
+// (cuando llegan los que hacen falta, pasa a la siguiente sola).
+const REACCIONES = [["🔥", "Temazo"], ["❤️", "Me encanta"], ["😴", "Me duerme"]];
+let reaccionesVistas = { id: null, cuentas: {} };   // las de recién: la que sumó una, salta
+function filaReacciones(s) {
+  const id = s.now.id, r = s.reactions || { counts: {}, mine: [] }, sk = s.skip;
+  const antes = reaccionesVistas.id === id ? reaccionesVistas.cuentas : null;
+  reaccionesVistas = { id, cuentas: { ...r.counts } };
+  const mandar = (path, mas = {}) => api(path, { id, client, ...mas }).then(render, err => toast(err.message, true));
+  return el("div", { class: "reacciones" },
+    REACCIONES.map(([e, que]) => {
+      const n = r.counts[e] || 0, mia = r.mine.includes(e);
+      return el("button", {
+        type: "button", class: [mia && "on", antes && n > (antes[e] || 0) && "salta"].filter(Boolean).join(" "),
+        "aria-pressed": String(mia), "aria-label": `${que}: ${n}`, title: mia ? `${que} (ya lo dijiste)` : que,
+        onclick: () => mia || mandar("/api/react", { emoji: e, by: nameInput.value.trim() }),
+      }, e, el("span", { class: "n" }, n));
+    }),
+    sk && el("button", {
+      type: "button", class: sk.voted ? "saltear on" : "saltear", "aria-pressed": String(sk.voted),
+      "aria-label": `Votar para saltearla: van ${sk.votes} de ${sk.needed}`,
+      title: sk.voted ? `Ya votaste saltearla (van ${sk.votes} de ${sk.needed})`
+                      : `Votar para saltearla: con ${sk.needed} votos pasa a la que sigue`,
+      onclick: () => sk.voted || mandar("/api/vote-skip"),
+    }, "⏭", el("span", { class: "n" }, `${sk.votes}/${sk.needed}`)));
+}
+
+// 👍 en la cola: cada uno vota, una vez, las que pidieron los demás, y la votada sube (hasta las
+// que tienen tantos votos como ella). En la propia se ve cuántos tiene.
+function botonVoto(it) {
+  if (it.mine) {
+    return it.votes > 0 && el("span", { class: "votos", title: it.votes === 1 ? "La votó una persona" : `La votaron ${it.votes}` },
+                              `👍 ${it.votes}`);
+  }
+  return el("button", {
+    type: "button", class: it.voted ? "voto on" : "voto", "aria-pressed": String(!!it.voted),
+    "aria-label": `Votar ${it.title}` + (it.votes ? ` (tiene ${it.votes})` : ""),
+    title: it.voted ? "Ya la votaste" : "Votarla: sube en la cola",
+    onclick: () => it.voted || api("/api/vote", { id: it.id, client }).then(render, err => toast(err.message, true)),
+  }, "👍", it.votes > 0 && el("span", { class: "n" }, ` ${it.votes}`));
 }
 
 // Con el PIN y dos o más en la cola: 🔀 mezclar (una vez; lo que pidan después va al final).
@@ -2984,6 +3078,12 @@ const recapVista = (() => {
       el("b", {}, `${(t.plays / t.songs).toLocaleString("es-AR", { maximumFractionDigits: 1 })} veces`), "."]);
     if (d.skipped) sueltos.push(["⏭", "La que más saltearon: ", el("b", {}, `«${d.skipped.title}»`),
                                  `, de ${d.skipped.artist} (${veces(d.skipped.times)}).`]);
+    // Las reacciones: de cada una, la canción que más juntó.
+    const titulos = { "🔥": "La más festejada", "❤️": "La más querida", "😴": "La que durmió a todos" };
+    for (const [e] of REACCIONES) {
+      const r = (d.reactions || []).find(x => x.emoji === e);
+      if (r) sueltos.push([e, `${titulos[e]}: `, el("b", {}, `«${r.title}»`), `, de ${r.artist} (${num(r.count)} ${e}).`]);
+    }
     $("#rDatos").replaceChildren(...sueltos.map(([ico, ...txt]) =>
       el("li", {}, el("span", { "aria-hidden": "true" }, ico), el("span", {}, ...txt))));
   }

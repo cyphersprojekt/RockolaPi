@@ -15,11 +15,22 @@ max_por_persona = 3
 # Duración máxima de una canción, en segundos (0 = sin límite).
 duracion_maxima = 600
 
+# Saltear por votos: cuántas personas tienen que votar ⏭ (debajo de lo que suena, en la página)
+# para que la canción pase sola a la siguiente. 0 = no se vota (sólo saltea quien tiene el PIN).
+votos_para_saltear = 3
+
 # Volumen inicial (0 a 130).
 volumen = 80
 
 # true: iguala el volumen entre canciones (algunas vienen mucho más fuertes que otras).
 normalizar = false
+
+# Crossfade (modo mpv): cuántos segundos se pisan dos canciones cuando está prendido. Con él, la
+# que sigue va entrando mientras la que suena se va, sin silencio entre las dos. Se prende y se
+# apaga desde la web (con el PIN: 🎚️ crossfade); acá va sólo cuánto dura. 0 = no ofrecerlo.
+# Mientras está prendido hay un segundo mpv esperando (unos 30 MB de memoria), y hace falta un
+# sistema de audio que mezcle (PipeWire o PulseAudio: lo que deja pi/instalar.sh).
+crossfade = 6
 
 # Dónde suena la música: "mpv" (en esta máquina) o "navegador" (pestaña /player).
 # Vacío = mpv si está instalado.
