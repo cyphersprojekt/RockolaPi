@@ -61,17 +61,21 @@
     .col { display: flex; flex-direction: column; min-height: 0; }
     .col > .panel { flex: none; }
     #panelCola, #panelPedir, #panelHistorial, #biblioPanel { display: flex; flex-direction: column; }
-    /* la cola y los resultados ocupan lo que necesitan (mientras haya lugar)... */
-    #panelCola, #panelPedir { flex: 0 1 auto; min-height: 0; }
-    /* ...y lo que queda es para lo que sonó y las guardadas, que llegan hasta abajo */
+    /* la cola ocupa lo que necesita (mientras haya lugar)... */
+    #panelCola { flex: 0 1 auto; min-height: 0; }
+    /* ...y lo que queda es para lo que sonó, que llega hasta abajo */
     #panelHistorial { flex: 1 1 0; min-height: 8em; }
-    #biblioPanel { flex: 1 1 0; min-height: 16em; }
+    /* A la derecha, cada panel tiene su parte del alto, esté vacío o lleno: 2 de cada 5 para
+       buscar, 3 para las guardadas (con esos dos números se cambia el reparto). Así buscar no
+       mueve las guardadas: los resultados van llenando su lugar y, si no entran, se paginan. */
+    #panelPedir { flex: 2 1 0; min-height: 0; }
+    #biblioPanel { flex: 3 1 0; min-height: 16em; }
     #queue, #results, #history, #guardadas, #playlists { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-    #history, #guardadas, #playlists { flex: 1 1 0; }
+    #results, #history, #guardadas, #playlists { flex: 1 1 0; }
     .filas { flex: 0 1 auto; min-height: 0; overflow: hidden; }
-    /* en las que llegan hasta abajo, las filas ocupan todo el alto: el paginado queda pegado al
-       fondo, tenga la página las filas que tenga (en la cola y los resultados lo hace el JS) */
-    #history > .filas, #guardadas > .filas, #playlists > .filas { flex: 1 1 0; }
+    /* en las de alto fijo, las filas ocupan todo el alto: el paginado queda pegado al fondo,
+       tenga la página las filas que tenga (en la cola lo hace el JS) */
+    #results > .filas, #history > .filas, #guardadas > .filas, #playlists > .filas { flex: 1 1 0; }
     /* la franja de arriba: la letra y el chat, del mismo alto */
     .col-letra { display: flex; flex-direction: row; column-gap: 3ch; }
     .col-letra > .panel { flex: 1 1 0; min-width: 0; }
@@ -100,17 +104,21 @@
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
 
-  /* el selector de salas: un botón que despliega la lista, como un panel más */
+  /* los desplegables (el de las salas, el de cómo ver las guardadas): un botón que despliega la
+     lista, como un panel más. De ancho fijo, diga lo que diga (si no entra, "…"): así lo de al
+     lado no se mueve. */
   .selector { position: relative; }
-  /* de ancho fijo, se llame como se llame la sala (si no entra, "…"): así la barra no se mueve */
-  #salaBtn { display: flex; align-items: center; gap: 1ch; width: 22ch; }
-  #salaBtn .nombre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
-  #salaBtn .flechita { color: var(--dim); }
-  #salaBtn[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
+  .selector > button { display: flex; align-items: center; gap: 1ch; }
+  .selector > button .nombre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .selector > button .flechita { color: var(--dim); }
+  .selector > button[aria-expanded="true"] { border-color: var(--acc); color: var(--acc); }
+  #salaBtn { width: 22ch; }
+  #vistaBtn { width: 19ch; }
   .menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: calc(100vw - 32px);
           max-height: 70vh; overflow-y: auto; margin: 0; padding: .3em 0; list-style: none;
           background: var(--bg1); border: 1px solid var(--acc); box-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
   .menu.derecha { left: auto; right: 0; }   /* si no entra hacia la derecha */
+  .menu.arriba { top: auto; bottom: calc(100% + 4px); }   /* si no entra hacia abajo */
   .menu [role="option"] { display: grid; grid-template-columns: 2ch auto; column-gap: 1ch; padding: .35em 1.5ch .35em 1ch;
                           color: var(--fg); cursor: pointer; white-space: nowrap; }
   .menu [role="option"] .marca { color: var(--acc); }
@@ -140,6 +148,13 @@
             white-space: nowrap; text-decoration: none; }
   /* .on: 📊 recap, mientras se lo está mirando (tocándolo de nuevo se vuelve a la cola) */
   a.boton:hover, a.boton.on { border-color: var(--acc); color: var(--acc); }
+  /* ⬇ descargas: cuántas esperan para bajarse, en la esquina del botón. No ocupa lugar: que
+     aparezca o cambie no mueve la barra. */
+  #descargasBtn { position: relative; }
+  #descargasBtn .cuenta { position: absolute; top: -.5em; right: -.9ch; min-width: 2.4ch; padding: 0 .5ch;
+                          font-size: .75em; line-height: 1.5; font-weight: 700; text-align: center;
+                          background: var(--acc); color: var(--bg); }
+  #descargasBtn .cuenta.mal { background: var(--red); }
 
   /* sonando */
   .now { display: flex; gap: 2ch; align-items: flex-start; }
@@ -223,14 +238,8 @@
   .listas .fila { padding: .2em 0; }
   .listas .fila + .fila { border-top: 0; }
   .guardada { color: var(--ok); }
-  /* las que esperan para bajarse (⬇), arriba de las guardadas: se pueden cancelar */
-  .pendientes { margin-bottom: .6em; padding-bottom: .5em; border-bottom: 1px dashed var(--line);
-                max-height: 10.5em; overflow-y: auto; flex: none; }
-  .pendientes .fila { padding: .15em 0; }
-  .pendientes .fila + .fila { border-top: 0; }
-  .pendientes .cabeza { border-bottom: 0; color: var(--dim); }
   @media (max-width: 599px) { .largo { display: none; } }   /* "⬇ guardar" → "⬇" en el celular */
-  .vistas { display: flex; align-items: center; gap: 1ch; flex-wrap: wrap; margin-bottom: .6em; }
+  .vistas { display: flex; align-items: center; gap: 1ch; margin-bottom: .6em; color: var(--dim); }
 
   /* paginado: « ‹ 4 [5] 6 › » */
   .paginas { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5ch;
@@ -332,6 +341,15 @@
   #recap ul.datos li { display: grid; grid-template-columns: 2.5ch minmax(0, 1fr); gap: 1ch; padding: .45em 0; }
   #recap ul.datos li + li { border-top: 1px dashed var(--line); }
 
+  /* ---------- ⬇ descargas: otra vista de esta misma página, como el recap. Una sola lista, angosta
+     (para que el título y sus botones no queden lejos), que en la compu se desplaza debajo de la barra. ---------- */
+  #descargas .contenido { max-width: min(var(--ancho), 110ch); margin: 0 auto; padding: 0 var(--margen) 4em; }
+  @media (min-width: 1000px) and (min-height: 600px) { #descargas { flex: 1; min-height: 0; overflow-y: auto; } }
+  #descargas .cabeza { color: var(--dim); }
+  #descargas .bajando { color: var(--ok); font-weight: 700; }
+  #descargas .mal { color: var(--red); }
+  #descargas .fila.fallo .pos { color: var(--red); }
+
   /* preguntas (en lugar de las del navegador): un panel en el medio, con la página a media luz */
   #dialogo { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
              max-width: none; overflow: visible; }
@@ -370,6 +388,9 @@
           title="Escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻<span class="largo"> radio</span></button>
   <a class="boton" id="recapLink" href="/recap"
      title="Recap: lo más escuchado, artistas, géneros y quién pide más">📊<span class="largo"> recap</span></a>
+  <button id="descargasBtn" type="button" aria-pressed="false"
+          title="Descargas: las canciones que esperan para bajarse">⬇<span class="largo"> descargas</span><span
+          class="cuenta" id="descargasCuenta" hidden></span></button>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
   <button id="lockBtn" type="button" title="Controlar la música (pide PIN)">🔒 controlar</button>
 </div>
@@ -461,17 +482,15 @@
 
   <section class="panel" id="biblioPanel" hidden>
     <span class="ttl" id="biblioTitle">GUARDADAS</span>
-    <div id="pendientes" class="pendientes" hidden></div>
-    <div class="vistas" id="vistas">
-      <span class="dim">ver:</span>
-      <button type="button" data-vista="albumes" aria-pressed="true">💿 por álbum</button>
-      <button type="button" data-vista="artistas" aria-pressed="false"
-              title="Las guardadas por artista: tocá uno para ver sus álbumes o todas sus canciones, o hacerlo sonar entero">🎤 por artista</button>
-      <button type="button" data-vista="generos" aria-pressed="false"
-              title="Las guardadas por género (el del artista, según iTunes): tocá uno para ver sus temas o hacerlo sonar entero">🎸 por género</button>
-      <button type="button" data-vista="recientes" aria-pressed="false">🕘 recientes</button>
-      <button type="button" data-vista="listas" aria-pressed="false"
-              title="Las playlists de la sala: armá una y cargala entera cuando quieras">♫ playlists</button>
+    <!-- Cómo ver las guardadas: un desplegable, como el de las salas (así, por más maneras que
+         se sumen, ocupa un renglón). Las opciones las pone pintarVista(). -->
+    <div class="vistas" id="vistas"><span aria-hidden="true">ver:</span>
+      <div class="selector">
+        <button type="button" id="vistaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="vistaMenu"
+                title="Cómo ver las guardadas"><span class="nombre" id="vistaActual">…</span><span
+                class="flechita" aria-hidden="true">▾</span></button>
+        <ul id="vistaMenu" class="menu" role="listbox" aria-label="Cómo ver las guardadas" hidden></ul>
+      </div>
     </div>
     <div id="guardadas"></div>
     <div class="herr" id="listasHerr" hidden>
@@ -533,6 +552,19 @@
   </div>
 </section>
 <div id="recapTip" role="tooltip" hidden></div>
+
+<!-- ⬇ descargas: las que esperan para bajarse (ver descargasVista) -->
+<section id="descargas" hidden aria-labelledby="descargasTtl">
+  <div class="contenido">
+    <section class="panel">
+      <span class="ttl" id="descargasTtl">DESCARGAS</span>
+      <div id="descargasLista"><div class="vacio">conectando…</div></div>
+    </section>
+    <div class="hint">Se bajan de a una, en este orden, después de la que tiene que sonar. Quedan anotadas: si la
+      rockola se reinicia, siguen. <b>✕</b> cancela las tuyas; con el PIN (🔒 controlar), cualquiera, y
+      <b>⤒ ↑ ↓</b> cambian el orden.</div>
+  </div>
+</section>
 <dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
   <form method="dialog" class="panel" id="dlgForm" novalidate>
     <span class="ttl" id="dlgTitulo">CONFIRMAR</span>
@@ -573,7 +605,8 @@ function irASala(id, aviso) {
   if (aviso) store.set("aviso", JSON.stringify(aviso));   // para mostrarlo ya en la otra
   store.set("sala", id);
   if (radio.on) avisarRadio(false);
-  location.href = recapVista.link(id);   // (si está en el 📊 recap, va al de la otra sala)
+  // (si está en el 📊 recap o en ⬇ descargas, va a lo mismo de la otra sala)
+  location.href = descargasVista.abierta() ? descargasVista.link(id) : recapVista.link(id);
 }
 
 const nameInput = $("#name");
@@ -735,7 +768,7 @@ function salirDeControl() {
 }
 
 function pedirPin() {
-  recapVista.cerrar();   // (el formulario está en la vista de la cola)
+  recapVista.cerrar(); descargasVista.cerrar();   // (el formulario está en la vista de la cola)
   $("#pinPanel").hidden = false; reacomodar();
   $("#pinPanel").scrollIntoView({ block: "nearest" });
   $("#pinInput").focus();
@@ -856,7 +889,8 @@ function pintarLista(caja, items, filaDe, { arriba = [], vacio, pag, porPagina =
 function reacomodar() {
   if (last) render(last);
   centrarLetra();       // otro alto: el renglón de ahora, otra vez en el medio
-  pintarResultados();   // y de paso reajusta las guardadas
+  pintarResultados();
+  reajustarGuardadas();
 }
 let reacomodo = 0;
 addEventListener("resize", () => { cancelAnimationFrame(reacomodo); reacomodo = requestAnimationFrame(reacomodar); });
@@ -879,7 +913,8 @@ function accionesCola(it, i) {
 // ---------- estado ----------
 function ponerTitulo(enRecap = recapVista.abierta()) {
   const otra = last?.room && !last.room.main;   // una sala sin parlante
-  document.title = (otra ? `Rockola · ${last.room.name}` : "Rockola") + (enRecap ? " · recap" : "");
+  document.title = (otra ? `Rockola · ${last.room.name}` : "Rockola")
+    + (enRecap ? " · recap" : descargasVista.abierta() ? " · descargas" : "");
 }
 
 let current = null, progress = null, progressAt = 0, last = null;
@@ -988,7 +1023,7 @@ function render(s) {
   document.querySelectorAll("[data-vid]").forEach(b => {
     if (queuedIds.has(b.dataset.vid)) { b.disabled = true; b.textContent = "en cola"; b.className = ""; }
   });
-  pintarPendientes(s);
+  descargasVista.alEstado(s);
   seguirGuardando(s);
 }
 
@@ -1154,14 +1189,62 @@ for (const [accion, fn] of [["play", () => radio.on || prenderRadio()], ["pause"
   try { navigator.mediaSession?.setActionHandler(accion, fn); } catch {}
 }
 
+// ---------- desplegables ----------
+// Un botón que despliega una lista, como un <select> pero con la estética de la página (con el
+// teclado: ↑ ↓, Inicio, Fin, Enter, Esc). Así se eligen la sala (arriba) y cómo ver las guardadas.
+// Las opciones se arman con `opcion(valor, nombre, sub, elegida)` (la elegida lleva ●) y se ponen
+// en `menu`; al tocar una, se cierra y se llama `elegir(valor)`.
+function desplegable(boton, menu, elegir) {
+  const opciones = () => [...menu.querySelectorAll('[role="option"]')];
+  function abrir(foco = "elegida") {
+    menu.hidden = false; menu.classList.remove("derecha", "arriba");
+    boton.setAttribute("aria-expanded", "true");
+    const r = menu.getBoundingClientRect();
+    if (r.right > innerWidth - 8) menu.classList.add("derecha");   // que no se salga por el costado…
+    if (r.bottom > innerHeight - 8 && r.height < boton.getBoundingClientRect().top) menu.classList.add("arriba");   // …ni por abajo
+    const ops = opciones();
+    (foco === "ultima" ? ops.at(-1) : ops.find(o => o.getAttribute("aria-selected") === "true") || ops[0])?.focus();
+  }
+  function cerrar(volver = true) {
+    if (menu.hidden) return;
+    menu.hidden = true; boton.setAttribute("aria-expanded", "false");
+    if (volver) boton.focus();
+  }
+  const tocar = valor => { cerrar(); elegir(valor); };
+  const opcion = (valor, nombre, sub, elegida = false) => el("li", {
+    role: "option", tabindex: -1, "aria-selected": String(elegida), "data-valor": valor, onclick: () => tocar(valor) },
+    el("span", { class: "marca", "aria-hidden": "true" }, elegida ? "●" : ""), el("span", {}, nombre),
+    sub && el("span", { class: "sub" }, sub));
+  boton.onclick = () => menu.hidden ? abrir() : cerrar();
+  boton.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); abrir(e.key === "ArrowUp" ? "ultima" : "elegida"); }
+  });
+  menu.addEventListener("keydown", e => {
+    const ops = opciones(), i = ops.indexOf(document.activeElement);
+    const ir = j => ops[(j + ops.length) % ops.length]?.focus();
+    if (e.key === "ArrowDown") ir(i + 1);
+    else if (e.key === "ArrowUp") ir(i - 1);
+    else if (e.key === "Home") ir(0);
+    else if (e.key === "End") ir(ops.length - 1);
+    else if (e.key === "Enter" || e.key === " ") { if (i >= 0) tocar(ops[i].dataset.valor); }
+    else if (e.key === "Escape") cerrar();
+    else if (e.key === "Tab") return cerrar(false);
+    else return;
+    e.preventDefault();
+  });
+  // Tocar afuera lo cierra (sin mover el foco: capaz tocaron otra cosa).
+  document.addEventListener("pointerdown", e => { if (!boton.parentElement.contains(e.target)) cerrar(false); });
+  return { cerrar, opcion };
+}
+
 // ---------- salas ----------
 // La principal suena en el parlante (🔊); las otras se escuchan sólo con la radio (📻). Se elige
-// arriba, en un menú como el de un <select> (con el teclado: ↑ ↓, Inicio, Fin, Enter, Esc);
-// "＋ nueva sala…" abre el formulario. Ahí están también las salas de tv (📺), para mirar videos
-// de YouTube entre varios: son otra página (/tv). En modo navegador no hay más salas de música
-// que la principal, pero de tv sí.
+// arriba, en un desplegable; "＋ nueva sala…" abre el formulario. Ahí están también las salas de
+// tv (📺), para mirar videos de YouTube entre varios: son otra página (/tv). En modo navegador no
+// hay más salas de música que la principal, pero de tv sí.
 let firmaSalas = "", salaDeTv = false;   // (salaDeTv: el formulario está por crear una de tv)
 const salaBtn = $("#salaBtn"), salaMenu = $("#salaMenu");
+const menuSalas = desplegable(salaBtn, salaMenu, elegirSala);
 const linkTv = id => `/tv?sala=${encodeURIComponent(id)}`;
 function pintarSalas(s) {
   const tvs = s.tvs || [], firma = JSON.stringify([s.rooms, tvs, s.mode]);
@@ -1171,12 +1254,7 @@ function pintarSalas(s) {
   $("#salaActual").textContent = esta ? `${esta.main ? "🔊" : "📻"} ${esta.name}` : "sala";
   $("#salaActual").title = esta?.name || "";   // (entero, por si no entra)
   salaBtn.setAttribute("aria-label", `Sala: ${esta?.name || ""}`);
-  // ● marca en la que estás.
-  const opcion = (valor, nombre, sub, elegida = false) => el("li", {
-    role: "option", tabindex: -1, "aria-selected": String(elegida), "data-valor": valor,
-    onclick: () => elegirSala(valor) },
-    el("span", { class: "marca", "aria-hidden": "true" }, elegida ? "●" : ""), el("span", {}, nombre),
-    el("span", { class: "sub" }, sub));
+  const { opcion } = menuSalas;   // (● marca en la que estás)
   const sep = () => el("li", { class: "sep", role: "separator" });
   salaMenu.replaceChildren(...[
     ...s.rooms.map(r => opcion(r.id, `${r.main ? "🔊" : "📻"} ${r.name}`,
@@ -1187,22 +1265,8 @@ function pintarSalas(s) {
     opcion("+tv", "＋ nueva sala de tv…", "para mirar videos de YouTube entre todos"),
   ].filter(Boolean));
 }
-const opcionesSala = () => [...salaMenu.querySelectorAll('[role="option"]')];
 
-function abrirMenuSalas(foco = "elegida") {
-  salaMenu.hidden = false; salaMenu.classList.remove("derecha");
-  salaBtn.setAttribute("aria-expanded", "true");
-  if (salaMenu.getBoundingClientRect().right > innerWidth - 8) salaMenu.classList.add("derecha");   // que no se salga
-  const ops = opcionesSala();
-  (foco === "ultima" ? ops.at(-1) : ops.find(o => o.getAttribute("aria-selected") === "true") || ops[0])?.focus();
-}
-function cerrarMenuSalas(volver = true) {
-  if (salaMenu.hidden) return;
-  salaMenu.hidden = true; salaBtn.setAttribute("aria-expanded", "false");
-  if (volver) salaBtn.focus();
-}
 function elegirSala(v) {
-  cerrarMenuSalas();
   if (v === sala) return;
   if (v.startsWith("tv:")) { location.href = linkTv(v.slice(3)); return; }
   if (v !== "+" && v !== "+tv") return irASala(v);
@@ -1212,30 +1276,11 @@ function elegirSala(v) {
     ? "Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat. El PIN es para quitar videos de otros y para borrarla."
     : "Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio, cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).";
   $("#salaNombre").placeholder = salaDeTv ? "nombre: Almuerzo" : "nombre: Ventas";
-  recapVista.cerrar();
+  recapVista.cerrar(); descargasVista.cerrar();
   $("#salaPanel").hidden = false; reacomodar();
   $("#salaPanel").scrollIntoView({ block: "nearest" });
   $("#salaNombre").focus();
 }
-salaBtn.onclick = () => salaMenu.hidden ? abrirMenuSalas() : cerrarMenuSalas();
-salaBtn.addEventListener("keydown", e => {
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); abrirMenuSalas(e.key === "ArrowUp" ? "ultima" : "elegida"); }
-});
-salaMenu.addEventListener("keydown", e => {
-  const ops = opcionesSala(), i = ops.indexOf(document.activeElement);
-  const ir = j => ops[(j + ops.length) % ops.length]?.focus();
-  if (e.key === "ArrowDown") ir(i + 1);
-  else if (e.key === "ArrowUp") ir(i - 1);
-  else if (e.key === "Home") ir(0);
-  else if (e.key === "End") ir(ops.length - 1);
-  else if (e.key === "Enter" || e.key === " ") { if (i >= 0) elegirSala(ops[i].dataset.valor); }
-  else if (e.key === "Escape") cerrarMenuSalas();
-  else if (e.key === "Tab") return cerrarMenuSalas(false);
-  else return;
-  e.preventDefault();
-});
-// Tocar afuera lo cierra (sin mover el foco: capaz tocaron otra cosa).
-document.addEventListener("pointerdown", e => { if (!e.target.closest?.(".selector")) cerrarMenuSalas(false); });
 $("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; reacomodar(); };
 $("#salaForm").addEventListener("submit", async e => {
   e.preventDefault();
@@ -1487,7 +1532,12 @@ function pintarResultados() {
   // Lo de YouTube, si es de este texto o si está por llegar lo nuevo (para que la lista no salte).
   const yt = busqueda && (busqueda.q === q || buscandoYT) ? busqueda : null;
   const pl = yt ? playlistVista : null;
-  if (!q || (!deAca.buscadas && !yt && !buscandoYT)) { box.replaceChildren(); reajustarGuardadas(); return; }
+  if (!q || (!deAca.buscadas && !yt && !buscandoYT)) {
+    // En la compu el panel tiene su alto, haya o no resultados (ver el CSS): vacío, dice para qué es.
+    const ayuda = "Acá van apareciendo los resultados" + (hayBiblio() ? ": primero las 💾 guardadas, después lo que hay en YouTube." : ".");
+    box.replaceChildren(...(fijo() ? [el("div", { class: "hint" }, ayuda)] : []));
+    return;
+  }
   const locales = deAca.items, estan = new Set(locales.map(s => s.videoId));
   const deYT = (yt?.res || []).filter(s => !estan.has(s.videoId));   // las guardadas no se repiten
   const discos = yt?.discos || [];
@@ -1509,7 +1559,6 @@ function pintarResultados() {
   pintarLista(box, [...locales.map(s => ({ ...s, saved: true })), ...discos, ...deYT],
               it => it.browseId ? filaDisco(it) : filaResultado(it),
               { arriba, pag: pagResultados, nombre: "Páginas de los resultados", alCambiar: pintarResultados });
-  reajustarGuardadas();   // debajo quedó más (o menos) lugar
 }
 
 // Un tema de la búsqueda. En la de un álbum (`pos`, su número), pedirlo no limpia la búsqueda: capaz
@@ -1588,7 +1637,6 @@ function pintarDisco(box) {
   pintarLista(box, songs, (song, i) => filaResultado(song, { pos: i + 1 }), {
     arriba: [cabeza], vacio: error ? "⚠ " + error : datos ? "No tiene temas que se puedan pedir." : "cargando sus temas…",
     pag: pagDisco, porPagina: TEMAS_POR_PAGINA, nombre: `Páginas de los temas de ${a.title}`, alCambiar: pintarResultados });
-  reajustarGuardadas();   // debajo quedó más (o menos) lugar
 }
 
 function botonGuardarAlbum(a) {
@@ -1684,37 +1732,7 @@ async function guardarCancion(song, btn) {
   }
 }
 
-// Las que esperan para bajarse (⬇), arriba de las guardadas: la que se está bajando, las que
-// esperan y las que fallaron. ✕ cancela (las propias; con el PIN, cualquiera).
-let firmaPendientes = "";
-function pintarPendientes(s) {
-  const lista = s?.saving || [], caja = $("#pendientes");
-  const firma = JSON.stringify([lista, admin, verListas()]);
-  if (firma === firmaPendientes) return;
-  firmaPendientes = firma;
-  caja.hidden = !lista.length || verListas();
-  if (!lista.length) return caja.replaceChildren();
-  const puedo = g => admin || g.mine;
-  const cancelables = lista.filter(g => puedo(g) && !g.error).map(g => g.videoId);
-  const esperan = lista.filter(g => !g.error).length;
-  caja.replaceChildren(
-    el("div", { class: "fila cabeza" },
-      el("div", { class: "info" }, `⬇ Para guardar: ${esperan} ${esperan === 1 ? "espera" : "esperan"} bajarse`),
-      cancelables.length > 1 && el("button", { type: "button", title: "Cancelar todas las que podés cancelar",
-        onclick: async () => await preguntar({ titulo: "CANCELAR DESCARGAS", peligro: true, no: "volver",
-                                               si: `✕ cancelar ${cancelables.length}`,
-                                               texto: `¿Cancelar ${cancelables.length} descargas? No se bajan (la que se está bajando termina, pero no queda guardada).` })
-                             && cancelarGuardado(cancelables) }, "✕ todas")),
-    ...lista.map(g => el("div", { class: "fila" },
-      el("div", { class: "info" },
-        el("div", { class: "t", title: g.title }, g.title),
-        el("div", { class: "sub" }, g.error ? `⚠ no se pudo: ${g.error}` : g.active ? "⬇ bajándose ahora…" : "⏳ en espera",
-           g.artist && ` · ${g.artist}`, g.mine && " · ", g.mine && el("span", { class: "mia" }, "la pediste vos"))),
-      puedo(g) && el("button", { type: "button", "aria-label": `Cancelar ${g.title}`,
-        title: g.error ? "Sacarla de la lista" : g.active ? "Cancelar: termina de bajarse, pero no queda guardada" : "Cancelar: no se baja",
-        onclick: () => cancelarGuardado([g.videoId]) }, "✕"))));
-}
-
+// ✕ en ⬇ descargas: cancelar una (o varias) de las que esperan para bajarse.
 async function cancelarGuardado(vids) {
   try {
     const r = await api("/api/download-cancel", { videoIds: vids, client });
@@ -1920,12 +1938,27 @@ function subirA(e) {
   if (y < 0) scrollBy(0, y);
 }
 
+// Cómo se ve el panel: las guardadas, de cuatro maneras, o las ♫ playlists de la sala. Se elige
+// en un desplegable (un renglón, por más maneras que haya).
+const VISTAS = [
+  ["albumes", "💿 por álbum", "de la A a la Z"],
+  ["artistas", "🎤 por artista", "sus álbumes o sus canciones"],
+  ["generos", "🎸 por género", "el del artista, según iTunes"],
+  ["recientes", "🕘 recientes", "las últimas que sonaron"],
+  ["listas", "♫ playlists", "las que se arman en la sala"],
+];
+const menuVistas = desplegable($("#vistaBtn"), $("#vistaMenu"), elegirVista);
+let vistaPintada = null;
+
 function pintarVista() {
-  const listas = verListas();
-  document.querySelectorAll(".vistas button[data-vista]").forEach(b => {
-    const on = b.dataset.vista === "listas" ? listas : !listas && b.dataset.vista === vista;
-    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
-  });
+  const listas = verListas(), actual = listas ? "listas" : vista;
+  if (actual !== vistaPintada) {   // (sólo si cambió: esto corre con cada estado, y el menú puede estar abierto)
+    vistaPintada = actual;
+    const nombre = VISTAS.find(v => v[0] === actual)[1];
+    $("#vistaActual").textContent = nombre;
+    $("#vistaBtn").setAttribute("aria-label", `Ver: ${nombre}`);
+    $("#vistaMenu").replaceChildren(...VISTAS.map(([v, n, sub]) => menuVistas.opcion(v, n, sub, v === actual)));
+  }
   $("#vistas").hidden = !hayBiblio();   // sin guardadas no hay nada que elegir
   $("#guardadas").hidden = listas;
   $("#playlists").hidden = !listas;
@@ -1940,28 +1973,25 @@ function pintarTituloBiblio() {
     const n = listasSala.items.length;
     $("#biblioTitle").textContent = "PLAYLISTS" + (n ? ` · ${n}` : "");
   } else if (lib?.limit) {
-    const bajando = (last.saving || []).filter(g => !g.error).length;
-    $("#biblioTitle").textContent = `GUARDADAS · ${lib.songs}` + ((last.rooms || []).length > 1 ? "" : ` · ${tamano(lib.bytes)}`)
-      + (bajando ? ` · ⬇ ${bajando} bajando` : "");
+    $("#biblioTitle").textContent = `GUARDADAS · ${lib.songs}` + ((last.rooms || []).length > 1 ? "" : ` · ${tamano(lib.bytes)}`);
   }
 }
 
-document.querySelectorAll(".vistas button[data-vista]").forEach(b => b.addEventListener("click", () => {
-  const v = b.dataset.vista;
+function elegirVista(v) {
   if (v === "listas") {
     if (panelVista === "listas") return;
     panelVista = "listas"; store.set("panel", panelVista);
-    pintarVista(); pintarListas(); pintarPendientes(last);
+    pintarVista(); pintarListas();
     return;
   }
   if (panelVista === "guardadas" && v === vista) return;
   panelVista = "guardadas"; store.set("panel", panelVista);
   const otra = v !== vista;
   vista = v; store.set("vista", vista);
-  pintarVista(); pintarPendientes(last);
+  pintarVista();
   // (los géneros, siempre de nuevo: mientras no se miraban, pudo haberse averiguado alguno más)
   if (otra || v === "generos") cargarGuardadas(); else { pintarGuardadas(); reajustarGuardadas(); }
-}));
+}
 
 function refrescarGuardadas(demora) {
   if (biblioTimer) return;   // ya hay uno en camino
@@ -2012,7 +2042,7 @@ async function cargarGuardadas(pagina = biblio.pagina) {
   }
 }
 
-// Cambió el lugar para la lista (aparecieron resultados, otra ventana…): si ahora entran otras tantas, pedirlas.
+// Cambió el lugar para la lista (otra ventana, se abrió el PIN…): si ahora entran otras tantas, pedirlas.
 function reajustarGuardadas() {
   if (verListas()) { if (fijo()) pintarListas(); return; }   // (las playlists se acomodan solas)
   if ($("#biblioPanel").hidden || biblio.v == null) return;
@@ -2350,7 +2380,7 @@ async function refrescarListas() {
 function repintarListas(s = last) {
   pintarVista(); pintarListas(); pintarArmando();
   if (s) render(s);       // lo que suena, la cola y lo que sonó
-  pintarResultados();     // la búsqueda (y reacomoda lo de abajo)
+  pintarResultados();     // la búsqueda
   if (biblio.v != null && !verListas()) pintarGuardadas();
 }
 
@@ -2459,7 +2489,7 @@ function filaLista(l) {
 
 // `ir`: desde el aviso de arriba (en el celular, el panel está más abajo, y capaz mostraba las guardadas).
 async function abrirLista(id, ir = false) {
-  if (ir && panelVista !== "listas") { panelVista = "listas"; store.set("panel", panelVista); pintarPendientes(last); }
+  if (ir && panelVista !== "listas") { panelVista = "listas"; store.set("panel", panelVista); }
   const resumen = listasSala.items.find(x => x.id === id) || { name: armando?.id === id ? armando.name : "" };
   listasSala.abierta = { ...resumen, id, songs: resumen.songs || null };   // (los de ahora, cuando lleguen)
   listasSala.creando = false; pagLista.pagina = 0;
@@ -2564,6 +2594,141 @@ $("#listaNueva").addEventListener("submit", async e => {
   } catch (err) { toast(err.message, true); }
 });
 
+// ---------- ⬇ descargas ----------
+// Las que esperan para bajarse (las de ⬇ guardar): otra vista de esta misma página, como el recap,
+// con la misma barra de arriba. ⬇ descargas la abre y la cierra; /descargas abre la página directo
+// acá (y ← del navegador vuelve a la cola). Muestra la que se está bajando, las que esperan (en el
+// orden en que se van a bajar) y las que fallaron. ✕ cancela (las propias; con el PIN, cualquiera)
+// y, con el PIN, ⤒ ↑ ↓ cambian el orden. El botón de la barra lleva la cuenta en la esquina, se
+// esté en la vista que se esté.
+const descargasVista = (() => {
+  const boton = $("#descargasBtn"), caja = $("#descargas");
+  let abierta = false, firma = null, scrollCola = 0, foco = null;
+
+  const link = (paraSala = sala, aca = abierta) =>
+    (aca ? "/descargas" : "/") + (paraSala !== PRINCIPAL ? `?sala=${encodeURIComponent(paraSala)}` : "");
+
+  function pintarBoton(s = last) {
+    const lista = s?.saving || [], van = lista.filter(g => !g.error).length;
+    const cuenta = $("#descargasCuenta");
+    cuenta.hidden = !lista.length;
+    cuenta.textContent = van || "⚠";   // (sólo quedan las que fallaron)
+    cuenta.className = van ? "cuenta" : "cuenta mal";
+    // Donde no se guardan canciones (modo navegador) no hay nada que bajar: apagado, no escondido
+    // (la barra es la misma en todos lados). Abierta, prendido: que se pueda cerrar.
+    boton.disabled = !abierta && !!s && !hayBiblio();
+    boton.classList.toggle("on", abierta);
+    boton.setAttribute("aria-pressed", String(abierta));
+    boton.title = abierta ? "Volver a la cola, la letra y el chat"
+      : "Descargas: " + (van ? `${van === 1 ? "una canción espera" : `${van} canciones esperan`} para bajarse`
+                             : "las canciones que esperan para bajarse");
+  }
+
+  function abrir(apilar = true) {
+    if (abierta) return;
+    recapVista.cerrar(false);   // (de a una vista)
+    scrollCola = scrollY;
+    abierta = true;
+    $("main").hidden = true; caja.hidden = false;
+    scrollTo(0, 0);
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    firma = null; pintar();
+  }
+
+  function cerrar(apilar = true) {
+    if (!abierta) return;
+    abierta = false;
+    caja.hidden = true; $("main").hidden = false;
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    reacomodar();   // mientras tanto las listas estaban ocultas: volver a contar cuántas filas entran
+    scrollTo(0, scrollCola);
+  }
+
+  // ⤒ ↑ ↓: `to` es el lugar entre las que esperan (0 = la próxima). El foco sigue a la canción.
+  async function mover(g, to, que) {
+    foco = [g.videoId, que];
+    try { render(await api("/api/download-move", { videoId: g.videoId, to, client })); }
+    catch (err) { toast(err.message, true); }
+    foco = null;
+  }
+
+  function pintar(s = last) {
+    const lista = s?.saving || [], otras = s?.savingOthers || 0, hay = hayBiblio();
+    const f = JSON.stringify([lista, otras, admin, !!s, hay, s?.room?.name, s?.rooms?.length, s?.savingOffline]);
+    if (f === firma) return;
+    firma = f;
+    const van = lista.filter(g => !g.error), fallaron = lista.filter(g => g.error);
+    const esperan = van.filter(g => !g.active);   // (la que ya se está bajando no se mueve)
+    const enSala = (s?.rooms || []).length > 1 ? ` · ${s.room.name}` : "";
+    $("#descargasTtl").textContent = "DESCARGAS" + enSala + (van.length ? ` · ${van.length}` : "");
+    const vacio = !s ? "conectando…"
+      : !hay ? "En esta rockola no se guardan canciones (modo navegador, o guardar_gb = 0): no hay nada para bajar."
+      : !lista.length && "No hay nada bajándose. Con ⬇ guardar (en los resultados del buscador, o en un álbum) una canción se baja para que quede entre las guardadas, sin ponerla en la cola.";
+    const deOtras = otras > 0 && el("div", { class: "hint" },
+      `Hay ${otras === 1 ? "una más" : `${otras} más`} de otras salas en la fila: se bajan de a una entre todas.`);
+    if (vacio) return $("#descargasLista").replaceChildren(el("div", { class: "vacio" }, vacio), deOtras || "");
+    const cortada = s.savingOffline && van.length > 0 && el("div", { class: "vacio mal" },
+      "⚠ No hay conexión con YouTube: quedan esperando, y se prueba de nuevo cada medio minuto.");
+
+    const puedo = g => admin || g.mine;
+    const cancelables = van.filter(puedo).map(g => g.videoId);
+    const botones = new Map();   // "videoId:⤒" -> el botón (para devolverle el foco después de mover)
+    const accion = (g, que, attrs) => {
+      const b = el("button", { type: "button", ...attrs }, que);
+      botones.set(`${g.videoId}:${que}`, b);
+      return b;
+    };
+    const fila = (g, pos, estado, i) => el("div", { class: g.error ? "fila fallo" : "fila" },
+      el("span", { class: "pos", "aria-hidden": "true" }, pos),
+      el("img", { src: g.thumb || null, alt: "", loading: "lazy" }),
+      el("div", { class: "info" },
+        el("div", { class: "t", title: g.title }, g.title),
+        el("div", { class: "sub" }, estado, [g.artist, g.duration ? fmt(g.duration) : null].filter(Boolean).map(x => ` · ${x}`),
+           g.mine && " · ", g.mine && el("span", { class: "mia" }, "la pediste vos"))),
+      el("div", { class: "acts" },
+        // (apagados en vez de ausentes: así los botones de todas las filas quedan en columna)
+        admin && i != null && [
+          accion(g, "⤒", { disabled: i === 0, title: "Que sea la próxima en bajarse", "aria-label": `Que ${g.title} sea la próxima en bajarse`,
+                          onclick: () => mover(g, 0, "⤒") }),
+          accion(g, "↑", { disabled: i === 0, title: "Que se baje antes: sube un lugar", "aria-label": `Subir ${g.title} un lugar`,
+                          onclick: () => mover(g, i - 1, "↑") }),
+          accion(g, "↓", { disabled: i === esperan.length - 1, title: "Que se baje después: baja un lugar", "aria-label": `Bajar ${g.title} un lugar`,
+                          onclick: () => mover(g, i + 1, "↓") })],
+        puedo(g) && accion(g, "✕", { "aria-label": `Cancelar ${g.title}`,
+          title: g.error ? "Sacarla de la lista" : g.active ? "Cancelar: termina de bajarse, pero no queda guardada" : "Cancelar: no se baja",
+          onclick: () => cancelarGuardado([g.videoId]) })));
+    const cuantas = [van.length > 0 && `${van.length} ${van.length === 1 ? "espera" : "esperan"} bajarse`,
+                     fallaron.length > 0 && `${fallaron.length} no se ${fallaron.length === 1 ? "pudo" : "pudieron"} bajar`].filter(Boolean).join(" · ");
+    $("#descargasLista").replaceChildren(
+      cortada || "",
+      el("div", { class: "fila cabeza" },
+        el("div", { class: "info" }, cuantas),
+        cancelables.length > 1 && el("button", { type: "button", title: "Cancelar todas las que podés cancelar",
+          onclick: async () => await preguntar({ titulo: "CANCELAR DESCARGAS", peligro: true, no: "volver",
+                                                 si: `✕ cancelar ${cancelables.length}`,
+                                                 texto: `¿Cancelar ${cancelables.length} descargas? No se bajan (la que se está bajando termina, pero no queda guardada).` })
+                               && cancelarGuardado(cancelables) }, "✕ todas")),
+      ...van.filter(g => g.active).map(g => fila(g, "⬇", el("span", { class: "bajando" }, "bajándose ahora…"))),
+      ...esperan.map((g, i) => fila(g, i + 1, "⏳ en espera", i)),
+      ...fallaron.map(g => fila(g, "⚠", el("span", { class: "mal" }, `no se pudo: ${g.error}`))),
+      deOtras || "");
+    if (foco) {   // el botón que tocaron, si sigue prendido; si no, otro de la misma canción
+      const [vid, que] = foco;
+      [que, "↑", "↓", "✕"].map(k => botones.get(`${vid}:${k}`)).find(b => b && !b.disabled)?.focus();
+    }
+  }
+
+  // Con cada estado de la sala: la cuenta del botón y, si se está mirando, la lista.
+  function alEstado(s) { pintarBoton(s); if (abierta) pintar(s); }
+
+  boton.onclick = () => abierta ? cerrar() : abrir();
+  // (antes que el del recap, que está más abajo: al volver de acá al recap con ←, primero se cierra esta)
+  addEventListener("popstate", () => location.pathname === "/descargas" ? abrir(false) : cerrar(false));
+  return { abrir, cerrar, alEstado, link, abierta: () => abierta };
+})();
+
 // ---------- 📊 recap ----------
 // Lo más escuchado de la sala (o de todas) en un período. Es otra vista de esta misma página, con
 // la misma barra de arriba: no se recarga nada y la 📻 radio sigue sonando. 📊 la abre y la
@@ -2618,6 +2783,7 @@ const recapVista = (() => {
 
   function abrir(apilar = true) {
     if (!abierta) {
+      descargasVista.cerrar(false);   // (de a una vista)
       scrollCola = scrollY;
       abierta = true;
       $("main").hidden = true; $("#recap").hidden = false;
@@ -2853,6 +3019,7 @@ const recapVista = (() => {
   if (location.pathname === "/recap") abrir(false);
   return { abrir, cerrar, alEstado, link, abierta: () => abierta };
 })();
+if (location.pathname === "/descargas") descargasVista.abrir(false);   // (acá, con el recap ya definido: se cierran entre sí)
 
 // Recordar el PIN en este dispositivo; después, el aviso que dejó la página antes de cambiar de
 // sala (p. ej. "creé la sala…"), que si no lo taparía el de "ya podés controlar".

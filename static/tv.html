@@ -157,7 +157,7 @@
 </head>
 <body>
 <!-- La misma barra que en la página de pedidos, con todo en el mismo lugar: así, al pasar de una
-     sala de música a una de tv, no salta. Lo que acá no va (📻 radio, 📊 recap) queda apagado. -->
+     sala de música a una de tv, no salta. Lo que acá no va (📻 radio, 📊 recap, ⬇ descargas) queda apagado. -->
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
   <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
@@ -172,6 +172,8 @@
           title="La radio es de las salas de música. Acá el video se ve (y se escucha) con ▶ mirar acá">📻<span class="largo"> radio</span></button>
   <button id="recapBtn" type="button" disabled
           title="El recap es de la música: está en las salas de música">📊<span class="largo"> recap</span></button>
+  <button id="descargasBtn" type="button" disabled
+          title="Las descargas son de la música: están en las salas de música">⬇<span class="largo"> descargas</span></button>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
   <button id="lockBtn" type="button" title="Con el PIN: quitar o adelantar videos de otros, y borrar la sala">🔒 controlar</button>
 </div>

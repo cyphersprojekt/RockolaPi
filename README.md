@@ -100,7 +100,9 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 - **Compañeros:** entran al link o escanean el QR, ponen su nombre, buscan y tocan **+ agregar**.
   Hay un solo buscador, sin botón: mientras escribís aparecen las **💾 guardadas** que coinciden
   (las palabras en cualquier orden) y, cuando dejás de escribir, abajo de ellas lo que hay en
-  YouTube (con Enter, sin esperar). Las guardadas suenan sin esperar la descarga.
+  YouTube (con Enter, sin esperar). Las guardadas suenan sin esperar la descarga. En la compu el
+  panel del buscador tiene su alto aunque esté vacío, y los resultados lo van llenando (si no
+  entran, se paginan): así buscar no mueve lo que está abajo.
 - **Letra:** la de la que suena (a la izquierda en la compu; debajo de lo que suena en el
   celular), de YouTube Music o, si ahí no está o no trae los tiempos, de [LRCLIB](https://lrclib.net).
   El título dice de dónde vino (LyricFind o Musixmatch, que le dan las letras a YouTube, o
@@ -109,9 +111,18 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 - **Guardar sin pedir:** en los resultados de YouTube, **⬇ guardar** la baja para que quede entre
   las guardadas, sin ponerla en la cola (en modo mpv). Se bajan de a una, después de la que tiene
   que sonar; hasta 40 esperando a la vez, con las mismas reglas que para pedir (nada en vivo ni
-  más largo que `duracion_maxima`). Las que esperan aparecen arriba de GUARDADAS (la que se está
-  bajando, las que esperan y las que fallaron), y **✕** cancela una (o **✕ todas**): cada uno las
-  suyas; con el PIN, cualquiera. Si ya se estaba bajando, termina pero no queda guardada.
+  más largo que `duracion_maxima`). Lo que espera se ve en **⬇ descargas** (abajo).
+- **⬇ Descargas:** arriba, **⬇ descargas** cambia la cola por la lista de lo que espera para
+  bajarse, en la misma página, como el recap (el botón lleva la cuenta en la esquina; tocándolo
+  de nuevo se vuelve; el link directo es `http://<ip>:8000/descargas`). Están la que se está
+  bajando, las que esperan, en el orden en que se van a bajar, y las que fallaron (el aviso dura
+  un minuto). **✕** cancela una (o **✕ todas**): cada uno las suyas; con el PIN, cualquiera. Si
+  ya se estaba bajando, termina pero no queda guardada. Con el PIN, **⤒ ↑ ↓** cambian el orden:
+  **⤒** la pone primera (después de la que ya se está bajando). Las que esperan **quedan
+  anotadas**: si la rockola se reinicia o se corta la luz, al volver sigue bajándolas, en el
+  mismo orden. Y si no hay internet (p. ej. recién prendida la Raspberry), no se pierden:
+  quedan esperando y se prueba de nuevo cada medio minuto. La fila es una sola para todas las
+  salas; cada sala ve y ordena las suyas.
 - **💿 Álbumes:** buscando un disco o un artista («bocanada», «soda stereo») aparecen también sus
   álbumes, con cuántos temas hay guardados. Tocando uno se ven sus temas, para pedirlos de a uno
   o, con el PIN, **▶ reproducir** el disco entero (corta la que suena; lo que estaba en la cola
@@ -123,7 +134,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   **▶ reproducir** (con el PIN): el disco entero, en el orden de YouTube Music, aunque falten temas
   por bajar (si YouTube no lo encuentra, suenan los guardados).
 - **♫ Armar una playlist:** en el panel de abajo a la derecha (abajo de todo en el celular),
-  **♫ playlists** y **+ nueva playlist**. Queda elegida para sumarle temas: aparece **♫+** al lado
+  **♫ playlists** (en el desplegable **ver:**) y **+ nueva playlist**. Queda elegida para sumarle temas: aparece **♫+** al lado
   de cada tema (en la búsqueda, en un álbum abierto, en las guardadas, en lo que suena, en la cola
   y en lo que sonó) y **♫+ todos** en un álbum o una playlist de YouTube. **♫✓** quiere decir que
   ya está (tocalo para sacarlo); **✓ listo** termina. Abriéndola se ve en orden, se suben temas
@@ -131,8 +142,9 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   navegador) o alguien con el PIN. Cualquiera pide sus temas de a uno; entera, **▶ reproducir** o
   **+ a la cola**, con el PIN. Cada sala tiene las suyas (hasta 50, de hasta 200 temas cada una).
 - En **GUARDADAS** (abajo de todo en el celular; en la compu, a la derecha, debajo del buscador)
-  están todas las que ya se bajaron, para recorrerlas: **💿 por álbum** (tocás uno y ves sus
-  temas) o **🕘 recientes**, separadas en páginas (**♫ playlists**, al lado, muestra las playlists). Con el PIN, **🗑** borra una a mano: sale de
+  están todas las que ya se bajaron, para recorrerlas. En el desplegable **ver:** se elige cómo:
+  **💿 por álbum** (tocás uno y ves sus temas), **🎤 por artista**, **🎸 por género** o
+  **🕘 recientes**, separadas en páginas (ahí mismo, **♫ playlists** muestra las playlists). Con el PIN, **🗑** borra una a mano: sale de
   las guardadas de la sala y, si ninguna otra sala la tiene, se borra el archivo (si está
   sonando o en la cola, cuando termine). Si vuelve a sonar, se vuelve a guardar.
 - **🎤 Por artista:** las guardadas de cada artista, en orden alfabético (un tema de varios, como
@@ -214,7 +226,8 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 - **Si se reinicia:** al volver a arrancar (`systemctl --user restart rockola`, `./iniciar.sh`, o si
   se corta la luz), cada sala sigue donde estaba: lo que sonaba, en el segundo en que iba (si se
   cortó la luz, unos segundos antes), y la cola tal cual, cada tema con quien lo pidió (así cada
-  uno puede seguir quitando los suyos). Si estaba en pausa, queda en pausa. En el reinicio diario
+  uno puede seguir quitando los suyos). Lo que esperaba para bajarse (**⬇ descargas**) se sigue
+  bajando. Si estaba en pausa, queda en pausa. En el reinicio diario
   de las 6 queda todo como estaba, pero en pausa (la oficina está vacía): ⏯ lo sigue. Al prender la
   Raspberry también, y con `azar_al_prender` sigue solo cuando el parlante está listo. El chat se
   borra.
@@ -296,7 +309,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── tele.py               las 📺 salas de tv: el video que va, su reloj, la cola y el chat (tv.json)
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
-├── static/               páginas web: pedidos y 📊 recap (/), las salas de tv (/tv), /pantalla y /player
+├── static/               páginas web: pedidos, 📊 recap y ⬇ descargas (/), las salas de tv (/tv), /pantalla y /player
 ├── iniciar.sh, tui.sh    arrancar el servidor y la pantalla
 ├── rockola.ejemplo.toml  configuración de ejemplo
 ├── pi/                   instalador de la Raspberry, salida de audio y Bluetooth
@@ -378,7 +391,8 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   control desde otro sitio: el servidor exige JSON y revisa el `Host`. En una sala de tv el
   control del video (pausa, moverlo, ⏭) es de todos; el PIN es para la cola de otros y para borrarla.
 - **Entre reinicios:** de cada sala, lo que suena (y en qué segundo), la cola con quién pidió cada
-  tema y lo que sonó recién quedan en `~/.cache/rockola/colas.json`. Se escribe un par de segundos
+  tema y lo que sonó recién quedan en `~/.cache/rockola/colas.json`; ahí mismo, las canciones que
+  esperan para bajarse (⬇), en su orden. Se escribe un par de segundos
   después de cada cambio, cada 30 s mientras suena algo (por si se corta la luz: no más seguido,
   para no gastar la tarjeta) y al apagar la rockola. Las salas, las canciones guardadas, el 🔀,
   las ♫ playlists (`listas.json`, con los datos de cada tema: se ven sin preguntarle a YouTube) y

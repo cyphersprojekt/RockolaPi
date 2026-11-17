@@ -86,6 +86,7 @@ state = {
     "mode": "navegador",
     "volume": None,    # el del parlante (sala principal)
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
+    "sin_red": False,  # no se llega a YouTube: las de "saving" esperan a que vuelva (ver bucle_guardar)
 }
 MAX_GUARDANDO = 40     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
 PRINCIPAL = "principal"
@@ -378,9 +379,11 @@ def set_radio(sala, body):
 # Lo que suena (y en qué segundo), la cola, quién pidió cada una y lo que sonó recién, de cada
 # sala, quedan en colas.json: al volver a arrancar (p. ej. para aplicar un cambio) sigue donde
 # estaba. Se escribe un par de segundos después de cada cambio, cada 30 s mientras suena algo
-# (por si se corta la luz) y al apagar la rockola. El chat no: se borra.
+# (por si se corta la luz) y al apagar la rockola. El chat no: se borra. Ahí quedan también las
+# que esperan para bajarse (⬇), en su orden: al volver a arrancar se siguen bajando.
 
 CLAVES_ITEM = ("id", "videoId", "title", "artist", "duration", "thumb", "album", "by", "playlist", "azar")
+CLAVES_A_BAJAR = ("videoId", "title", "artist", "datos", "album", "salas", "clientes")   # de state["saving"]
 MAX_COLA_GUARDADA = 2000
 lock_colas = threading.Lock()   # (escriben el hilo de bucle_colas y main, al apagar)
 colas_escritas = {"texto": None, "cerrado": False}
@@ -400,7 +403,10 @@ def foto_de_colas():
             "history": s.history,
             "owners": {k: v for k, v in s.owners.items() if k in en_cola},
         }
-    return {"salas": fotos}
+    # Las que esperan para bajarse (también la que se está bajando: si se corta, se baja de nuevo).
+    # Las que fallaron no: son un aviso que dura un minuto.
+    a_bajar = [{k: g[k] for k in CLAVES_A_BAJAR} for g in state["saving"] if not g["error"]]
+    return {"salas": fotos, "saving": a_bajar}
 
 
 def guardar_colas(final=False):
@@ -457,14 +463,38 @@ def _item_guardado(i):
     return item
 
 
+def _a_bajar_guardada(g):
+    """Una de las que esperaban para bajarse, leída de colas.json, como va en state["saving"]; o
+    None si no está bien o si ya no existe ninguna de las salas que la habían pedido."""
+    if not isinstance(g, dict) or not VIDEO_ID.match(str(g.get("videoId", ""))):
+        return None
+    lista = lambda k: [x for x in g[k] if isinstance(x, str)] if isinstance(g.get(k), list) else []
+    en = [sid for sid in lista("salas") if sid in salas]
+    datos = g.get("datos") if isinstance(g.get("datos"), dict) else {}
+    try:
+        duracion = int(datos.get("duration") or 0)
+    except (TypeError, ValueError):
+        duracion = 0
+    if not en or duracion <= 0:
+        return None
+    texto = lambda v: str(v or "")[:300]
+    titulo, artista, album = texto(g.get("title") or datos.get("title")), texto(g.get("artist") or datos.get("artist")), g.get("album")
+    return {"videoId": g["videoId"], "title": titulo, "artist": artista,
+            "datos": {"title": titulo, "artist": artista, "duration": duracion, "thumb": texto(datos.get("thumb")),
+                      "album": texto(datos.get("album"))},
+            "error": None, "hasta": 0, "album": album if isinstance(album, str) and ALBUM_ID.match(album) else None,
+            "salas": en, "clientes": [c[:64] for c in lista("clientes")], "bajando": False}
+
+
 def retomar_colas(en_pausa=False):
     """Al arrancar: cada sala como estaba la última vez (lo que sonaba y en qué segundo, la cola,
-    lo que sonó recién). Con `en_pausa`, lo de la principal queda en pausa (ver main: a las 6 de la
-    mañana la oficina está vacía). Devuelve True si la principal tiene una que seguía sonando (que
-    no estaba en pausa)."""
+    lo que sonó recién), y las que esperaban para bajarse (⬇), en su orden. Con `en_pausa`, lo de
+    la principal queda en pausa (ver main: a las 6 de la mañana la oficina está vacía). Devuelve
+    True si la principal tiene una que seguía sonando (que no estaba en pausa)."""
     ruta = carpeta() / "colas.json"
     try:
-        guardadas = json.loads(ruta.read_text())["salas"]
+        doc = json.loads(ruta.read_text())
+        guardadas = doc["salas"]
         if not isinstance(guardadas, dict):
             raise TypeError("«salas» no es un diccionario")
     except FileNotFoundError:
@@ -504,6 +534,18 @@ def retomar_colas(en_pausa=False):
                 if i and i.get("title"):
                     _remember({k: i.get(k) or ("" if k != "duration" else 0) for k in DATOS_TEMA})
             bump(s)
+        # Las que esperaban para bajarse: las sigue bajando el Director (ver bucle_guardar). Si
+        # alguna ya se había bajado (se apagó justo), ahí mismo queda guardada, sin bajarla.
+        a_bajar = doc.get("saving") if isinstance(doc.get("saving"), list) else []
+        if state["mode"] == "mpv" and GUARDAR_GB > 0:
+            for g in filter(None, map(_a_bajar_guardada, a_bajar)):
+                if len(state["saving"]) < MAX_GUARDANDO and not any(x["videoId"] == g["videoId"] for x in state["saving"]):
+                    state["saving"].append(g)
+            if state["saving"]:
+                bump()
+    if state["saving"]:
+        n = len(state["saving"])
+        print(f"  ⬇ Sigo con las descargas: {n} {'canción esperaba' if n == 1 else 'canciones esperaban'} para bajarse", flush=True)
     if cuantas:
         print(f"  ⏯ Retomo donde estaba: {cuantas} {'canción' if cuantas == 1 else 'canciones'} entre lo que "
               "sonaba y las colas", flush=True)
@@ -1241,8 +1283,12 @@ def public_state(sala, client=None, since=None, radio=False):
             "library": director.descargas.resumen(sala.id) if director else None,
             "lists": {"v": listas.version(sala.id)} if listas else None,   # (las pide aparte: /api/lists)
             "saving": [dict({k: g.get(k) for k in ("videoId", "title", "artist", "error", "album")},
+                            thumb=g["datos"].get("thumb"), duration=g["datos"].get("duration"),
                             active=g["bajando"], mine=bool(client) and client in g["clientes"])
                        for g in state["saving"] if sala.id in g["salas"]],
+            # (la fila para bajar es una sola: cuántas de otras salas hay esperando en ella)
+            "savingOthers": sum(not g["error"] and sala.id not in g["salas"] for g in state["saving"]),
+            "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
         }
 
 
@@ -1307,6 +1353,15 @@ def add_song(sala, body):
         sala.owners[item["id"]] = client
         bump(sala)
     return item
+
+
+def hay_internet(timeout=5):
+    """¿Se llega a YouTube? Para saber si una descarga falló por la canción o porque no hay conexión."""
+    try:
+        socket.create_connection(("www.youtube.com", 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
 
 
 def _se_guarda():
@@ -1462,6 +1517,35 @@ def cancelar_guardado(sala, body, es_admin):
     if ajenas and not n:
         raise ApiError(403, "Sólo podés cancelar las que pediste vos (con el PIN, cualquiera)")
     return n
+
+
+def mover_guardado(sala, body):
+    """⤒ ↑ ↓ en ⬇ descargas (con el PIN): cambia el orden en que se bajan las que esperan. `to`
+    es el lugar entre las de la sala que esperan (0 = la próxima). La que ya se está bajando no
+    se mueve, ni se le pasa adelante. La fila es una sola para todas las salas: la canción queda
+    justo antes de la que estaba en ese lugar (o después de la última de la sala)."""
+    vid = str(body.get("videoId", ""))
+    try:
+        to = int(body.get("to", 0))
+    except (TypeError, ValueError):
+        raise ApiError(400, "Posición inválida")
+    with lock:
+        fila = state["saving"]
+        de_la_sala = [g for g in fila if sala.id in g["salas"] and not g["error"]]
+        g = next((x for x in de_la_sala if x["videoId"] == vid), None)
+        if g is None:
+            raise ApiError(404, "Esa canción ya no está esperando para bajarse")
+        if g["bajando"]:
+            raise ApiError(409, "Esa ya se está bajando")
+        otras = [x for x in de_la_sala if x is not g and not x["bajando"]]
+        to = max(0, min(len(otras), to))
+        lugar = lambda x: next(i for i, y in enumerate(fila) if y is x)
+        fila.pop(lugar(g))
+        if to < len(otras):
+            fila.insert(lugar(otras[to]), g)
+        else:
+            fila.insert(lugar(otras[-1]) + 1 if otras else len(fila), g)
+        bump()
 
 
 def quitar_guardada(sala, body):
@@ -1995,12 +2079,19 @@ class Director:
                 time.sleep(2)
                 visto = -1
 
-    def bucle_guardar(self, olvidar=60, pausa=1):
+    def bucle_guardar(self, olvidar=60, pausa=1, sin_red=30):
         """Las que pidieron guardar sin ponerlas en la cola (state["saving"]): las baja de a
-        una. Mientras se baja una que tiene que sonar espera, que eso va primero (y así no hay
-        más de dos descargas a la vez). Las que fallan quedan `olvidar` segundos en la lista,
-        con su error, para que la página lo muestre.
+        una, en el orden de la lista (que se cambia desde ⬇ descargas: ver mover_guardado).
+        Mientras se baja una que tiene que sonar espera, que eso va primero (y así no hay más de
+        dos descargas a la vez). Las que fallan quedan `olvidar` segundos en la lista, con su
+        error, para que la página lo muestre. Las que esperan quedan anotadas en colas.json: si
+        la rockola se reinicia, siguen (ver retomar_colas).
+
+        Si una falla y resulta que no hay internet (p. ej. recién prendida la Raspberry, con el
+        wifi todavía sin conectar), no es que esa canción no se pueda bajar: quedan todas
+        esperando y se prueba de nuevo cada `sin_red` segundos.
         """
+        avisado = False   # (que la consola no se llene: un aviso por corte)
         while True:
             with changed:
                 while True:
@@ -2016,8 +2107,10 @@ class Director:
             while any(s.loading for s in list(salas.values())):
                 time.sleep(pausa)
             with lock:
-                if not any(g is sig for g in state["saving"]):
-                    continue   # la cancelaron mientras esperaba
+                # Mientras esperaba pudieron cancelarla, o poner otra adelante (⤒ ↑): la primera de ahora.
+                sig = next((g for g in state["saving"] if not g["error"]), None)
+                if sig is None:
+                    continue
                 sig["bajando"] = True
                 bump()
             vid, error = sig["videoId"], None
@@ -2028,6 +2121,7 @@ class Director:
                         error = "se bajó pero no quedó guardada (¿falta lugar en el disco?)"
             except Exception as e:   # ErrorDescarga, o yt-dlp con algo raro
                 error = str(e)[:160] or type(e).__name__
+            cortada = bool(error) and not hay_internet()   # (sin el lock: puede tardar unos segundos)
             with lock:
                 if not error:   # que quede en las guardadas de cada sala que la pidió
                     for sid in sig["salas"]:
@@ -2035,15 +2129,26 @@ class Director:
                             self.descargas.sumar_a_sala(vid, sid)
                 sig["bajando"] = False
                 cancelada = not sig["salas"]
-                if error and not cancelada:
-                    sig["error"], sig["hasta"] = error, time.time() + olvidar
-                else:
+                if cancelada or not error:
                     state["saving"] = [g for g in state["saving"] if g is not sig]
+                elif not cortada:
+                    sig["error"], sig["hasta"] = error, time.time() + olvidar
+                state["sin_red"] = cortada   # (si es eso, la canción sigue en su lugar, esperando)
                 bump()
             if cancelada and not error:   # la cancelaron mientras se bajaba: no queda guardada
                 self.descargas.descartar(vid, en_uso())
+            elif cortada:
+                if not avisado:
+                    print(f"  ⚠ sin internet: las descargas esperan (pruebo cada {sin_red} s)", flush=True)
+                avisado = True
+                time.sleep(sin_red)
+                with lock:
+                    state["sin_red"] = False   # a probar de nuevo
+                    bump()
+                continue
             elif error:
                 print(f"  ⚠ no pude guardar “{sig['title']}”: {error}", flush=True)
+            avisado = False
 
     def sonar_al_arrancar(self, espera=10, cada=5, retomar=False):
         """Recién arrancada la rockola (al prender la Raspberry, o al reiniciar el servicio,
@@ -2505,7 +2610,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(u.query)
 
         def route():
-            if u.path in ("/", "/recap"):   # (/recap: la misma página, abierta en el 📊 recap)
+            if u.path in ("/", "/recap", "/descargas"):   # (la misma página, abierta en 📊 recap o en ⬇ descargas)
                 return self.send_page("index.html")
             if u.path == "/pantalla":
                 return self.send_page("pantalla.html")
@@ -2685,6 +2790,8 @@ class Handler(BaseHTTPRequestHandler):
                 move_first(sala, body)
             elif path == "/api/move":
                 move_to(sala, body)
+            elif path == "/api/download-move":   # ⤒ ↑ ↓ en ⬇ descargas: el orden en que se bajan
+                mover_guardado(sala, body)
             elif path == "/api/remove-playlist":
                 remove_playlist(sala, body)
             elif path == "/api/shuffle":
