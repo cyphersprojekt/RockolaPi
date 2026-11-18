@@ -11,8 +11,8 @@ muestra qué está sonando, quién lo pidió y qué viene después.
 ![La página de la rockola](docs/img/web.png)
 
 **La página**, acá con el PIN puesto (por eso los controles): la letra en sincro y el chat, lo que
-suena y la cola, el buscador y las canciones guardadas. Arriba, el led de internet, la sala,
-📻 radio, 📊 recap y ⬇ descargas.
+suena y la cola, el buscador y las canciones guardadas. Arriba, el led de internet, el clima, la
+sala, el nombre y cuatro botones: 📻 radio, 📊 recap, ⬇ descargas y 🔒 controlar.
 
 | ![Descargas](docs/img/descargas.png) | ![Sala de tv](docs/img/salatv.png) |
 |:---:|:---:|
@@ -56,7 +56,7 @@ escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que s
   desde la web) no tienen parlante y se escuchan con 📻 radio. Cada una tiene su cola, su PIN, su
   🔀 al azar y sus guardadas: lo que pide ventas no se mezcla con lo de tu equipo, pero un tema
   que ya bajó otra sala suena al instante, sin bajarlo de nuevo.
-- **💬 Chat** en cada sala.
+- **💬 Chat** en cada sala, con el registro de quién salteó, quién votó saltear y quién reaccionó.
 - **📺 Salas de tv:** para mirar videos de YouTube entre varios, cada uno en su navegador. Van a
   la par: si alguien pausa, adelanta o salta el video, les pasa a todos. Con su cola y su chat.
   No pasan por la Raspberry: no se baja nada ni suena en el parlante.
@@ -124,6 +124,11 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 
 ## Usarla
 
+Los cuatro botones de la barra de arriba (**📻** radio, **📊** recap, **⬇** descargas y **🔒**
+controlar) son sólo el ícono: qué es cada uno lo dice al pasarle el mouse, y el que está prendido
+(la radio sonando, la vista abierta, el PIN puesto) lleva el recuadro resaltado. En el celular
+no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
+
 - **Compañeros:** entran al link o escanean el QR, ponen su nombre, buscan y tocan **+ agregar**.
   Hay un solo buscador, sin botón: mientras escribís aparecen las **💾 guardadas** que coinciden
   (las palabras en cualquier orden) y, cuando dejás de escribir, abajo de ellas lo que hay en
@@ -134,15 +139,17 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   los demás: la tuya no la votás vos). La votada sube hasta quedar debajo de las que tienen
   tantos votos como ella, o más; entre dos con los mismos votos, va primero la que los juntó
   antes. Es un voto por persona y por canción, y no se saca. En la tuya ves cuántos tiene. Con el
-  PIN se sigue pudiendo ordenar a mano: a una que pusieron en su lugar con ⤒ o ↑, los votos de
-  las otras no le pasan por arriba.
+  PIN se sigue pudiendo ordenar a mano: a una que pusieron en su lugar con ⤒ o arrastrándola
+  (↕), los votos de las otras no le pasan por arriba.
 - **⏭ Saltear por votos:** debajo de lo que suena, **⏭ 0/3**: es un voto para saltearla. Cuando
   votan 3 personas (`votos_para_saltear` en `rockola.toml`; con 0 no se vota), pasa sola a la
-  que sigue y avisa. Quien tiene el PIN la saltea sin votar, como siempre.
+  que sigue y avisa. Quien tiene el PIN la saltea sin votar, como siempre. Cada voto queda
+  anotado en el chat, con el nombre de quien votó.
 - **🔥 ❤️ 😴 Reacciones:** al lado del ⏭, para decir qué te parece lo que suena: una de cada una
-  por persona y por canción. Todos ven cuántas van; en la pantalla de la Raspberry (y en
-  `/pantalla`) además aparece un instante de quién fue la última. Cuando la canción termina, sus
-  reacciones quedan con ella en «sonaron recién» y en el 📊 recap.
+  por persona y por canción, y tocándola de nuevo se saca. Todos ven cuántas van; en la pantalla
+  de la Raspberry (y en `/pantalla`) además aparece un instante de quién fue la última, y en el
+  chat queda anotado quién reaccionó. Cuando la canción termina, las reacciones que le quedaron
+  van con ella a «sonaron recién» y al 📊 recap.
 - **Letra:** la de la que suena (a la izquierda en la compu; debajo de lo que suena en el
   celular), de YouTube Music o, si ahí no está o no trae los tiempos, de [LRCLIB](https://lrclib.net).
   El título dice de dónde vino (LyricFind o Musixmatch, que le dan las letras a YouTube, o
@@ -152,7 +159,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   las guardadas, sin ponerla en la cola (en modo mpv). Se bajan de a una, después de la que tiene
   que sonar; hasta 40 esperando a la vez, con las mismas reglas que para pedir (nada en vivo ni
   más largo que `duracion_maxima`). Lo que espera se ve en **⬇ descargas** (abajo).
-- **⬇ Descargas:** arriba, **⬇ descargas** cambia la cola por la lista de lo que espera para
+- **⬇ Descargas:** arriba (en el celular, en el menú de abajo), **⬇** cambia la cola por la lista de lo que espera para
   bajarse, en la misma página, como el recap (el botón lleva la cuenta en la esquina; tocándolo
   de nuevo se vuelve; el link directo es `http://<ip>:8000/descargas`). Están la que se está
   bajando, las que esperan, en el orden en que se van a bajar, y las que fallaron (el aviso dura
@@ -188,7 +195,8 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   **🕘 recientes**, separadas en páginas (ahí mismo, **♫ playlists** muestra las playlists). Con el
   PIN, **🗑** borra una a mano: sale de las guardadas de la sala y, si ninguna otra sala la tiene,
   se borra el archivo (si está sonando o en la cola, cuando termine). Si vuelve a sonar, se vuelve
-  a guardar.
+  a guardar. El mismo **🗑** está en el buscador, en las que ya están guardadas (ahí va en lugar
+  de **⬇ guardar**): no hace falta ir a buscarla a las guardadas para borrarla.
 - **🎤 Por artista:** las guardadas de cada artista, en orden alfabético (un tema de varios, como
   «Bizarrap, Quevedo», está en el de cada uno). Tocás uno y elegís qué ver: **💿 álbumes** (los
   discos en los que está, que se abren como cualquier álbum; sus temas sueltos van al final, como
@@ -200,7 +208,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   (ver **Géneros**, abajo): se va averiguando de a un artista, así que al principio muchas están
   en **Sin género** (ahí dice cuántos artistas faltan) y la lista se acomoda sola. En «Sin género»
   quedan los videos sueltos y los artistas que iTunes no conoce.
-- **📻 Radio, con auriculares:** arriba a la derecha, **📻 radio** hace sonar en ese dispositivo lo
+- **📻 Radio, con auriculares:** arriba a la derecha (en el celular, en el menú de abajo), **📻** hace sonar en ese dispositivo lo
   que suena en la rockola, a la par (la letra queda en sincro): pausa, ⏭ y ⏮ los sigue sola. Cada uno
   con su volumen, así que si en la oficina prefieren silencio, con el PIN bajen la rockola a 0 y la
   música sigue en los auriculares. Se apaga tocándolo de nuevo, o con la tecla ⏸ del teclado o de los
@@ -220,7 +228,12 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   que ya bajó otra sala, suena sin esperar y pasa a ser también de la tuya. El espacio
   (`guardar_gb`) es uno solo para todas.
 - **💬 Chat:** el de la sala en la que estás (en la compu, a la izquierda, debajo de la letra).
-  Escribís y Enter. Se borra cuando se reinicia la rockola.
+  Escribís y Enter. Se borra cuando se reinicia la rockola. Entre los mensajes va, más apagado,
+  **el registro** de lo que se hizo con la música y quién fue: quién votó saltear una canción
+  (y cuando se salteó por los votos), quién reaccionó (una vez por persona, reacción y canción) y
+  quién la cambió directamente con el PIN (**⏭**, **⏮** o **▶ ahora**). Va con el nombre que
+  cada uno puso arriba («Alguien», si no puso); lo que se hace desde la Raspberry (la botonera,
+  el teclado) figura como «desde la rockola».
 - **📺 Salas de tv:** en el mismo menú de **sala:** están las de tv, y **＋ nueva sala de tv…**
   crea una (con un nombre y un PIN, como las otras). Son otra página: `http://<ip>:8000/tv?sala=almuerzo`
   (`/tv` a secas las lista). Ahí se busca un video de YouTube (cualquiera, no sólo música) o se pega
@@ -230,7 +243,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   siempre), y todos van por el mismo segundo.
   - **El control es de todos:** si alguien pausa, le da play o mueve el video (en el video mismo
     o con **⏸ pausa** y **⏭ siguiente**, abajo), les pasa a todos, y dice quién fue. Con el PIN
-    de la sala (o el de la rockola), **🔒 controlar** suma lo que no es de todos: quitar (✕) o
+    de la sala (o el de la rockola), **🔒** suma lo que no es de todos: quitar (✕) o
     adelantar (⤒) videos de otro y **🗑 borrar sala**.
   - **Corre mientras alguien mira:** cada video arranca cuando el primero lo tiene andando (nadie
     se pierde el principio por lo que tarde en cargar), y si se van todos queda en espera, donde
@@ -240,7 +253,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
     Premium en ese navegador, no hay). Un video que no deja verse fuera de YouTube se saltea solo.
   - Hay hasta 8, y andan en los dos modos. Quedan guardadas entre reinicios, con su cola y por
     dónde iba el video (el chat no).
-- **📊 Recap:** arriba, **📊 recap** cambia la cola por el recap, en la misma página: la 📻 radio sigue
+- **📊 Recap:** arriba (en el celular, en el menú de abajo), **📊** cambia la cola por el recap, en la misma página: la 📻 radio sigue
   sonando, y se vuelve tocándolo de nuevo (o con ← del navegador). Su link es
   `http://<ip>:8000/recap`, y se actualiza solo cuando termina un tema. Muestra cuánto sonó, el top de
   canciones, artistas y géneros, **quién pide más** (con su artista favorito), a qué hora y qué día
@@ -251,9 +264,14 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
   cuentan como pedidas, pero no para los rankings. En «quién pide más» no entran 🔀 ni lo que se
   cargó entero (playlists y álbumes). Entre los datos están **la más festejada** (🔥), **la más
   querida** (❤️) y **la que durmió a todos** (😴): de cada reacción, la canción que más juntó. Las de cada persona se juntan por el nombre, sin fijarse en mayúsculas ni acentos.
-- **Quien maneja la música:** en la misma página, **🔒 controlar** y el PIN. Aparecen ⏮ ⏸ ⏭ con el
-  volumen al lado, abajo 🔀 y 🎚️ (lo que se deja prendido o apagado), y botones para reordenar
-  (⤒ ↑) o quitar (✕) cualquier canción. Al lado de cada
+- **Quien maneja la música:** en la misma página, **🔒** y el PIN (mientras se controla queda
+  **🔓**, resaltado: tocándolo se deja de controlar). Aparecen ⏮ ⏸ ⏭ con el
+  volumen al lado, abajo 🔀 y 🎚️ (lo que se deja prendido o apagado), y en cada canción de las
+  próximas **⤒** (que suene a continuación), **↕** y **✕** (quitarla). De **↕** se la agarra
+  para **arrastrarla** adonde tiene que ir, con el mouse o con el dedo: mientras, las otras se
+  corren para mostrar dónde va a quedar (Esc, y vuelve a su lugar). Con el teclado, ↑ y ↓ sobre
+  **↕** la mueven de a un lugar. En la compu, si la cola tiene varias páginas, se arrastra dentro
+  de la página. Al lado de cada
   **+ agregar** (en la búsqueda y en las guardadas) aparece **▶ ahora**: corta la que suena (queda
   en "sonaron recién", como con ⏭) y pone esa; la cola sigue igual.
 - **Mezclar la cola:** con el PIN, **🔀 mezclar** arriba de las próximas. Las pone en otro orden al
@@ -492,7 +510,11 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   rockola; a ésos no se les manda nada: ven de dónde viene el pedido. Lo pregunta la rockola, no
   cada página. Si no puede (no hay internet), queda el último hasta dos horas y después nada.
 - **Tiempo real con long-poll:** las páginas, la TUI y los botones se enteran de cada cambio al
-  instante, sin websockets ni dependencias.
+  instante, sin websockets ni dependencias. Para que eso sea liviano: lo que la rockola manda
+  (las páginas, el estado, las guardadas, una búsqueda) va comprimido con gzip si el navegador
+  lo acepta (la página de pedidos pasa de unos 180 KB a 50; se comprime una sola vez), y la
+  página arma de nuevo sólo lo que cambió: un mensaje en el chat o un cambio de volumen no
+  vuelven a dibujar la cola.
 - **Permisos:** cualquiera agrega temas, quita los suyos, vota, reacciona, chatea, crea salas y arma
   ♫ playlists (las cambia quien la armó: la página la reconoce por el mismo identificador con el
   que quita sus temas; es también el que cuenta como «una persona» para los votos y las

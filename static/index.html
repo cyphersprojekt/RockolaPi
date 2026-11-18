@@ -7,6 +7,7 @@
 <title>Rockola</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   /* Misma estética que /pantalla y la TUI (paleta gruvbox) */
@@ -94,6 +95,8 @@
   .chat { overflow-y: auto; overflow-wrap: anywhere; }
   .msg { padding: .1em 0; }
   .msg .hora { color: var(--dim); font-size: .87em; }
+  /* el registro: quién votó saltear, reaccionó o cambió la que suena (más apagado que lo que se escribe) */
+  .msg.log { color: var(--dim); }
   .chatform { margin-top: .6em; }
 
   /* barra de arriba (su contenido alineado con el de abajo) */
@@ -115,6 +118,13 @@
   .clima { margin-right: auto; color: var(--dim); white-space: nowrap; cursor: default; }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
+  /* Los cuatro botones de la barra (📻 radio, 📊 recap, ⬇ descargas, 🔒 controlar): sólo el ícono,
+     todos del mismo ancho. El que está prendido (la radio sonando, la vista abierta, el PIN
+     puesto) lleva el recuadro resaltado, y más grueso: a un emoji el color no le llega. Lo mismo
+     los modos del reproductor (🔀 🎚️). En el celular este grupo es el menú de abajo (ver al final). */
+  .iconos { display: flex; gap: 1ch; }
+  .iconos > button, .iconos > a { min-width: 4.5ch; text-align: center; }
+  .iconos > .on, .modos > .on { box-shadow: inset 0 0 0 1px var(--acc); }
 
   /* los desplegables (el de las salas, el de cómo ver las guardadas): un botón que despliega la
      lista, como un panel más. De ancho fijo, diga lo que diga (si no entra, "…"): así lo de al
@@ -262,6 +272,16 @@
   .mia { color: var(--ok); font-weight: 700; }
   .acts { display: flex; gap: .6ch; flex: none; }
   .acts button { padding: .2em .8ch; }
+  /* ↕ en las próximas (con el PIN): de ahí se agarra la fila para arrastrarla a otro lugar, con
+     el mouse o con el dedo (touch-action: que el dedo no desplace la página). Mientras, las
+     otras filas se corren para mostrar dónde va a quedar (ver empezarArrastre). */
+  .agarre { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .filas.ordenando .fila { transition: transform .15s ease; }
+  .filas.ordenando .fila.movida { transition: none; position: relative; z-index: 1; background: var(--bg1);
+                                  box-shadow: 0 0 0 1px var(--acc), 0 6px 14px rgba(0, 0, 0, .5); }
+  body.arrastrando, body.arrastrando .agarre { cursor: grabbing; }
+  body.arrastrando { user-select: none; -webkit-user-select: none; }
+  @media (prefers-reduced-motion: reduce) { .filas.ordenando .fila { transition: none; } }
   .hint { color: var(--dim); margin-top: .7em; }
   .fila.playlist .t { color: var(--acc); font-weight: 700; }
   .herr { display: flex; justify-content: flex-end; margin-bottom: .3em; }
@@ -398,10 +418,35 @@
   button.primario.peligro { background: var(--red); border-color: var(--red); }
 
   /* avisos: barra de abajo */
-  #toast { position: fixed; left: 0; right: 0; bottom: 0; padding: .55em 12px; background: var(--bg2);
+  #toast { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; padding: .55em 12px; background: var(--bg2);
            border-top: 2px solid var(--ok); transform: translateY(110%); transition: transform .2s; }
   #toast.show { transform: none; }
   #toast.err { border-top-color: var(--red); color: var(--red); }
+
+  /* ---------- en el celular: el menú de abajo ----------
+     Los cuatro botones de la barra bajan a un menú fijo al pie, al alcance del pulgar. Arriba
+     queda lo demás, en dos renglones: el logo, el led, el clima y la sala (que ocupa lo que
+     sobra); y el nombre. Los avisos salen justo arriba del menú (escondidos quedan detrás: el
+     menú es de la barra, que va por encima), y cada vista termina más arriba, para que el menú
+     no le tape lo último. (Va al final: pisa reglas de más arriba.) */
+  @media (max-width: 599px) {
+    :root { --menu: 52px; }
+    html { scroll-padding: 7em 0 calc(var(--menu) + 1em); }   /* lo que se enfoca no queda detrás de las barras */
+    .salas { flex: 1 1 14ch; min-width: 0; }
+    .salas .selector { flex: 1; min-width: 0; }
+    #salaBtn { width: 100%; }
+    .name { flex: 1 1 100%; }
+    .name input { flex: 1; width: auto; }
+    .iconos { position: fixed; left: 0; right: 0; bottom: 0; height: var(--menu); padding: 6px var(--margen);
+              background: var(--bg2); border-top: 1px solid var(--line); }
+    .iconos > button, .iconos > a.boton { flex: 1 1 0; min-width: 0; padding: 0; font-size: 1.25em;
+                                          display: flex; align-items: center; justify-content: center; }
+    /* la cuenta de las descargas, pegada al ícono (el botón acá es ancho) */
+    #descargasBtn .cuenta { top: 2px; right: auto; left: calc(50% + .8ch); font-size: .6em; }
+    main { padding-bottom: calc(var(--menu) + 5em); }
+    #recap .contenido, #descargas .contenido { padding-bottom: calc(var(--menu) + 4em); }
+    #toast { bottom: var(--menu); }
+  }
 </style>
 </head>
 <body>
@@ -417,15 +462,20 @@
       <ul id="salaMenu" class="menu" role="listbox" aria-label="Salas" hidden></ul>
     </div>
   </div>
-  <button id="radioBtn" type="button" aria-pressed="false" hidden
-          title="Escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻<span class="largo"> radio</span></button>
-  <a class="boton" id="recapLink" href="/recap"
-     title="Recap: lo más escuchado, artistas, géneros y quién pide más">📊<span class="largo"> recap</span></a>
-  <button id="descargasBtn" type="button" aria-pressed="false"
-          title="Descargas: las canciones que esperan para bajarse">⬇<span class="largo"> descargas</span><span
-          class="cuenta" id="descargasCuenta" hidden></span></button>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
-  <button id="lockBtn" type="button" title="Controlar la música (pide PIN)">🔒 controlar</button>
+  <!-- Sólo el ícono (qué es cada uno lo dice al pasar el mouse); prendido, con el recuadro
+       resaltado. En el celular, este grupo es el menú de abajo. -->
+  <nav class="iconos" aria-label="Radio, recap, descargas y control">
+    <button id="radioBtn" type="button" aria-pressed="false" aria-label="Radio" hidden
+            title="Radio: escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻</button>
+    <a class="boton" id="recapLink" href="/recap" aria-label="Recap"
+       title="Recap: lo más escuchado, artistas, géneros y quién pide más">📊</a>
+    <button id="descargasBtn" type="button" aria-pressed="false" aria-label="Descargas"
+            title="Descargas: las canciones que esperan para bajarse">⬇<span
+            class="cuenta" id="descargasCuenta" hidden></span></button>
+    <button id="lockBtn" type="button" aria-pressed="false" aria-label="Controlar la música"
+            title="Controlar la música (pide PIN)">🔒</button>
+  </nav>
 </div>
 <main>
   <div id="pinPanel" class="panel" hidden>
@@ -603,7 +653,7 @@
       <div id="descargasLista"><div class="vacio">conectando…</div></div>
     </section>
     <div class="hint">Se bajan de a una, en este orden, después de la que tiene que sonar. Quedan anotadas: si la
-      rockola se reinicia, siguen. <b>✕</b> cancela las tuyas; con el PIN (🔒 controlar), cualquiera, y
+      rockola se reinicia, siguen. <b>✕</b> cancela las tuyas; con el PIN (🔒), cualquiera, y
       <b>⤒ ↑ ↓</b> cambian el orden.</div>
   </div>
 </section>
@@ -742,15 +792,27 @@ function dibujarTapa(lienzos, url) {
   img.src = url;
 }
 
-// Barra de progreso hecha con caracteres, del ancho justo
+// Barra de progreso hecha con caracteres, del ancho justo. Cuánto mide un "━" se mide poniendo
+// y sacando una sonda, que obliga al navegador a acomodar la página de nuevo: antes se hacía
+// cada segundo, con cada tic de la barra. Ahora se recuerda, y se mide de nuevo cuando puede
+// haber cambiado (la ventana o el zoom, una letra que terminó de cargar) y, por las dudas, cada
+// medio minuto.
+let anchoRaya = 0, usosAnchoRaya = 0;
+const olvidarAnchoRaya = () => { anchoRaya = 0; };
+addEventListener("resize", olvidarAnchoRaya);
+document.fonts?.ready.then(olvidarAnchoRaya);
+document.fonts?.addEventListener?.("loadingdone", olvidarAnchoRaya);
 function columnas(e) {
-  const probe = document.createElement("span");
-  probe.textContent = "━".repeat(20);
-  probe.style.visibility = "hidden"; probe.style.position = "absolute";
-  e.append(probe);
-  const w = probe.getBoundingClientRect().width / 20;
-  probe.remove();
-  return w ? Math.max(10, Math.floor(e.clientWidth / w)) : 30;
+  if (!anchoRaya || ++usosAnchoRaya > 30) {
+    const probe = document.createElement("span");
+    probe.textContent = "━".repeat(20);
+    probe.style.visibility = "hidden"; probe.style.position = "absolute";
+    e.append(probe);
+    anchoRaya = probe.getBoundingClientRect().width / 20;   // (0 si no se ve: se mide de nuevo la próxima)
+    probe.remove();
+    usosAnchoRaya = 0;
+  }
+  return anchoRaya ? Math.max(10, Math.floor(e.clientWidth / anchoRaya)) : 30;
 }
 
 // ---------- control con PIN ----------
@@ -778,8 +840,12 @@ async function api(path, body) {
 }
 
 function pintarControl() {
-  $("#lockBtn").textContent = admin ? "🔓 controlando" : "🔒 controlar";
-  $("#lockBtn").classList.toggle("on", admin);
+  // Sólo el candado: abierto, y con el recuadro prendido, mientras se controla.
+  const b = $("#lockBtn");
+  b.textContent = admin ? "🔓" : "🔒";
+  b.classList.toggle("on", admin);
+  b.setAttribute("aria-pressed", String(admin));
+  b.title = admin ? "Controlando la música: tocá para dejar de controlar" : "Controlar la música (pide PIN)";
   $("#controls").hidden = !admin;
   if (armando && !armando.mine && !admin) ponerArmando(null);   // era de otro: la cambiaba con el PIN
   if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
@@ -836,8 +902,9 @@ async function control(path, body = {}) {
   catch (err) { toast(err.message, true); }
 }
 $("#playBtn").onclick = () => control("/api/pause");
-$("#prevBtn").onclick = () => control("/api/prev");
-$("#skipBtn").onclick = () => current && control("/api/next", { finished: current.id });
+// (con el nombre: en el chat queda anotado quién cambió la que suena)
+$("#prevBtn").onclick = () => control("/api/prev", { by: nameInput.value.trim(), client });
+$("#skipBtn").onclick = () => current && control("/api/next", { finished: current.id, by: nameInput.value.trim(), client });
 $("#shufBtn").onclick = async () => {
   const on = !last?.shuffle;
   await control("/api/shuffle", { on });
@@ -873,7 +940,7 @@ $("#volUp").onclick = () => control("/api/volume", { delta: 5 });
 function fila(song, { pos, imagen = false, extra, action, marca } = {}) {
   return el("div", { class: "fila" },
     pos != null && el("span", { class: "pos" }, pos),
-    imagen && el("img", { src: song.thumb || null, alt: "", loading: "lazy" }),
+    imagen && el("img", { src: song.thumb || null, alt: "", loading: "lazy", decoding: "async" }),
     el("div", { class: "info" },
       el("div", { class: "t", title: song.title }, song.title),
       el("div", { class: "sub" }, marca, marca && " · ",
@@ -940,23 +1007,164 @@ function reacomodar() {
   pintarResultados();
   reajustarGuardadas();
 }
-let reacomodo = 0;
-addEventListener("resize", () => { cancelAnimationFrame(reacomodo); reacomodo = requestAnimationFrame(reacomodar); });
+// Cuando cambia la ventana. En el celular pasa todo el tiempo (la barra de direcciones del
+// navegador se esconde y vuelve al desplazar la página) y ahí no hay nada que volver a contar:
+// las listas se ven enteras, del ancho que sea. Sólo la letra, que tiene que seguir centrada (la
+// barra de progreso se acomoda aparte: ver tickProgress). Antes se armaba todo de nuevo cada vez.
+let reacomodo = 0, eraFijo = fijo();
+addEventListener("resize", () => {
+  cancelAnimationFrame(reacomodo);
+  reacomodo = requestAnimationFrame(() => {
+    const ahora = fijo();
+    if (ahora || eraFijo) reacomodar(); else centrarLetra();   // (también al pasar de una manera a la otra)
+    eraFijo = ahora;
+  });
+});
 document.fonts?.ready.then(reacomodar);
 
-function accionesCola(it, i) {
+// `n`: cuántas hay en la cola (con una sola no hay nada que ordenar).
+function accionesCola(it, i, n) {
   if (admin) {
     return el("div", { class: "acts" },
       botonLista(it), botonVoto(it),
       i > 0 && el("button", { title: "Que suene a continuación", "aria-label": "Mover al principio",
                               onclick: () => control("/api/move", { id: it.id, to: 0 }) }, "⤒"),
-      i > 0 && el("button", { title: "Subir un lugar", "aria-label": "Subir un lugar",
-                              onclick: () => control("/api/move", { id: it.id, to: i - 1 }) }, "↑"),
+      n > 1 && el("button", {
+        type: "button", class: "agarre", title: "Arrastrala para cambiarla de lugar (con el teclado: ↑ y ↓)",
+        "aria-label": `Mover ${it.title}, que está ${i + 1}ª de ${n}: con las flechas, un lugar para arriba o para abajo`,
+        onpointerdown: ev => empezarArrastre(ev, it, i),
+        onkeydown: ev => {
+          const paso = ev.key === "ArrowUp" ? -1 : ev.key === "ArrowDown" ? 1 : 0;
+          if (paso) { ev.preventDefault(); moverEnCola(it.id, i + paso); }
+        } }, "↕"),
       el("button", { title: "Quitar de la cola", "aria-label": "Quitar",
                      onclick: () => removeSong(it.id) }, "✕"));
   }
   return el("div", { class: "acts" }, botonLista(it), botonVoto(it),
             it.mine && el("button", { onclick: () => removeSong(it.id) }, "quitar"));
+}
+
+// ---------- arrastrar para ordenar la cola (con el PIN) ----------
+// ↕ en cada fila de las próximas: de ahí se la agarra (con el mouse o con el dedo) y se la suelta
+// donde tiene que ir. Mientras se arrastra, las otras filas se corren para mostrar dónde va a
+// quedar y, cerca del borde de la pantalla, la página se desplaza (en el celular la cola puede
+// ser larga). La cola no se vuelve a pintar hasta soltar (ver pintarCola). Al servidor se le dice
+// delante de cuál quedó (`before`), por si la cola cambió mientras tanto. Con el teclado, ↑ y ↓
+// sobre ↕ la mueven de a un lugar. En la compu, si la cola tiene varias páginas, se arrastra
+// dentro de la página (para pasarla a otra: las flechas, o ⤒).
+let arrastre = null;   // mientras se arrastra una: ver empezarArrastre
+let colaVista = [];    // la cola como está pintada (mientras se arrastra, puede no ser la última que llegó)
+const menuAbajo = matchMedia("(max-width: 599px)");   // (en el celular, los botones de la barra están abajo)
+
+// Dónde queda la fila `de` si se la corrió `dy` píxeles: cambia de lugar con una vecina cuando su
+// borde le pasa la mitad. `cajas`: { top, height } de todas las filas, como estaban al agarrarla.
+function lugarAlSoltar(cajas, de, dy) {
+  const arriba = cajas[de].top + dy, abajo = arriba + cajas[de].height;
+  let a = de;
+  cajas.forEach((c, k) => {
+    const medio = c.top + c.height / 2;
+    if (k < de && arriba < medio) a--;
+    else if (k > de && abajo > medio) a++;
+  });
+  return a;
+}
+
+// `i`: el lugar de `it` en la cola (no en la página).
+function empezarArrastre(ev, it, i) {
+  if (arrastre || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+  const agarre = ev.currentTarget, fila = agarre.closest(".fila");
+  const filas = fila ? [...fila.parentElement.children] : [], de = filas.indexOf(fila);
+  if (de < 0 || filas.length < 2) return;
+  ev.preventDefault();
+  try { agarre.setPointerCapture(ev.pointerId); } catch {}   // que siga llegando aunque el puntero se vaya del botón
+  const desde = i - de;   // (el lugar en la cola de la primera fila de esta página)
+  arrastre = {
+    id: it.id, puntero: ev.pointerId, agarre, fila, filas, de, a: de, desde,
+    ids: filas.map(f => f.dataset.id),
+    sigue: colaVista[desde + filas.length]?.id ?? null,   // la primera de la página que sigue (o ninguna)
+    // (medidas en la página, no en la ventana: mientras se arrastra, la página se puede desplazar)
+    cajas: filas.map(f => { const r = f.getBoundingClientRect(); return { top: r.top + scrollY, height: r.height }; }),
+    y0: ev.clientY + scrollY, y: ev.clientY, movio: false, pendiente: false, visto: null,
+    cuadro: requestAnimationFrame(seguirArrastre),
+  };
+  fila.classList.add("movida"); fila.parentElement.classList.add("ordenando");
+  document.body.classList.add("arrastrando");   // (que no se seleccione texto mientras)
+}
+
+// En cada cuadro, mientras se arrastra: desplazar la página si hace falta, y correr las filas.
+function seguirArrastre() {
+  const d = arrastre;
+  if (!d) return;
+  if (d.movio) {   // cerca del borde (debajo de la barra, o arriba del menú del celular), la página se desplaza
+    const techo = $(".top").getBoundingClientRect().bottom + 40;
+    const piso = (menuAbajo.matches ? $(".iconos").getBoundingClientRect().top : innerHeight) - 40;
+    const paso = d.y < techo ? d.y - techo : d.y > piso ? d.y - piso : 0;
+    if (paso) scrollBy(0, Math.max(-18, Math.min(18, paso / 3)));
+  }
+  const c = d.cajas[d.de], ultima = d.cajas.at(-1);
+  // la fila sigue al puntero, sin salirse de la lista
+  const dy = Math.max(d.cajas[0].top - c.top, Math.min(ultima.top + ultima.height - c.top - c.height, d.y + scrollY - d.y0));
+  d.a = lugarAlSoltar(d.cajas, d.de, dy);
+  const visto = `${dy} ${d.a}`;
+  if (visto !== d.visto) {   // (sólo si cambió algo: esto corre en cada cuadro)
+    d.visto = visto;
+    d.filas.forEach((f, k) => {
+      // las que quedan entre donde estaba y donde va le hacen lugar: se corren lo que ella mide
+      const corre = k === d.de ? dy : k < d.de && k >= d.a ? c.height : k > d.de && k <= d.a ? -c.height : 0;
+      f.style.transform = corre ? `translateY(${corre}px)` : "";
+    });
+  }
+  d.cuadro = requestAnimationFrame(seguirArrastre);
+}
+
+// `ok`: la soltaron (si no: Esc, o el navegador cortó el gesto, y vuelve a su lugar).
+function soltarArrastre(ok) {
+  const d = arrastre;
+  if (!d) return;
+  arrastre = null;
+  cancelAnimationFrame(d.cuadro);
+  try { d.agarre.releasePointerCapture(d.puntero); } catch {}
+  document.body.classList.remove("arrastrando");
+  const limpiar = () => {
+    d.fila.classList.remove("movida"); d.fila.parentElement?.classList.remove("ordenando");
+    for (const f of d.filas) f.style.transform = "";
+    pintado.cola = null;   // (la próxima vez la cola se pinta sí o sí)
+  };
+  if (!ok || d.a === d.de) {   // quedó donde estaba
+    limpiar();
+    if (ok && !d.movio) toast("Arrastrala para cambiarla de lugar (con el teclado: ↑ y ↓)");
+    if (d.pendiente && last) render(last);   // la cola cambió mientras tanto: ahora sí se pinta
+    return;
+  }
+  // Las filas quedan como se ven (corridas, y la que se movió justo en su lugar nuevo) hasta que
+  // llega la cola nueva y se pinta.
+  const c = d.cajas[d.de], lugar = d.cajas[d.a];
+  d.fila.style.transform = `translateY(${d.a < d.de ? lugar.top - c.top : lugar.top + lugar.height - c.top - c.height}px)`;
+  const otras = d.ids.filter(id => id !== d.id);
+  api("/api/move", { id: d.id, to: d.desde + d.a, before: otras[d.a] ?? d.sigue, client })
+    .then(s => { limpiar(); render(s); },
+          err => { limpiar(); toast(err.message, true); if (last) render(last); });
+}
+addEventListener("pointermove", ev => {
+  if (!arrastre || ev.pointerId !== arrastre.puntero) return;
+  arrastre.y = ev.clientY;
+  if (Math.abs(ev.clientY + scrollY - arrastre.y0) > 3) arrastre.movio = true;
+});
+addEventListener("pointerup", ev => { if (arrastre && ev.pointerId === arrastre.puntero) soltarArrastre(true); });
+addEventListener("pointercancel", ev => { if (arrastre && ev.pointerId === arrastre.puntero) soltarArrastre(false); });
+addEventListener("keydown", ev => { if (arrastre && ev.key === "Escape") { ev.preventDefault(); soltarArrastre(false); } });
+addEventListener("blur", () => soltarArrastre(false));
+
+// Con el teclado, sobre ↕: un lugar para arriba o para abajo (el foco sigue a la canción y, si
+// pasó a otra página de la cola, también la página).
+async function moverEnCola(id, to) {
+  if (to < 0 || to >= colaVista.length) return;
+  try {
+    const s = await api("/api/move", { id, to, client });
+    if (pagCola.n) pagCola.pagina = Math.floor(to / pagCola.n);
+    render(s);
+    document.querySelector(`#queue .fila[data-id="${id}"] .agarre`)?.focus();
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------- estado ----------
@@ -974,7 +1182,42 @@ let queuedIds = new Set();
 const posicion = () => progress.t + (progress.playing ? (performance.now() - progressAt) / 1000 : 0);
 const pagCola = { pagina: 0 };
 
+// Lo que suena, la cola y lo que sonó se arman de nuevo sólo si cambió algo de lo que muestran:
+// acá se anota con qué se armó cada uno la última vez. El estado llega seguido por cosas que no
+// los tocan (un mensaje en el chat, el volumen, una reacción, y cada 25 s aunque no pase nada), y
+// armarlos es lo más caro de la página: en la compu hay que poner todas las filas, medir cuántas
+// entran y ponerlas de nuevo. Así, además, lo que no cambió no pierde el foco ni corta una
+// animación. Se ve exactamente lo mismo que si se armara siempre.
+const pintado = { ahora: null, cola: null, sonaron: null };
+let armandoV = 0;   // sube cada vez que cambia la playlist que se está armando (por los ♫+ de las filas)
+// En la compu, cuántas filas entran depende del lugar: la ventana, y lo que miden la columna y
+// el panel de lo que suena (medido, no supuesto: un título de dos renglones lo agranda).
+const medidasCola = () => fijo() ? [innerWidth, innerHeight, $("#panelCola").parentElement.offsetHeight, $("#panelSonando").offsetHeight] : 0;
+
+// Las próximas. `forzar`: aunque no haya cambiado nada (ver render).
+function pintarCola(s, forzar) {
+  if (arrastre) { arrastre.pendiente = true; return; }   // se está arrastrando una fila: se pinta al soltarla
+  const firma = () => JSON.stringify([s.queue, admin, armandoV, pagCola.pagina, medidasCola()]);
+  if (!forzar && firma() === pintado.cola) return;
+  colaVista = s.queue;
+  pintarLista($("#queue"), s.queue, (it, i) => {
+    const f = fila(it, {
+      pos: i + 1,
+      extra: el("div", { class: "sub" }, "pedida por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by),
+                it.playlist && ` · ${iconoDe(it.playlist)} ${it.playlist.title}`),
+      action: accionesCola(it, i, s.queue.length),
+    });
+    f.dataset.id = it.id;   // (para arrastrarla, y para devolverle el foco)
+    return f;
+  }, { arriba: [...herramientasCola(s.queue), ...listasEnCola(s.queue)], vacio: "La cola está vacía.",
+       pag: pagCola, nombre: "Páginas de la cola", alCambiar: () => render(last) });
+  pintado.cola = firma();   // (después de pintar: la página pudo haberse acomodado)
+}
+
 function render(s) {
+  // El mismo estado otra vez: lo que cambió es de acá (la ventana, el PIN, la página de la
+  // cola…), así que se arma todo de nuevo.
+  const forzar = s === last;
   last = s;
   current = s.now; progress = s.progress; progressAt = performance.now();
   queuedIds = new Set([...s.queue.map(i => i.videoId), s.now?.videoId].filter(Boolean));
@@ -1003,19 +1246,24 @@ function render(s) {
       now.replaceChildren(disco);
       artFor = undefined;   // lienzos nuevos (p. ej. después de perder la conexión): dibujar la tapa
     }
-    const info = el("div", { class: "info" },
-      el("div", { class: cls }, txt),
-      el("div", { class: "titulo", title: s.now.title }, s.now.title),
-      el("div", { class: "sub" }, s.now.artist),
-      el("div", { class: "sub" }, quien(s.now)),
-      el("div", { class: "barra", id: "bar" }),
-      filaReacciones(s),
-      armando && el("div", { class: "en-lista" }, botonLista(s.now)));   // ♫+: sumarla a la que se está armando
     const vieja = now.querySelector(":scope > .info");
-    if (vieja) vieja.replaceWith(info); else now.append(info);
+    const firma = JSON.stringify([s.now, !!s.loading, !!s.progress.playing, !!s.waiting,
+                                  s.reactions?.counts, s.reactions?.mine, s.skip, armandoV]);
+    if (forzar || !vieja || firma !== pintado.ahora) {
+      pintado.ahora = firma;
+      const info = el("div", { class: "info" },
+        el("div", { class: cls }, txt),
+        el("div", { class: "titulo", title: s.now.title }, s.now.title),
+        el("div", { class: "sub" }, s.now.artist),
+        el("div", { class: "sub" }, quien(s.now)),
+        el("div", { class: "barra", id: "bar" }),
+        filaReacciones(s),
+        armando && el("div", { class: "en-lista" }, botonLista(s.now)));   // ♫+: sumarla a la que se está armando
+      if (vieja) vieja.replaceWith(info); else now.append(info);
+    }
     if (artFor !== s.now.thumb) { artFor = s.now.thumb; dibujarTapa(disco.querySelectorAll("canvas"), s.now.thumb); }
   } else {
-    artFor = undefined;
+    artFor = undefined; pintado.ahora = null;
     now.replaceChildren(el("div", { class: "vacio" }, "Nada sonando. ¡Pedí un tema!"));
   }
   now.classList.toggle("girando", !!s.now && !s.loading && !!s.progress.playing);   // pausado o cargando: quieto
@@ -1025,8 +1273,8 @@ function render(s) {
   if (radio.on && s.mode !== "mpv") apagarRadio(); else sintonizar();
   $("#nowTitle").textContent = "SONANDO" + (s.listeners ? ` · 📻 ${s.listeners} ${s.listeners === 1 ? "escucha" : "escuchan"}` : "");
   const pista = !sinParlante ? ""
-    : s.waiting ? "Nadie la está escuchando: sigue cuando alguien prende 📻 radio."
-    : !radio.on ? "Esta sala no tiene parlante: tocá 📻 radio para escucharla acá." : "";
+    : s.waiting ? "Nadie la está escuchando: sigue cuando alguien prende la radio (📻)."
+    : !radio.on ? "Esta sala no tiene parlante: tocá 📻 (la radio) para escucharla acá." : "";
   $("#salaHint").textContent = pista; $("#salaHint").hidden = !pista;
   ponerTitulo();
   recapVista.alEstado(s);
@@ -1071,20 +1319,19 @@ function render(s) {
 
   const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
   $("#queueTitle").textContent = s.queue.length ? `PRÓXIMAS · ${s.queue.length} · ${fmt(total)}` : "PRÓXIMAS";
-  pintarLista($("#queue"), s.queue, (it, i) => fila(it, {
-    pos: i + 1,
-    extra: el("div", { class: "sub" }, "pedida por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by),
-              it.playlist && ` · ${iconoDe(it.playlist)} ${it.playlist.title}`),
-    action: accionesCola(it, i),
-  }), { arriba: [...herramientasCola(s.queue), ...listasEnCola(s.queue)], vacio: "La cola está vacía.",
-        pag: pagCola, nombre: "Páginas de la cola", alCambiar: () => render(last) });
+  pintarCola(s, forzar);
 
-  // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo.
+  // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo (por eso, si la cola
+  // se pintó de nuevo, esto también: pintado.cola es parte de su firma).
   // (las que tuvieron reacciones las muestran: «pedida por Juli · 🔥 3  ❤️ 1»)
-  const reacciones = it => it.reacciones && " · " + REACCIONES.filter(([e]) => it.reacciones[e]).map(([e]) => `${e} ${it.reacciones[e]}`).join("  ");
-  pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it), reacciones(it)),
-                                                         action: armando && el("div", { class: "acts" }, botonLista(it)) }),
-              { vacio: "Todavía nada.", paginar: false });
+  const firmaSonaron = JSON.stringify([s.history, armandoV, pintado.cola]);
+  if (forzar || firmaSonaron !== pintado.sonaron) {
+    pintado.sonaron = firmaSonaron;
+    const reacciones = it => it.reacciones && " · " + REACCIONES.filter(([e]) => it.reacciones[e]).map(([e]) => `${e} ${it.reacciones[e]}`).join("  ");
+    pintarLista($("#history"), s.history, it => fila(it, { extra: el("div", { class: "sub" }, quien(it), reacciones(it)),
+                                                           action: armando && el("div", { class: "acts" }, botonLista(it)) }),
+                { vacio: "Todavía nada.", paginar: false });
+  }
 
   // Actualizar botones de resultados ya agregados
   document.querySelectorAll("[data-vid]").forEach(b => {
@@ -1094,9 +1341,10 @@ function render(s) {
   seguirGuardando(s);
 }
 
-// Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción;
-// la cuenta la ven todos, y un instante las pantallas) y, si se puede, el voto para saltearla
-// (cuando llegan los que hacen falta, pasa a la siguiente sola).
+// Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción,
+// y tocándola de nuevo se saca; la cuenta la ven todos, y un instante las pantallas) y, si se
+// puede, el voto para saltearla (cuando llegan los que hacen falta, pasa a la siguiente sola).
+// Quién reaccionó y quién votó queda anotado en el chat (por eso van con el nombre).
 const REACCIONES = [["🔥", "Temazo"], ["❤️", "Me encanta"], ["😴", "Me duerme"]];
 let reaccionesVistas = { id: null, cuentas: {} };   // las de recién: la que sumó una, salta
 function filaReacciones(s) {
@@ -1109,8 +1357,8 @@ function filaReacciones(s) {
       const n = r.counts[e] || 0, mia = r.mine.includes(e);
       return el("button", {
         type: "button", class: [mia && "on", antes && n > (antes[e] || 0) && "salta"].filter(Boolean).join(" "),
-        "aria-pressed": String(mia), "aria-label": `${que}: ${n}`, title: mia ? `${que} (ya lo dijiste)` : que,
-        onclick: () => mia || mandar("/api/react", { emoji: e, by: nameInput.value.trim() }),
+        "aria-pressed": String(mia), "aria-label": `${que}: ${n}`, title: mia ? `${que}: tocá de nuevo para sacarla` : que,
+        onclick: () => mandar("/api/react", { emoji: e, on: !mia, by: nameInput.value.trim() }),
       }, e, el("span", { class: "n" }, n));
     }),
     sk && el("button", {
@@ -1118,7 +1366,7 @@ function filaReacciones(s) {
       "aria-label": `Votar para saltearla: van ${sk.votes} de ${sk.needed}`,
       title: sk.voted ? `Ya votaste saltearla (van ${sk.votes} de ${sk.needed})`
                       : `Votar para saltearla: con ${sk.needed} votos pasa a la que sigue`,
-      onclick: () => sk.voted || mandar("/api/vote-skip"),
+      onclick: () => sk.voted || mandar("/api/vote-skip", { by: nameInput.value.trim() }),
     }, "⏭", el("span", { class: "n" }, `${sk.votes}/${sk.needed}`)));
 }
 
@@ -1179,6 +1427,9 @@ function tickProgress() {
   const tiempos = `  ${fmt(t)} / ${fmt(d)}`;
   const n = Math.max(5, columnas(bar) - tiempos.length);
   const on = d ? Math.round(n * t / d) : 0;
+  const clave = `${on} ${n}${tiempos}`;
+  if (bar.dataset.clave === clave) return;   // igual que como está (en pausa, o dos tics en el mismo segundo)
+  bar.dataset.clave = clave;
   bar.replaceChildren(el("span", { class: "on" }, "━".repeat(on)), el("span", { class: "off" }, "─".repeat(n - on)), tiempos);
 }
 setInterval(tickProgress, 1000);
@@ -1202,7 +1453,8 @@ function pintarRadio() {
   const b = $("#radioBtn");
   b.classList.toggle("on", radio.on);
   b.setAttribute("aria-pressed", String(radio.on));
-  b.lastElementChild.textContent = radio.on ? " escuchando" : " radio";
+  b.title = radio.on ? "Radio: escuchando acá lo que suena en la sala (tocá para apagarla)"
+                     : "Radio: escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)";
 }
 
 // Que el audio de acá vaya con la rockola: la misma canción, en el mismo segundo, sonando o en pausa.
@@ -1425,7 +1677,8 @@ $("#borrarSalaBtn").onclick = async () => {
 
 // ---------- chat de la sala ----------
 // Los últimos mensajes llegan con el estado. Viven en la memoria del servidor: al reiniciar la
-// rockola (p. ej. en el reinicio de las 6) se borran.
+// rockola (p. ej. en el reinicio de las 6) se borran. Entre ellos va el registro: quién votó
+// saltear, quién reaccionó y quién cambió la que suena (⏭ ⏮ ▶ ahora).
 let firmaChat = null;
 const hora = t => new Date(t * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
 
@@ -1436,7 +1689,11 @@ function pintarChat(s, alFondo = false) {
   const caja = $("#chat");
   const abajo = firmaChat === null || caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40;
   firmaChat = firma;
-  caja.replaceChildren(...(msgs.length ? msgs.map(m => el("div", { class: "msg" },
+  // (m.log: un renglón del registro, con su ícono: «12:03 ⏭ Juli salteó “Tema”»; sin nombre, lo hicieron desde la rockola)
+  caja.replaceChildren(...(msgs.length ? msgs.map(m => m.log
+      ? el("div", { class: "msg log" }, el("span", { class: "hora" }, hora(m.at)), ` ${m.log} `,
+           m.by && el("span", { class: m.mine ? "mia" : "quien" }, m.by), m.by && " ", m.text)
+      : el("div", { class: "msg" },
       el("span", { class: "hora" }, hora(m.at)), " ",
       el("span", { class: m.mine ? "mia" : "quien" }, m.by), ": ", m.text))
     : [el("div", { class: "vacio" }, "Nadie escribió todavía. Lo que escribas lo ven todos los de esta sala.")]));
@@ -1699,10 +1956,11 @@ function pintarResultados() {
 function filaResultado(song, { pos } = {}) {
   const guardada = song.saved || yaGuardadas.has(song.videoId);
   const alPedir = pos == null ? limpiarBusqueda : null;
+  // (la que ya está guardada, en lugar de ⬇ lleva 🗑 para borrarla de las guardadas: con el PIN, como allá)
   return fila(song, {
     imagen: pos == null, pos,
     marca: guardada && el("span", { class: "guardada", title: "Ya está guardada: suena sin esperar la descarga" }, "💾 guardada"),
-    action: el("div", { class: "acts" }, !guardada && botonGuardar(song), botonLista(song), botonAhora(song, alPedir),
+    action: el("div", { class: "acts" }, guardada ? botonBorrar(song) : botonGuardar(song), botonLista(song), botonAhora(song, alPedir),
                 botonAgregar(song, alPedir)),
   });
 }
@@ -2389,11 +2647,15 @@ function pintarGenero(g) {
 
 // Una guardada: + agregar y, con el PIN, 🗑 para borrarla de las guardadas de la sala.
 function accionesGuardada(song) {
-  return el("div", { class: "acts" },
-    admin && el("button", { type: "button", title: "Borrarla de las guardadas de esta sala",
-                            "aria-label": `Borrar ${song.title} de las guardadas`,
-                            onclick: ev => borrarGuardada(song, ev.currentTarget) }, "🗑"),
-    botonLista(song), botonAhora(song), botonAgregar(song));
+  return el("div", { class: "acts" }, botonBorrar(song), botonLista(song), botonAhora(song), botonAgregar(song));
+}
+
+// 🗑 (con el PIN): en las guardadas y, en el buscador, en las que ya están guardadas.
+function botonBorrar(song) {
+  if (!admin || !hayBiblio()) return null;
+  return el("button", { type: "button", title: "Borrarla de las guardadas de esta sala",
+                        "aria-label": `Borrar ${song.title} de las guardadas`,
+                        onclick: ev => borrarGuardada(song, ev.currentTarget) }, "🗑");
 }
 
 async function borrarGuardada(song, btn) {
@@ -2419,6 +2681,19 @@ async function borrarGuardada(song, btn) {
     } else if (biblio.vista === "recientes") {
       biblio = { ...biblio, items: biblio.items.filter(otra), total: biblio.total - 1 };
     }
+    // Y de la búsqueda: sale de las 💾 guardadas que coinciden; si además vino de YouTube (o es
+    // de un álbum abierto ahí), queda como una más, con su ⬇.
+    if (sugeridas.items.some(s => !otra(s))) {
+      sugeridas = { ...sugeridas, items: sugeridas.items.filter(otra), total: Math.max(0, sugeridas.total - 1) };
+    }
+    for (const s of busqueda?.res || []) if (!otra(s)) s.saved = false;
+    const delDisco = (discoAbierto?.datos?.songs || []).filter(s => !otra(s) && s.saved);
+    if (delDisco.length) {   // al álbum ya no lo tiene entero
+      for (const s of delDisco) s.saved = false;
+      albumesListos.delete(discoAbierto.a.browseId);
+      if (discoAbierto.a.saved > 0) discoAbierto.a.saved--;
+    }
+    pintarResultados();
     pintarGuardadas();
     render(r.state);
   } catch (err) {
@@ -2482,6 +2757,7 @@ const datosLista = l => [contarTemas(l.count), l.duration ? fmt(l.duration) : nu
                          l.mine ? "la armaste vos" : l.by && `de ${l.by}`].filter(Boolean).join(" · ");
 
 function ponerArmando(l) {
+  armandoV++;   // (los ♫+ de lo que suena, la cola y lo que sonó: que se armen de nuevo)
   armando = l && { id: l.id, name: l.name, mine: l.mine, ids: new Set((l.songs || []).map(s => s.videoId)) };
   if (armando) store.set(claveArmando, armando.id); else store.del(claveArmando);
 }
@@ -2752,9 +3028,10 @@ const descargasVista = (() => {
     boton.disabled = !abierta && !!s && !hayBiblio();
     boton.classList.toggle("on", abierta);
     boton.setAttribute("aria-pressed", String(abierta));
-    boton.title = abierta ? "Volver a la cola, la letra y el chat"
+    boton.title = abierta ? "Descargas: volver a la cola, la letra y el chat"
       : "Descargas: " + (van ? `${van === 1 ? "una canción espera" : `${van} canciones esperan`} para bajarse`
                              : "las canciones que esperan para bajarse");
+    boton.setAttribute("aria-label", boton.title);   // (el botón es sólo el ícono, y la cuenta)
   }
 
   function abrir(apilar = true) {
@@ -2910,7 +3187,7 @@ const recapVista = (() => {
     b.classList.toggle("on", abierta);
     if (abierta) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.href = link(sala, !abierta);   // (para abrirlo en otra pestaña)
-    b.title = abierta ? "Volver a la cola, la letra y el chat"
+    b.title = abierta ? "Recap: volver a la cola, la letra y el chat"
                       : "Recap: lo más escuchado, artistas, géneros y quién pide más";
   }
 

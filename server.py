@@ -18,6 +18,7 @@ Salas de tv (📺, en los dos modos): para mirar videos de YouTube entre varios,
 navegador (/tv). No pasan por esta máquina: no se baja nada ni suena en el parlante (ver tele.py).
 """
 import argparse
+import gzip
 import hashlib
 import hmac
 import itertools
@@ -123,12 +124,13 @@ class Sala:
         self.shuffle = False               # con la cola vacía, suenan guardadas al azar (modo mpv)
         self.owners = {}                   # item id -> client id (quién la pidió, para poder quitarla)
         self.votos = {}                    # item id -> [client ids]: los 👍 de cada una de la cola
-        self.fijas = set()                 # ids de las que puso en su lugar alguien con el PIN (⤒ ↑):
+        self.fijas = set()                 # ids de las que puso en su lugar alguien con el PIN (⤒, o arrastrándola):
                                            # una con más votos no les pasa por arriba
         self.saltear = []                  # client ids que votaron saltear la que suena
         self.reacciones = {}               # emoji -> [client ids]: las reacciones a la que suena
         self.reaccion = None               # {"n", "emoji", "by"}: la última (las pantallas la muestran un instante)
-        self.chat = []                     # [{"id", "by", "text", "at", "client"}]
+        self.anotadas = set()              # (client, emoji): las reacciones a la que suena que ya se anotaron en el chat
+        self.chat = []                     # [{"id", "by", "text", "at", "client"}]; los del registro, además, "log"
         self.oyentes = {}                  # client -> cuándo se lo vio con la 📻 radio prendida
         self.reanudar = None               # {"id", "t", "pausada"}: la que sonaba antes de reiniciar,
                                            # que tiene que seguir en ese segundo (ver retomar_colas)
@@ -365,9 +367,27 @@ def chatear(sala, body):
         if len(chat_envios) > 1000:
             chat_envios.clear()
         chat_envios[client] = recientes + [ahora]
-        n = sala.chat[-1]["id"] + 1 if sala.chat else 1
-        sala.chat = (sala.chat + [{"id": n, "by": name, "text": texto, "at": time.time(), "client": client}])[-MAX_CHAT:]
+        _al_chat(sala, {"by": name, "text": texto, "client": client})
         bump(sala)
+
+
+def _al_chat(sala, entrada):
+    """Un renglón más en el chat de la sala. Con el lock tomado; avisa (bump) el que llama."""
+    n = sala.chat[-1]["id"] + 1 if sala.chat else 1
+    sala.chat = (sala.chat + [dict(entrada, id=n, at=time.time())])[-MAX_CHAT:]
+
+
+def anotar(sala, icono, quien, texto, client=""):
+    """El registro: un renglón en el chat que dice quién hizo qué con la música (votó saltearla,
+    reaccionó, la salteó, puso otra). `quien`: el nombre que puso en la página ("" si no hay: lo
+    hicieron desde la rockola, y `texto` lo dice entero). Se ve como «12:03 ⏭ Juli salteó “Tema”».
+    Con el lock tomado; avisa (bump) el que llama."""
+    _al_chat(sala, {"by": quien, "text": texto, "client": client, "log": icono})
+
+
+def _nombre(body, sin="Alguien"):
+    """El nombre que viene con un pedido (el que puso en la página), o `sin` si no puso."""
+    return str(body.get("by") or "").strip()[:30] or sin
 
 
 def escuchar(sala, client):
@@ -1381,8 +1401,10 @@ def public_state(sala, client=None, since=None, radio=False):
             "waiting": not sala.principal and sala.now is not None and sala.lista and not sala.pausada
                        and not sala.progress["playing"],
             "listeners": sum(ahora - t < OYENTE_VENCE for t in sala.oyentes.values()),
+            # (los del registro llevan "log": su ícono; ver anotar)
             "chat": [{"id": m["id"], "by": m["by"], "text": m["text"], "at": m["at"],
-                      "mine": bool(client) and m["client"] == client} for m in sala.chat[-50:]],
+                      "mine": bool(client) and m["client"] == client, **({"log": m["log"]} if m.get("log") else {})}
+                     for m in sala.chat[-50:]],
             "library": director.descargas.resumen(sala.id) if director else None,
             "lists": {"v": listas.version(sala.id)} if listas else None,   # (las pide aparte: /api/lists)
             "saving": [dict({k: g.get(k) for k in ("videoId", "title", "artist", "error", "album")},
@@ -1414,6 +1436,27 @@ def progreso_ahora(sala):
         if p.get("d"):
             p["t"] = min(p["t"], p["d"])
     return p
+
+
+COMPRIMIR_DESDE = 1024   # bytes: lo que pesa menos va como está
+_paginas = {}            # nombre -> (cuándo se cambió el archivo, la página, la página comprimida)
+_paginas_lock = threading.Lock()
+
+
+def pagina(name):
+    """Una página de static/, y lo mismo comprimido. Se comprime una vez (y de nuevo si cambia el
+    archivo: así una versión nueva se ve sin reiniciar): index.html pasa de unos 180 KB a 50."""
+    ruta = STATIC / name
+    cuando = ruta.stat().st_mtime_ns
+    with _paginas_lock:
+        hay = _paginas.get(name)
+        if hay and hay[0] == cuando:
+            return hay[1], hay[2]
+    data = ruta.read_bytes()
+    gz = gzip.compress(data, compresslevel=9)
+    with _paginas_lock:
+        _paginas[name] = (cuando, data, gz)
+    return data, gz
 
 
 class ApiError(Exception):
@@ -1808,7 +1851,7 @@ def remove_song(sala, body, is_local):
 def votar(sala, body):
     """👍 a una de la cola: sube hasta quedar debajo de las que tienen tantos votos como ella (o
     más). Un voto por persona y por canción, y no a la que pidió uno mismo: si no, cada uno
-    subiría la suya. A las que puso en su lugar alguien con el PIN (⤒ ↑) no les pasa por arriba."""
+    subiría la suya. A las que puso en su lugar alguien con el PIN (⤒, o arrastrándola) no les pasa por arriba."""
     item_id, client = str(body.get("id", "")), str(body.get("client", ""))[:64]
     if not client:
         raise ApiError(400, "Falta el identificador; recargá la página")
@@ -1833,7 +1876,8 @@ def votar(sala, body):
 
 def votar_saltear(sala, body):
     """Un voto para saltear la que suena. Con VOTOS_SALTEAR (de personas distintas) pasa a la
-    siguiente, como con ⏭. `id`: cuál es, para que un voto que llega tarde no caiga en otra."""
+    siguiente, como con ⏭. `id`: cuál es, para que un voto que llega tarde no caiga en otra.
+    Queda anotado en el chat quién votó (`by`: su nombre)."""
     client = str(body.get("client", ""))[:64]
     if not client:
         raise ApiError(400, "Falta el identificador; recargá la página")
@@ -1847,17 +1891,20 @@ def votar_saltear(sala, body):
             raise ApiError(409, "Ya votaste saltearla")
         sala.saltear.append(client)
         alcanza = len(sala.saltear) >= VOTOS_SALTEAR
+        anotar(sala, "⏭", _nombre(body), f"votó saltear “{now['title']}” ({len(sala.saltear)} de {VOTOS_SALTEAR})", client)
         bump(sala)
-    if alcanza and advance(sala, {"finished": now["id"]}):
+    if alcanza and advance(sala, {"finished": now["id"]}, registro=f"Salteada “{now['title']}”: la votaron {VOTOS_SALTEAR}"):
         avisar(f"Salteada “{now['title']}”: la votaron {VOTOS_SALTEAR}", sala)
 
 
 def reaccionar(sala, body):
     """Una reacción (🔥 ❤️ 😴) a la que suena: una de cada una por persona y por canción. Se ven al
     lado del tema y, un instante, en las pantallas; cuando la canción termina quedan en las
-    estadísticas (ver _sonar)."""
+    estadísticas (ver _sonar). Tocándola de nuevo se saca: `on` dice si queda puesta o no (sin
+    `on`, lo contrario de como estaba). Queda anotado en el chat quién reaccionó: una vez por
+    persona, reacción y canción (sacarla y volverla a poner no llena el chat)."""
     emoji, client = str(body.get("emoji", "")), str(body.get("client", ""))[:64]
-    name = str(body.get("by", "")).strip()[:30] or "Alguien"
+    name = _nombre(body)
     if not client:
         raise ApiError(400, "Falta el identificador; recargá la página")
     if emoji not in REACCIONES:
@@ -1867,18 +1914,31 @@ def reaccionar(sala, body):
         if not now or now["id"] != str(body.get("id", "")):
             raise ApiError(409, "Esa canción ya no está sonando")
         quienes = sala.reacciones.setdefault(emoji, [])
-        if client in quienes:
-            raise ApiError(409, "Ya reaccionaste así a esta canción")
-        quienes.append(client)
-        sala.reaccion = {"n": (sala.reaccion or {}).get("n", 0) + 1, "emoji": emoji, "by": name}
+        estaba = client in quienes
+        on = body.get("on")
+        on = (not estaba) if on is None else bool(on)
+        if on == estaba:
+            return   # (ya estaba así: p. ej. dos toques seguidos)
+        if not on:
+            quienes.remove(client)
+        else:
+            quienes.append(client)
+            sala.reaccion = {"n": (sala.reaccion or {}).get("n", 0) + 1, "emoji": emoji, "by": name}
+            if (client, emoji) not in sala.anotadas:
+                sala.anotadas.add((client, emoji))
+                anotar(sala, emoji, name, f"reaccionó a “{now['title']}”", client)
         bump(sala)
 
 
-def advance(sala, body):
+def advance(sala, body, por=None, registro=None):
     """Termina `finished` y pasa a la siguiente.
 
     Es idempotente: si `finished` no es la que está sonando, no hace nada
     (evita saltear dos canciones si llegan dos avisos seguidos).
+
+    `por`: quién la salteó a mano con ⏭ (su nombre; "": desde la rockola, con la botonera o el
+    teclado). Queda anotado en el chat. None: terminó sola, o la saltearon los votos (`registro`:
+    lo que se anota entonces).
     """
     finished = body.get("finished")
     with lock:
@@ -1888,6 +1948,11 @@ def advance(sala, body):
         sig = sala.queue.pop(0) if sala.queue else cancion_al_azar(sala)
         if now is None and sig is None:
             return False   # no sonaba nada y sigue sin sonar: no cambió nada
+        if now and por is not None:
+            anotar(sala, "⏭", por, f"salteó “{now['title']}”" if por else f"Saltearon “{now['title']}” desde la rockola",
+                   str(body.get("client", ""))[:64])
+        elif now and registro:
+            anotar(sala, "⏭", "", registro)
         _sonar(sala, sig)
         return True
 
@@ -1904,7 +1969,7 @@ def _sonar(sala, item):
         # (las reacciones que tuvo quedan con ella en «sonaron recién»)
         sala.history = (sala.history + [dict(sala.now, reacciones=cuentas) if cuentas else sala.now])[-30:]
     sala.now = item
-    sala.saltear, sala.reacciones = [], {}   # los votos para saltear y las reacciones eran de la otra
+    sala.saltear, sala.reacciones, sala.anotadas = [], {}, set()   # los votos para saltear y las reacciones eran de la otra
     if item:
         item.pop("reacciones", None)         # (si vuelve a sonar, empieza de cero)
         sala.owners.pop(item["id"], None)
@@ -1918,7 +1983,8 @@ def _sonar(sala, item):
 
 def play_now(sala, body):
     """▶ ahora (con el PIN): corta la que suena (queda en "sonaron recién", como con ⏭) y pone
-    esta. Si estaba en la cola, sale de ahí; el resto de la cola sigue igual."""
+    esta. Si estaba en la cola, sale de ahí; el resto de la cola sigue igual. Queda anotado en
+    el chat quién fue."""
     meta = cancion(str(body.get("videoId", "")))   # las mismas reglas que para pedirla
     name = str(body.get("by", "")).strip()[:30] or "Anónimo"
     with lock:
@@ -1929,6 +1995,8 @@ def play_now(sala, body):
                 sala.owners.pop(i["id"], None)
         sala.queue = [i for i in sala.queue if i["videoId"] != meta["videoId"]]
         sala.pausada = False   # (sin parlante: si estaba pausada, que suene)
+        anotar(sala, "▶", name, f"puso “{meta['title']}”" + (f" (cortó “{sala.now['title']}”)" if sala.now else ""),
+               str(body.get("client", ""))[:64])
         _sonar(sala, dict(meta, id=uuid.uuid4().hex[:10], by=name))
 
 
@@ -1981,17 +2049,18 @@ def set_crossfade(sala, body):
     director.con_crossfade(on)
 
 
-def skip(sala):
-    """⏭ sin saber cuál está sonando (lo usan los botones físicos)."""
+def skip(sala, por=""):
+    """⏭ sin saber cuál está sonando (lo usan los botones físicos). `por`: como en advance."""
     with lock:
         now_id = sala.now["id"] if sala.now else None
     if now_id:
-        advance(sala, {"finished": now_id})
+        advance(sala, {"finished": now_id}, por=por)
 
 
-def previous(sala):
+def previous(sala, por="", client=""):
     """⏮ como en cualquier reproductor: si la canción va por más de 5 s, vuelve a empezar;
-    si no, pasa a la anterior (y la actual vuelve a quedar primera en la cola)."""
+    si no, pasa a la anterior (y la actual vuelve a quedar primera en la cola). Queda anotado en
+    el chat quién fue (`por`: su nombre; "": desde la rockola)."""
     with lock:
         now, t = sala.now, progreso_ahora(sala)["t"]
     if now and t > 5 and director:
@@ -1999,6 +2068,8 @@ def previous(sala):
             director.mpv.desde_el_principio()
         with lock:
             medir(sala.progress, 0)
+            anotar(sala, "⏮", por, f"volvió a empezar “{now['title']}”" if por
+                   else f"Volvieron a empezar “{now['title']}” desde la rockola", client)
             bump(sala)
         return
     with lock:
@@ -2008,9 +2079,11 @@ def previous(sala):
         if sala.now:
             sala.queue.insert(0, sala.now)
             sala.fijas.add(sala.now["id"])   # (vuelve primera: que siga después de la anterior)
+        anotar(sala, "⏮", por, f"volvió a “{anterior['title']}”" if por
+               else f"Volvieron a “{anterior['title']}” desde la rockola", client)
         sala.now = anterior
         anterior.pop("reacciones", None)     # (suena de nuevo: las reacciones y los votos, de cero)
-        sala.saltear, sala.reacciones = [], {}
+        sala.saltear, sala.reacciones, sala.anotadas = [], {}, set()
         sala.progress = {"t": 0, "d": 0, "playing": False}
         sala.trabajo, sala.lista, sala.reanudar = None, False, None
         bump(sala)
@@ -2041,18 +2114,24 @@ def move_first(sala, body):
 
 
 def move_to(sala, body):
-    """Mueve una canción de la cola a la posición `to` (0 = la próxima)."""
+    """Mueve una canción de la cola a la posición `to` (0 = la próxima). Con `before` (el id de
+    la que tiene que quedarle justo después), va delante de esa, esté donde esté ahora: al
+    arrastrarla, la cola pudo haber cambiado mientras tanto (terminó un tema, pidieron otro) y
+    `to` ya no ser el lugar donde la soltaron. Si esa ya no está en la cola, vale `to`."""
     item_id = str(body.get("id", ""))
     try:
         to = int(body.get("to", 0))
     except (TypeError, ValueError):
         raise ApiError(400, "Posición inválida")
+    antes_de = body.get("before")
     with lock:
         q = sala.queue
         idx = next((i for i, x in enumerate(q) if x["id"] == item_id), None)
         if idx is None:
             return
         item = q.pop(idx)
+        if antes_de is not None:
+            to = next((i for i, x in enumerate(q) if x["id"] == str(antes_de)), to)
         q.insert(max(0, min(len(q), to)), item)
         sala.fijas.add(item_id)   # (la pusieron ahí a mano: los votos no le pasan por arriba)
         bump(sala)
@@ -3036,10 +3115,25 @@ class Handler(BaseHTTPRequestHandler):
         pin = (self.headers.get("X-Pin") or "").strip()
         return bool(pin) and pin_valido(self.client_address[0], pin, sala)
 
-    def send_bytes(self, data, ctype, code=200, cache=False):
+    def acepta_gzip(self):
+        return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
+    def send_bytes(self, data, ctype, code=200, cache=False, gz=None):
+        """`gz`: lo mismo ya comprimido (las páginas, ver pagina). Si no, lo que es texto y pesa
+        (el estado, las guardadas, una búsqueda, el recap) se comprime acá, si el navegador lo
+        acepta: es mucho menos para mandar por el wifi, y a la rockola no le cuesta nada (nivel 1)."""
+        comprimido = False
+        if self.acepta_gzip():
+            if gz is None and len(data) >= COMPRIMIR_DESDE and ctype.startswith(("application/json", "text/", "image/svg")):
+                gz = gzip.compress(data, compresslevel=1)
+            if gz is not None and len(gz) < len(data):
+                data, comprimido = gz, True
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        if comprimido:
+            self.send_header("Content-Encoding", "gzip")
+        self.send_header("Vary", "Accept-Encoding")
         if not cache:
             self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -3049,7 +3143,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(json.dumps(obj).encode(), "application/json; charset=utf-8", code)
 
     def send_page(self, name):
-        self.send_bytes((STATIC / name).read_bytes(), "text/html; charset=utf-8")
+        data, gz = pagina(name)
+        self.send_bytes(data, "text/html; charset=utf-8", gz=gz)
 
     def send_audio(self, ruta):
         """Un archivo de audio, entero o el pedazo que diga Range: así el navegador puede
@@ -3294,14 +3389,18 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/library-remove":   # 🗑 una guardada, a mano
                 texto = quitar_guardada(sala, body)
                 return self.send_json({"text": texto, "state": public_state(sala, client)})
+            # Quién cambia la que suena queda anotado en el chat: con su nombre o, sin nombre,
+            # "Alguien" (desde esta máquina: "desde la rockola", que es la botonera o el teclado).
+            quien = _nombre(body, "" if self.is_local else "Alguien")
             if path == "/api/play-now":
                 play_now(sala, body)
             elif path == "/api/next":
-                advance(sala, body)
+                # (con `by`, es ⏭ a mano; sin `by`, el reproductor del modo navegador avisando que terminó)
+                advance(sala, body, por=quien if "by" in body else None)
             elif path == "/api/skip":
-                skip(sala)
+                skip(sala, quien)
             elif path == "/api/prev":
-                previous(sala)
+                previous(sala, quien, str(client or "")[:64])
             elif path == "/api/first":
                 move_first(sala, body)
             elif path == "/api/move":

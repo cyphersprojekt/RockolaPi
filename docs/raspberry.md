@@ -168,11 +168,13 @@ Otros comandos:
 - **Botones físicos** debajo de la pantalla: volumen −, anterior, play/pausa, siguiente y volumen +.
   Pulsadores táctiles directo al GPIO, sin soldar: ver **[botones.md](botones.md)** (con diagrama).
 - **Compañeros:** entran al link (o escanean el QR de la pantalla), ponen su nombre y piden temas.
-- **Vos:** en la misma página, tocá **🔒 Controlar** y poné el PIN. Te aparecen:
+- **Vos:** en la misma página, tocá **🔒** (arriba a la derecha; en el celular, en el menú de
+  abajo) y poné el PIN. Te aparecen:
   - ⏸/▶ pausa, ⏭ siguiente, y el volumen;
-  - en cada canción de la cola: ⤒ (que suene a continuación), ↑ (subir un lugar) y ✕ (quitar).
+  - en cada canción de la cola: ⤒ (que suene a continuación), ↕ (se la agarra de ahí para
+    arrastrarla a otro lugar) y ✕ (quitar).
 
-  El celular recuerda el PIN. Para salir, tocá **🔓 Controlando**.
+  El celular recuerda el PIN. Para salir, tocá el candado, que ahora está abierto (**🔓**).
 - **Pantalla de la Pi:** sólo muestra. Si algún día le conectás un teclado, las teclas de la TUI
   también funcionan. Arriba, al lado de **♫ ROCKOLA**, un led dice si la Pi tiene internet: verde,
   sí; rojo (y «sin internet»), no. Sin internet la música sigue con lo guardado, pero no se puede
@@ -180,7 +182,7 @@ Otros comandos:
   poné `clima = "Tu ciudad"` en `rockola.toml`). Cada 15 segundos cambia sola entre lo que suena
   y las estadísticas (lo más escuchado); el QR está siempre.
 - **Otra pantalla (una tele):** `http://<ip-de-la-pi>:8000/pantalla` en cualquier navegador.
-- **Con auriculares:** en la página, **📻 radio** (arriba a la derecha) hace sonar en esa compu lo
+- **Con auriculares:** en la página, **📻** (la radio: arriba a la derecha) hace sonar en esa compu lo
   mismo que la rockola, a la par. Si prefieren silencio en la oficina, bajen el volumen de la
   rockola a 0 desde la web: la música sigue en los auriculares.
 - **Otras salas:** otro equipo puede tener su propia música sin otra Raspberry: en la página,

@@ -628,7 +628,7 @@ class Rockola(App):
     def action_siguiente(self):
         now = (self.estado or {}).get("now")
         if now:
-            self.accion("/api/next", {"finished": now["id"]})
+            self.accion("/api/next", {"finished": now["id"], "by": ""})   # (a mano: queda anotado en el chat)
 
     def action_anterior(self):
         self.accion("/api/prev")
