@@ -2090,8 +2090,9 @@ async function guardarAlbum(a) {
   pidiendoAlbum.add(id);   // buscar el álbum en YouTube tarda un poco: ⏳ mientras
   repintarDiscos();
   try {
-    const r = await api("/api/download-album", a.browseId ? { browseId: a.browseId, client }
-                                                          : { album: a.album, artist: a.artist, client });
+    const r = await api(a.playlist ? "/api/download-playlist" : "/api/download-album",
+                        a.playlist ? { q: a.playlist, client } : a.browseId ? { browseId: a.browseId, client }
+                                                                         : { album: a.album, artist: a.artist, client });
     if (a.key) albumDeGuardadas.set(a.key, r.browseId);
     if (r.complete) albumesListos.add(r.browseId);
     else {   // (si estaba marcado como entero, ya no: le faltaban)
@@ -2211,7 +2212,9 @@ function tarjetaPlaylist() {
       el("div", { class: "info" },
         el("div", { class: "t", title: info.title }, "♫ " + info.title),
         el("div", { class: "sub" }, datos)),
-      el("div", { class: "botonera" }, botonesCargar(fuente, "la playlist entera", limpiarBusqueda), botonSumarTodos(fuente))),
+      el("div", { class: "botonera" }, botonesCargar(fuente, "la playlist entera", limpiarBusqueda), botonSumarTodos(fuente),
+        // ⬇ guardar: baja sus temas y arma con ellos una ♫ playlist de la rockola (como un álbum, que se baja entero)
+        info.id && botonGuardarAlbum({ browseId: info.id, title: info.title, playlist: q }))),
     info.total > info.count && el("div", { class: "hint" },
       `La playlist tiene ${info.total} temas: se cargan los que se pueden pedir (como mucho 200, sin repetidos ni muy largos).`));
 }

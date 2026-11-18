@@ -46,7 +46,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from ytmusicapi import YTMusic
 
-from listas import MAX_TEMAS as MAX_TEMAS_LISTA, ErrorLista, Listas
+from listas import MAX_TEMAS as MAX_TEMAS_LISTA, ErrorLista, Listas, _orden as _orden_nombre
 from tele import ErrorTele, Teles
 
 # ------------------------------------------------------------------ ajustes
@@ -1160,7 +1160,7 @@ def playlist_info(q):
     """Lo que muestra la página antes de cargarla: nombre, cuántos temas, cuánto dura."""
     pl = get_playlist(_id_playlist(q))
     ok = [c for c in pl["songs"] if _se_puede(c)]
-    return {"title": pl["title"], "author": pl["author"], "thumb": pl["thumb"],
+    return {"id": pl["id"], "title": pl["title"], "author": pl["author"], "thumb": pl["thumb"],
             "count": len(ok), "duration": sum(c["duration"] for c in ok), "total": pl["total"]}
 
 
@@ -1715,6 +1715,57 @@ def _a_guardar(meta, sala, client, album=None):
             "clientes": [client] if client else [], "bajando": False}
 
 
+def save_playlist(sala, body):
+    """⬇ de una playlist de YouTube: baja sus temas (como los de un álbum) y arma con ellos una
+    ♫ playlist de la rockola con el mismo nombre. Si ya hay una con ese nombre (p. ej. porque se
+    bajó antes), se le suman los que falten. Cualquiera puede, como con un álbum."""
+    _se_guarda()
+    client = str(body.get("client", ""))[:64]
+    pid = _id_playlist(str(body.get("q", ""))[:300])
+    pl = get_playlist(pid)
+    try:
+        r = _guardar_coleccion(sala, client, pid, dict(pl, songs=[c for c in pl["songs"] if _se_puede(c)]))
+    except ApiError as e:
+        if e.code != 409:
+            raise
+        # Nada nuevo para bajar (ya se están bajando, p. ej.): igual queda la ♫ playlist.
+        r = {"browseId": pid, "added": 0, "complete": False, "text": e.msg}
+    r["text"] += _lista_de_playlist(sala, client, pl)
+    return r
+
+
+def _lista_de_playlist(sala, client, pl):
+    """Arma (o completa) la ♫ playlist de la rockola con los temas de `pl`. Devuelve el
+    texto que se suma al aviso; nunca falla: lo importante es la descarga."""
+    if not listas:
+        return ""
+    temas = [c for c in pl["songs"] if _se_puede(c)]
+    if not temas:
+        return ""
+    try:
+        try:
+            lista, nueva = listas.crear(sala.id, pl["title"], "", client), True
+        except ErrorLista as e:
+            if e.code != 409:
+                raise
+            existente = next((l for l in listas.de_sala(sala.id, client)["lists"] if _orden_lista(l["name"]) == _orden_lista(pl["title"])), None)
+            if not existente:
+                raise
+            lista, nueva = existente, False
+        n, *_ = listas.sumar(sala.id, lista["id"], temas, client, False)
+    except ErrorLista as e:
+        return f" (No pude armar la ♫ playlist: {e.msg})"
+    _cambio_en_listas(sala)
+    if nueva:
+        return f" Armé la ♫ playlist «{lista['name']}» con {_contar(n, 'tema', 'temas')}."
+    return f" Sumé {_contar(n, 'tema', 'temas')} a la ♫ playlist «{lista['name']}», que ya existía." if n else \
+           f" La ♫ playlist «{lista['name']}» ya tenía todos."
+
+
+def _orden_lista(s):
+    return _orden_nombre(s)
+
+
 def _sumar_pedido(g, sala, client):
     """Otra sala (u otra persona) pide guardar una que ya está esperando para bajarse."""
     if sala.id not in g["salas"]:
@@ -1768,7 +1819,14 @@ def save_album(sala, body):
         bid = str(body.get("browseId", ""))
     if not ALBUM_ID.match(bid):
         raise ApiError(400, "Álbum inválido")
-    al = get_album(bid)
+    return _guardar_coleccion(sala, client, bid, get_album(bid))
+
+
+def _guardar_coleccion(sala, client, clave, al):
+    """Lo que tienen en común ⬇ un álbum y ⬇ una playlist de YouTube: baja los temas de `al`
+    ({"title", "songs", "unavailable"}) que faltan. `clave`: con qué se los agrupa en la fila de
+    descargas (el browseId del álbum, o el id de la playlist)."""
+    bid = clave
     ids = {c["videoId"] for c in al["songs"]}
     bajadas = {v for v in ids if director.descargas.datos(v)}
     sumadas = {v for v in bajadas if director.descargas.sumar_a_sala(v, sala.id)}
@@ -3447,6 +3505,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/download":   # guardarla sin ponerla en la cola
                 listo = save_song(sala, body)
                 return self.send_json({"done": listo, "state": public_state(sala, client)})
+            if path == "/api/download-playlist":   # …y con una playlist de YouTube (arma una ♫ playlist)
+                r = save_playlist(sala, body)
+                return self.send_json(dict(r, state=public_state(sala, client)))
             if path == "/api/download-album":   # lo mismo con un álbum entero
                 r = save_album(sala, body)
                 return self.send_json(dict(r, state=public_state(sala, client)))

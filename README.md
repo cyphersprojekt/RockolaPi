@@ -178,6 +178,13 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   álbumes, con cuántos temas hay guardados. Tocando uno se ven sus temas, para pedirlos de a uno
   o, con el PIN, **▶ reproducir** el disco entero (corta la que suena; lo que estaba en la cola
   sigue después) o ponerlo **+ a la cola**, al final.
+- **Guardar una playlist de YouTube:** al pegar su link en el buscador, la tarjeta de la playlist
+  trae **⬇ guardar** (además de cargarla a la cola): baja todos sus temas para que queden entre
+  las guardadas, sin ponerlos en la cola, igual que con un álbum (la cuenta de lo que falta, el
+  reintento y **⬇ descargas** son los mismos), y arma con ellos una **♫ playlist de la rockola**
+  con el mismo nombre. Si ya hay una con ese nombre en la sala, le suma los que faltaban; si es
+  de otra persona (y no tenés el PIN), baja igual y avisa que no pudo tocarla. Lo que no se
+  puede pedir (en vivo, demasiado largo, no disponible) queda afuera de las dos cosas.
 - **Guardar un álbum entero:** en esos álbumes (modo mpv), **⬇ guardar** baja todos sus temas
   (o **⬇ completar**, los que faltan), sin ponerlos en la cola; mientras, dice cuántos faltan y
   al terminar avisa una sola vez. Un álbum a medias también se completa desde GUARDADAS: abrilo y
