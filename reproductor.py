@@ -536,6 +536,16 @@ class Descargas:
             _, vid = random.choice(elegibles)
             return dict(self.guardadas[vid]["datos"], videoId=vid)
 
+    def ids(self):
+        """Los videoId de las guardadas."""
+        with self.lock:
+            return set(self.guardadas)
+
+    def tapas(self):
+        """Las direcciones de las tapas de las guardadas (cada una, una vez)."""
+        with self.lock:
+            return {g["datos"].get("thumb") for g in self.guardadas.values()} - {None, ""}
+
     def datos(self, video_id):
         """Los datos (con videoId) de una guardada, o None."""
         with self.lock:

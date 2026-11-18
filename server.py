@@ -82,6 +82,8 @@ MAX_VIDEOS = 12           # videos que aparecen, como mucho, al buscar para una 
 DATOS_TEMA = ("videoId", "title", "artist", "duration", "thumb", "album")   # los de un tema, sin más
 MAX_SUELTOS = 20          # temas sueltos que se suman de una vez a una ♫ playlist
 RANGO = re.compile(r"bytes=(\d*)-(\d*)")   # el pedazo de un archivo que pide el navegador
+FUENTE = re.compile(r"/fuentes/([a-z0-9-]+\.woff2)")   # la letra de las páginas (static/fuentes)
+UN_ANIO = 365 * 24 * 3600
 TIPOS_AUDIO = {".webm": "audio/webm", ".weba": "audio/webm", ".opus": "audio/ogg", ".ogg": "audio/ogg",
                ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".aac": "audio/aac"}
 
@@ -151,6 +153,8 @@ director = None        # Director en modo mpv
 stats = None           # Estadisticas: lo que sonó, para el recap (/recap)
 listas = None          # Listas: las ♫ playlists que se arman en la rockola, de cada sala
 teles = None           # Teles: las salas de tv (📺), para mirar videos de YouTube entre varios
+tapas = None           # Tapas: las copias de las tapas de las canciones guardadas (ver tapas.py)
+letras_guardadas = None   # Letras: las copias de las letras de las canciones guardadas (ver letras.py)
 videos = {}            # videoId -> datos de un video (de lo que se buscó para una sala de tv)
 fallos_pin = {}        # ip -> (intentos fallidos, bloqueado hasta)
 
@@ -334,6 +338,17 @@ def borrar_sala(sala):
         listas.borrar_sala(sala.id)
     if director:
         threading.Thread(target=director.descargas.quitar_sala, args=(sala.id,), daemon=True).start()
+
+
+def copiar_tapas(limpiar=False):
+    """Que haya una copia de la tapa de cada canción guardada (ver tapas.py): las que faltan se
+    van bajando. `limpiar`: además, borrar las de canciones que ya no están guardadas."""
+    if not (tapas and director):
+        return
+    urls = director.descargas.tapas()
+    if limpiar:
+        tapas.quedarse_con(urls)
+    tapas.guardar(urls)
 
 
 def en_uso():
@@ -635,7 +650,8 @@ def album_de(video_id):
     return _album(t) if t.get("videoId") == video_id else ""
 
 
-letras = {}            # videoId -> su letra (también las que no tienen: no volver a preguntar)
+letras = {}            # videoId -> su letra (también las que no tienen: no volver a preguntar). En memoria, las
+                       # últimas; las de las guardadas, además, quedan copiadas en el disco (letras_guardadas)
 letras_en_camino = {}  # videoId -> Event: si la piden varios a la vez, se busca una sola vez
 lock_letras = threading.Lock()
 
@@ -648,6 +664,9 @@ def letra(video_id):
     (`t` y `f`: cuándo empieza y termina, en segundos). Sin tiempos, `synced` es False y los
     renglones sólo traen `text`; sin letra, `lines` viene vacío. Si YouTube no responde, tira
     la excepción y no queda guardado: se vuelve a probar la próxima vez.
+
+    La de una canción guardada sale de la copia que tiene la rockola (ver _letra_con_copia): no
+    se le pregunta a nadie, y está aunque se corte internet.
     """
     with lock_letras:
         if video_id in letras:
@@ -665,7 +684,7 @@ def letra(video_id):
                 return letras[video_id]
         raise ApiError(502, "No pude traer la letra. Probá de nuevo.")
     try:
-        datos, guardar = _buscar_letra(video_id)
+        datos, guardar = _letra_con_copia(video_id)
         if guardar:
             with lock_letras:
                 if len(letras) > 500:
@@ -676,6 +695,62 @@ def letra(video_id):
         with lock_letras:
             letras_en_camino.pop(video_id, None)
         espera.set()
+
+
+def _letra_con_copia(video_id):
+    """(letra, si se puede recordar). Si la rockola tiene su copia (ver letras.py), es esa, sin
+    preguntarle a nadie. Si no la tiene, se busca y, si la canción está guardada, queda copiada.
+    Una copia vencida (no tenía letra, o no tenía tiempos, y pasó un mes) se vuelve a preguntar:
+    si ahora hay algo mejor, se cambia; si no, o si no se puede preguntar, sigue valiendo."""
+    c = letras_guardadas
+    vieja, vencida = c.leer(video_id) if c else (None, False)
+    if vieja is not None and not vencida:
+        return vieja, True
+    if vieja is not None and state["online"] is False:
+        return vieja, False   # sin internet no hay a quién preguntarle: la que hay (y se prueba la próxima vez)
+    try:
+        datos, guardar = _buscar_letra(video_id)
+    except Exception:
+        if vieja is None:
+            raise
+        return vieja, False
+    if vieja is not None:
+        mejor = guardar and (datos["synced"] or (bool(datos["lines"]) and not vieja["lines"]))
+        if not mejor:
+            if guardar:
+                c.guardar(video_id, vieja)   # se preguntó y no hay nada mejor: vale otro mes
+            return vieja, guardar
+    if guardar and c and director and director.descargas.datos(video_id) is not None:   # (sólo las de las guardadas)
+        c.guardar(video_id, datos)
+    return datos, guardar
+
+
+def _copiar_letra(video_id):
+    """Para letras.Letras (ahí dice qué contesta): que quede copiada la letra de una guardada
+    que todavía no la tiene."""
+    c = letras_guardadas
+    if not c or not director or director.descargas.datos(video_id) is None:
+        return "ya"   # (dejó de estar guardada: nada que copiar)
+    with lock_letras:
+        sabida = video_id in letras   # ya la pidió una página (p. ej. recién, cuando empezó a sonar): no hay que preguntar
+    try:
+        datos = letra(video_id)
+    except Exception:
+        return "red"   # YouTube no contestó (se habrá cortado internet)
+    if c.leer(video_id)[0] is None:
+        with lock_letras:
+            firme = video_id in letras
+        if not firme:
+            return "no"   # una respuesta que no se da por buena (YouTube o LRCLIB fallaron un rato)
+        c.guardar(video_id, datos)
+    return "ya" if sabida else "ok"
+
+
+def copiar_letras(limpiar=False):
+    """Que haya una copia de la letra de cada canción guardada (ver letras.py): las que faltan
+    se van buscando, de a una. `limpiar`: además, borrar las de canciones que ya no están guardadas."""
+    if letras_guardadas and director:
+        letras_guardadas.completar(director.descargas.ids(), limpiar)
 
 
 def _buscar_letra(video_id):
@@ -1877,12 +1952,14 @@ def votar(sala, body):
 def votar_saltear(sala, body):
     """Un voto para saltear la que suena. Con VOTOS_SALTEAR (de personas distintas) pasa a la
     siguiente, como con ⏭. `id`: cuál es, para que un voto que llega tarde no caiga en otra.
-    Queda anotado en el chat quién votó (`by`: su nombre)."""
-    client = str(body.get("client", ""))[:64]
+    Queda anotado en el chat quién votó (`by`: su nombre), así que sin nombre no se vota."""
+    client, name = str(body.get("client", ""))[:64], _nombre(body, "")
     if not client:
         raise ApiError(400, "Falta el identificador; recargá la página")
     if not VOTOS_SALTEAR:
         raise ApiError(409, "Acá no se saltea por votos (votos_para_saltear = 0 en rockola.toml)")
+    if not name:   # (queda anotado quién votó: sin nombre no se vota)
+        raise ApiError(400, "Poné tu nombre arriba primero")
     with lock:
         now = sala.now
         if not now or now["id"] != str(body.get("id", "")):
@@ -1891,7 +1968,7 @@ def votar_saltear(sala, body):
             raise ApiError(409, "Ya votaste saltearla")
         sala.saltear.append(client)
         alcanza = len(sala.saltear) >= VOTOS_SALTEAR
-        anotar(sala, "⏭", _nombre(body), f"votó saltear “{now['title']}” ({len(sala.saltear)} de {VOTOS_SALTEAR})", client)
+        anotar(sala, "⏭", name, f"votó saltear “{now['title']}” ({len(sala.saltear)} de {VOTOS_SALTEAR})", client)
         bump(sala)
     if alcanza and advance(sala, {"finished": now["id"]}, registro=f"Salteada “{now['title']}”: la votaron {VOTOS_SALTEAR}"):
         avisar(f"Salteada “{now['title']}”: la votaron {VOTOS_SALTEAR}", sala)
@@ -1902,9 +1979,10 @@ def reaccionar(sala, body):
     lado del tema y, un instante, en las pantallas; cuando la canción termina quedan en las
     estadísticas (ver _sonar). Tocándola de nuevo se saca: `on` dice si queda puesta o no (sin
     `on`, lo contrario de como estaba). Queda anotado en el chat quién reaccionó: una vez por
-    persona, reacción y canción (sacarla y volverla a poner no llena el chat)."""
+    persona, reacción y canción (sacarla y volverla a poner no llena el chat). Por eso, para
+    reaccionar hay que haber puesto el nombre (`by`); para sacar una reacción, no."""
     emoji, client = str(body.get("emoji", "")), str(body.get("client", ""))[:64]
-    name = _nombre(body)
+    name = _nombre(body, "")
     if not client:
         raise ApiError(400, "Falta el identificador; recargá la página")
     if emoji not in REACCIONES:
@@ -1919,6 +1997,8 @@ def reaccionar(sala, body):
         on = (not estaba) if on is None else bool(on)
         if on == estaba:
             return   # (ya estaba así: p. ej. dos toques seguidos)
+        if on and not name:
+            raise ApiError(400, "Poné tu nombre arriba primero")
         if not on:
             quienes.remove(client)
         else:
@@ -2440,6 +2520,8 @@ class Director:
         with lock:
             bump()
         averiguar_generos()   # (el de su artista, si todavía no se sabe)
+        copiar_tapas()        # (y que quede una copia de su tapa…)
+        copiar_letras()       # (…y de su letra)
 
     def al_reiniciar(self, mpv=None):
         """mpv se cayó y se levantó de nuevo: lo que sonaba se perdió.
@@ -3119,7 +3201,9 @@ class Handler(BaseHTTPRequestHandler):
         return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
 
     def send_bytes(self, data, ctype, code=200, cache=False, gz=None):
-        """`gz`: lo mismo ya comprimido (las páginas, ver pagina). Si no, lo que es texto y pesa
+        """`cache`: False, que el navegador no lo guarde (lo de siempre); True, que decida él; un
+        número, que lo guarde esos segundos sin volver a preguntar.
+        `gz`: lo mismo ya comprimido (las páginas, ver pagina). Si no, lo que es texto y pesa
         (el estado, las guardadas, una búsqueda, el recap) se comprime acá, si el navegador lo
         acepta: es mucho menos para mandar por el wifi, y a la rockola no le cuesta nada (nivel 1)."""
         comprimido = False
@@ -3136,11 +3220,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Vary", "Accept-Encoding")
         if not cache:
             self.send_header("Cache-Control", "no-store")
+        elif cache is not True:   # (segundos: algo que no cambia nunca, como la letra)
+            self.send_header("Cache-Control", f"public, max-age={int(cache)}, immutable")
         self.end_headers()
         self.wfile.write(data)
 
     def send_json(self, obj, code=200):
-        self.send_bytes(json.dumps(obj).encode(), "application/json; charset=utf-8", code)
+        texto = json.dumps(obj)
+        if tapas:   # las tapas que están copiadas acá, con la dirección de la copia (ver tapas.py)
+            texto = tapas.en_json(texto)
+        self.send_bytes(texto.encode(), "application/json; charset=utf-8", code)
 
     def send_page(self, name):
         data, gz = pagina(name)
@@ -3231,6 +3320,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_page("player.html")
             if u.path in ("/favicon.svg", "/favicon.ico"):   # .ico: los que lo piden igual
                 return self.send_bytes((STATIC / "favicon.svg").read_bytes(), "image/svg+xml", cache=True)
+            fuente = FUENTE.fullmatch(u.path)
+            if fuente:   # la letra de las páginas: la sirve la rockola (no Google Fonts), y el navegador la guarda
+                ruta = STATIC / "fuentes" / fuente[1]
+                if not ruta.is_file():
+                    raise ApiError(404, "No existe")
+                return self.send_bytes(ruta.read_bytes(), "font/woff2", cache=UN_ANIO)
+            if u.path.startswith("/tapas/"):   # la copia de una tapa (la dirección dice cuál es: no cambia nunca)
+                copia = tapas and tapas.archivo(u.path.removeprefix("/tapas/"))
+                if not copia:
+                    raise ApiError(404, "No existe")
+                try:
+                    return self.send_bytes(copia[0].read_bytes(), copia[1], cache=UN_ANIO)
+                except OSError:
+                    raise ApiError(404, "No existe")
             if u.path == "/api/state":
                 since = qs.get("since", [""])[0]
                 return self.send_json(public_state(
@@ -3469,13 +3572,13 @@ class Handler(BaseHTTPRequestHandler):
         # No llenar la consola con los polls de estado.
         path = getattr(self, "path", "")  # no existe si la conexión venció antes del pedido
         if any(p in path for p in ("/api/state", "/api/tv/state", "/api/progress", "/api/info", "/api/qr",
-                                   "/api/audio")):
+                                   "/api/audio", "/fuentes/", "/tapas/")):
             return
         super().log_message(fmt, *args)
 
 
 def main():
-    global director, stats, listas, teles, PORT, IP_FIJA
+    global director, stats, listas, teles, tapas, letras_guardadas, PORT, IP_FIJA
     ap = argparse.ArgumentParser(description="Rockola de oficina")
     ap.add_argument("--modo", choices=["mpv", "navegador"],
                     help="dónde suena la música (por defecto: mpv si está instalado)")
@@ -3523,6 +3626,19 @@ def main():
         if state["crossfade"]:
             director.con_crossfade(True)   # (el segundo mpv, ya listo para el primer cambio de tema)
         averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
+        if director.descargas.limite:   # (si se guardan canciones)
+            from tapas import Tapas
+            try:
+                tapas = Tapas(carpeta() / "tapas", hay_red=lambda: state["online"] is not False)
+                copiar_tapas(limpiar=True)   # (las que falten: se bajan de a una, sin apuro)
+            except OSError as e:   # sin copias, pero que suene
+                print(f"  ⚠ no pude preparar la carpeta de las tapas ({carpeta() / 'tapas'}): {e}", flush=True)
+            from letras import Letras
+            try:
+                letras_guardadas = Letras(carpeta() / "letras", _copiar_letra, hay_red=lambda: state["online"] is not False)
+                copiar_letras(limpiar=True)   # (las que falten: se buscan de a una, muy despacio)
+            except OSError as e:
+                print(f"  ⚠ no pude preparar la carpeta de las letras ({carpeta() / 'letras'}): {e}", flush=True)
         # Al prender la Raspberry o reiniciar el servicio (p. ej. al actualizar), si nadie pide
         # nada: 🔀 y que suene sola. En el reinicio diario de las 6, no: la oficina está vacía.
         retomar = seguia and prendida

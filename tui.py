@@ -21,6 +21,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from rich.color import Color
@@ -258,7 +259,8 @@ class Rockola(App):
 
     def bajar_tapa(self, url, n):
         try:
-            with urllib.request.urlopen(url, timeout=10) as r:
+            # (la tapa de una canción guardada viene como /tapas/…: la copia que tiene la rockola)
+            with urllib.request.urlopen(urllib.parse.urljoin(self.base + "/", url), timeout=10) as r:
                 img = Image.open(io.BytesIO(r.read())).convert("RGB")
             img = ImageOps.fit(img, (n, n), Image.LANCZOS)  # recorte cuadrado centrado
             px = list(img.getdata())

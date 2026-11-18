@@ -81,8 +81,9 @@ escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que s
   entre temas, y ⏭ es instantáneo) y se recupera sola si el reproductor se cae o se cuelga. **Si se
   reinicia** (p. ej. para actualizarla o aplicar un cambio), **sigue donde estaba:** el mismo tema,
   en el mismo segundo, con la cola de cada sala y lo que faltaba bajar. **Si se corta internet,
-  la música sigue** con lo guardado: un led, en la página y en la pantalla, avisa que no hay, y
-  cuando vuelve retoma las descargas.
+  la música sigue** con lo guardado, y se sigue viendo como siempre (de las guardadas, la
+  rockola tiene copiadas las tapas y las letras): un led, en la página y en la pantalla, avisa
+  que no hay, y cuando vuelve retoma las descargas.
 
 | | |
 |:---:|:---:|
@@ -144,17 +145,20 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
 - **⏭ Saltear por votos:** debajo de lo que suena, **⏭ 0/3**: es un voto para saltearla. Cuando
   votan 3 personas (`votos_para_saltear` en `rockola.toml`; con 0 no se vota), pasa sola a la
   que sigue y avisa. Quien tiene el PIN la saltea sin votar, como siempre. Cada voto queda
-  anotado en el chat, con el nombre de quien votó.
+  anotado en el chat, con el nombre de quien votó: por eso, para votar hay que tener puesto el
+  nombre (arriba), como para pedir un tema.
 - **🔥 ❤️ 😴 Reacciones:** al lado del ⏭, para decir qué te parece lo que suena: una de cada una
   por persona y por canción, y tocándola de nuevo se saca. Todos ven cuántas van; en la pantalla
   de la Raspberry (y en `/pantalla`) además aparece un instante de quién fue la última, y en el
-  chat queda anotado quién reaccionó. Cuando la canción termina, las reacciones que le quedaron
-  van con ella a «sonaron recién» y al 📊 recap.
+  chat queda anotado quién reaccionó: para reaccionar también hay que tener puesto el nombre
+  (para sacar una reacción propia, no). Cuando la canción termina, las reacciones que le
+  quedaron van con ella a «sonaron recién» y al 📊 recap.
 - **Letra:** la de la que suena (a la izquierda en la compu; debajo de lo que suena en el
   celular), de YouTube Music o, si ahí no está o no trae los tiempos, de [LRCLIB](https://lrclib.net).
   El título dice de dónde vino (LyricFind o Musixmatch, que le dan las letras a YouTube, o
   LRCLIB). Si trae los tiempos, se va poniendo amarilla mientras se canta y se mueve sola; si
-  no, queda para leerla.
+  no, queda para leerla. La de una canción guardada queda copiada en la rockola: aparece al
+  toque, y también si se cortó internet.
 - **Guardar sin pedir:** en los resultados de YouTube, **⬇ guardar** la baja para que quede entre
   las guardadas, sin ponerla en la cola (en modo mpv). Se bajan de a una, después de la que tiene
   que sonar; hasta 40 esperando a la vez, con las mismas reglas que para pedir (nada en vivo ni
@@ -232,8 +236,9 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   **el registro** de lo que se hizo con la música y quién fue: quién votó saltear una canción
   (y cuando se salteó por los votos), quién reaccionó (una vez por persona, reacción y canción) y
   quién la cambió directamente con el PIN (**⏭**, **⏮** o **▶ ahora**). Va con el nombre que
-  cada uno puso arriba («Alguien», si no puso); lo que se hace desde la Raspberry (la botonera,
-  el teclado) figura como «desde la rockola».
+  cada uno puso arriba: sin nombre no se vota ni se reacciona (y un ⏭ o ⏮ con el PIN sin
+  nombre figura como «Alguien»). Lo que se hace desde la Raspberry (la botonera, el teclado)
+  figura como «desde la rockola».
 - **📺 Salas de tv:** en el mismo menú de **sala:** están las de tv, y **＋ nueva sala de tv…**
   crea una (con un nombre y un PIN, como las otras). Son otra página: `http://<ip>:8000/tv?sala=almuerzo`
   (`/tv` a secas las lista). Ahí se busca un video de YouTube (cualquiera, no sólo música) o se pega
@@ -310,7 +315,8 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   con `azar_al_prender` sigue solo cuando el parlante está listo. El chat se borra.
 - **Si se corta internet:** la música sigue, con lo guardado (lo que ya estaba bajado y el 🔀); lo
   que no anda hasta que vuelva es buscar en YouTube y bajar temas nuevos (las descargas quedan
-  esperando). El **led** al lado de **♫ ROCKOLA** lo muestra, en la página, en `/pantalla` y en la
+  esperando). Las guardadas se siguen viendo con su tapa (en la página y en la pantalla) y con
+  su letra: la rockola tiene una copia de cada una. El **led** al lado de **♫ ROCKOLA** lo muestra, en la página, en `/pantalla` y en la
   terminal: verde con internet; rojo (titilando) sin internet; apagado si todavía no se sabe o
   si esa página no llega a la rockola. Es el internet de la rockola, no el de tu celular: la
   rockola prueba cada 15 segundos conectarse a Google (8.8.8.8, o 1.1.1.1 de Cloudflare; si en
@@ -401,7 +407,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 | `ip` | automática | la IP que muestran el link y el QR |
 | `clima` | automático | de dónde es el clima de la barra de arriba: vacío, el de donde está la rockola (por su IP); una ciudad (`"Rosario"`) o un punto (`"-32.95, -60.64"`); `false`, no mostrarlo |
 | `guardar_gb` | `16` | GB para canciones guardadas, entre todas las salas; al pasarlos se borran las que hace más que no suenan (0 = no guardar). Siempre deja 2 GB libres |
-| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas, las salas (también las de tv), las ♫ playlists y las estadísticas del recap |
+| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas (y las copias de sus tapas y sus letras), las salas (también las de tv), las ♫ playlists y las estadísticas del recap |
 | `azar_al_prender` | `true` | al prender la Raspberry o reiniciar el servicio, si en 10 s nadie pide nada: 🔀 prendido y a sonar (con un parlante Bluetooth, cuando se conecta); si estaba sonando un tema, sigue ése. No en el reinicio de las 6 |
 | `predescargar` | `0` | canciones de la cola que se bajan por adelantado (0 = toda la cola) |
 | `[controles]` | | pines de los botones, paso de volumen y doble toque |
@@ -413,10 +419,13 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── reproductor.py        descargas con yt-dlp y control de mpv por su socket JSON IPC
 ├── estadisticas.py       lo que sonó, en SQLite, para el 📊 recap (y los géneros, de iTunes)
 ├── listas.py             las ♫ playlists que se arman en la rockola, por sala (listas.json)
+├── tapas.py              las copias de las tapas de las guardadas (para verlas sin internet)
+├── letras.py             las copias de las letras de las guardadas (lo mismo)
 ├── tele.py               las 📺 salas de tv: el video que va, su reloj, la cola y el chat (tv.json)
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
 ├── static/               páginas web: pedidos, 📊 recap y ⬇ descargas (/), las salas de tv (/tv), /pantalla y /player
+│   └── fuentes/          la letra de las páginas (JetBrains Mono, con su licencia OFL): la sirve la rockola
 ├── iniciar.sh, tui.sh    arrancar el servidor y la pantalla
 ├── rockola.ejemplo.toml  configuración de ejemplo
 ├── pi/                   instalador de la Raspberry, salida de audio y Bluetooth
@@ -434,6 +443,14 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   artista. Sus tiempos se usan sólo si la duración coincide (±3 s); si no, es otra versión y los
   renglones irían corridos, así que queda sin tiempos. Se le manda el título, el artista, el
   álbum y la duración de lo que suena, nada más.
+  La letra de cada canción guardada queda copiada en `~/.cache/rockola/letras` (un `.json` por
+  canción, un par de KB): la que está copiada no se vuelve a preguntar, y sale aunque no haya
+  internet. Se copia cuando alguien la pide (al sonar) y, las de las guardadas que todavía no
+  sonaron, de a una en segundo plano y bien despacio (una cada 10 segundos: con mil guardadas,
+  la primera vez son unas tres horas, y sigue después de un reinicio; sin internet, espera).
+  La que no tiene letra, o la tiene sin tiempos, también queda anotada, pero vence al mes: se
+  vuelve a preguntar la próxima vez que suene, por si la subieron. Las de canciones que ya no
+  están guardadas se borran al arrancar.
 - **Reproducción (modo mpv):** el *director* (en `server.py`) mira el estado y hace que mpv toque lo
   que corresponde. Cada tema se baja con [yt-dlp](https://github.com/yt-dlp/yt-dlp) (~5 MB).
   Mientras suena uno, se bajan de a una, en orden, todas las que siguen en la cola: si la mezclan o
@@ -462,6 +479,18 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   sonó: no hay un índice que se rompa si se corta la luz. En 16 GB entran unas 3000. El álbum sale
   de YouTube Music o, para las pedidas por link, de yt-dlp; a las que se guardaron antes de que se
   anotara, se lo pregunta de a una, sin apuro, un rato después de arrancar.
+- **Tapas:** la tapa de cada tema es una dirección en los servidores de Google. De las canciones
+  guardadas la rockola se baja una copia a `~/.cache/rockola/tapas` (de 120 px, unos 8 KB: lo
+  que hace falta para el tamaño en que se muestran; los temas de un mismo disco comparten
+  archivo), y en todo lo que les contesta a las páginas y a la pantalla cambia la dirección de
+  una tapa copiada por la de la copia (`/tapas/…`). Así se ven aunque se corte internet, cargan
+  de la red de la oficina y pesan lo mismo vengan de donde vengan (la misma tapa llega de 120 px
+  desde la búsqueda y de 544 px, diez veces más pesada, desde un álbum). Se copian al guardarse
+  cada canción; las de las que ya estaban, de a una, al arrancar (sin internet, esperan a que
+  vuelva). Lo anotado en cada canción sigue siendo la dirección original, y las copias de las
+  que ya no están guardadas se borran al arrancar. No cuentan para `guardar_gb`: mil tapas son
+  unos 8 MB. Las de lo que todavía no está guardado (los resultados de YouTube) vienen de
+  Google, como siempre.
 - **Deno** se instala en el entorno virtual para que yt-dlp resuelva los desafíos de JavaScript
   de YouTube.
 - **📻 Radio:** no transmite el audio de la Pi (eso pediría ffmpeg y sumaría segundos de demora). La
@@ -515,6 +544,12 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   lo acepta (la página de pedidos pasa de unos 180 KB a 50; se comprime una sola vez), y la
   página arma de nuevo sólo lo que cambió: un mensaje en el chat o un cambio de volumen no
   vuelven a dibujar la cola.
+- **La letra de las páginas** ([JetBrains Mono](https://www.jetbrains.com/lp/mono/), licencia
+  OFL) la sirve la rockola misma, desde `static/fuentes/` (66 KB entre todos los alfabetos; el
+  navegador baja sólo los que usa, casi siempre los 31 KB del latino, y los guarda). No se le
+  pide a Google Fonts: así la página no depende de internet para dibujarse. Si el celular está
+  en el wifi de la oficina y se corta internet, aparece igual al toque, y con las tapas de las
+  guardadas (ver **Tapas**).
 - **Permisos:** cualquiera agrega temas, quita los suyos, vota, reacciona, chatea, crea salas y arma
   ♫ playlists (las cambia quien la armó: la página la reconoce por el mismo identificador con el
   que quita sus temas; es también el que cuenta como «una persona» para los votos y las

@@ -6,10 +6,30 @@
 <meta name="theme-color" content="#3c3836">
 <title>Rockola</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="preload" href="/fuentes/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  /* La letra (JetBrains Mono, licencia OFL: static/fuentes/OFL.txt) la sirve la rockola, no
+     Google Fonts: la página no espera a internet para dibujarse (si el celular está en el wifi
+     de la oficina y se corta, igual aparece al toque). Un archivo por alfabeto (el navegador
+     baja sólo los que usa: casi siempre, el primero) que sirve para todos los grosores. */
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-latin.woff2) format("woff2");
+               unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-latin-ext.woff2) format("woff2");
+               unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-cyrillic.woff2) format("woff2");
+               unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-cyrillic-ext.woff2) format("woff2");
+               unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-greek.woff2) format("woff2");
+               unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url(/fuentes/jetbrains-mono-vietnamese.woff2) format("woff2");
+               unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB; }
   /* Misma estética que /pantalla y la TUI (paleta gruvbox) */
   :root {
     --bg: #282828; --bg1: #32302f; --bg2: #3c3836; --line: #504945;
@@ -1344,7 +1364,8 @@ function render(s) {
 // Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción,
 // y tocándola de nuevo se saca; la cuenta la ven todos, y un instante las pantallas) y, si se
 // puede, el voto para saltearla (cuando llegan los que hacen falta, pasa a la siguiente sola).
-// Quién reaccionó y quién votó queda anotado en el chat (por eso van con el nombre).
+// Quién reaccionó y quién votó queda anotado en el chat: por eso van con el nombre, y sin
+// nombre no se puede.
 const REACCIONES = [["🔥", "Temazo"], ["❤️", "Me encanta"], ["😴", "Me duerme"]];
 let reaccionesVistas = { id: null, cuentas: {} };   // las de recién: la que sumó una, salta
 function filaReacciones(s) {
@@ -1352,13 +1373,21 @@ function filaReacciones(s) {
   const antes = reaccionesVistas.id === id ? reaccionesVistas.cuentas : null;
   reaccionesVistas = { id, cuentas: { ...r.counts } };
   const mandar = (path, mas = {}) => api(path, { id, client, ...mas }).then(render, err => toast(err.message, true));
+  // Reaccionar y votar saltearla quedan anotados en el chat con el nombre: sin nombre no se
+  // puede (como para pedir un tema), y se lleva a ponerlo. Sacar una reacción propia, sí.
+  const conNombre = hacer => () => {
+    const by = nameInput.value.trim();
+    if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return; }
+    hacer(by);
+  };
   return el("div", { class: "reacciones" },
     REACCIONES.map(([e, que]) => {
       const n = r.counts[e] || 0, mia = r.mine.includes(e);
       return el("button", {
         type: "button", class: [mia && "on", antes && n > (antes[e] || 0) && "salta"].filter(Boolean).join(" "),
         "aria-pressed": String(mia), "aria-label": `${que}: ${n}`, title: mia ? `${que}: tocá de nuevo para sacarla` : que,
-        onclick: () => mandar("/api/react", { emoji: e, on: !mia, by: nameInput.value.trim() }),
+        onclick: mia ? () => mandar("/api/react", { emoji: e, on: false })
+                     : conNombre(by => mandar("/api/react", { emoji: e, on: true, by })),
       }, e, el("span", { class: "n" }, n));
     }),
     sk && el("button", {
@@ -1366,7 +1395,7 @@ function filaReacciones(s) {
       "aria-label": `Votar para saltearla: van ${sk.votes} de ${sk.needed}`,
       title: sk.voted ? `Ya votaste saltearla (van ${sk.votes} de ${sk.needed})`
                       : `Votar para saltearla: con ${sk.needed} votos pasa a la que sigue`,
-      onclick: () => sk.voted || mandar("/api/vote-skip", { by: nameInput.value.trim() }),
+      onclick: sk.voted ? () => {} : conNombre(by => mandar("/api/vote-skip", { by })),
     }, "⏭", el("span", { class: "n" }, `${sk.votes}/${sk.needed}`)));
 }
 
