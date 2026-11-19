@@ -292,7 +292,8 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
 - **Mezclar la cola:** con el PIN, **🔀 mezclar** arriba de las próximas. Las pone en otro orden al
   azar, una vez: lo que pidan después va al final, como siempre. Sirve, por ejemplo, después de
   cargar una playlist (ojo, que mezcla también los pedidos que ya estaban).
-- **🎙️ Voz** (con el PIN, en la sala del parlante): **🎙️** en la barra de arriba cambia la cola por
+- **🎙️ Voz** (con el PIN de la sala; **cada sala tiene lo suyo**: sus anuncios, su micrófono, sus
+  «cada X canciones»): **🎙️** en la barra de arriba cambia la cola por
   la pestaña **VOZ**, como el recap o ⬇ descargas (apagado sin el PIN; su link es `/voz`), con dos cosas:
   - **Micrófono abierto:** hablás desde tu celular o compu y se escucha en el parlante, con la
     música más baja (a un cuarto) hasta que cerrás; si dejan de llegar datos, se cierra solo.
@@ -306,8 +307,14 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   Los demás entran por `http://` como siempre y no ven ninguna advertencia: el panel, por http,
   ofrece **abrir por https** (el navegador avisa una vez que el certificado es propio: se acepta)
   y recién ahí aparecen el micrófono y grabar. Subir un audio ya hecho y manejar los anuncios
-  andan por http. Ojo: se escuchan en el parlante, no por 📻 radio; y con un micrófono en la
-  misma sala del parlante puede haber acople (usá auriculares, o mandalo desde otro lugar).
+  andan por http.
+  **Dónde se escucha:** en la sala del parlante, en el parlante (con la música más baja). En todas
+  las salas, además, por **📻 radio**: quien la tiene prendida oye el anuncio entrando a la par
+  (un segundo de diferencia) y su música baja mientras tanto. El micrófono por radio llega con
+  un par de segundos de demora (Chrome, Edge y Firefox; Safari no); si prendés la radio con el
+  micrófono ya abierto, puede tardar en engancharse. Las salas sin parlante sólo se oyen por
+  radio. Quien está hablando no se oye a sí mismo por la radio de su página. Ojo: con el micrófono
+  en la misma sala del parlante puede haber acople (usá auriculares, o mandalo desde otro lugar).
 - **Música de fondo:** con el PIN, **🔀** (al azar: abajo a la derecha de los controles, chiquito).
   Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
   recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si

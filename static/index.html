@@ -688,8 +688,8 @@
       <span class="ttl" id="vozTtl">VOZ</span>
       <div id="vozCuerpo"><div class="vacio">conectando…</div></div>
     </section>
-    <div class="hint">El micrófono y los anuncios suenan en el parlante, encima de la música (que baja un rato). Hacen falta el PIN (🔒)
-      y que la sala sea la del parlante.</div>
+    <div class="hint">Cada sala tiene lo suyo. El micrófono y los anuncios suenan encima de la música (que baja un rato) en el parlante
+      (sala principal) y, en todas las salas, por 📻 radio. Hace falta el PIN (🔒) de la sala.</div>
   </div>
 </section>
 <dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
@@ -1550,6 +1550,7 @@ function prenderRadio() {
   sintonizar();
   // Que arranque dentro del clic: si no, hay navegadores que después no la dejan sonar sola.
   if (radio.vid) audio.play().catch(noArranca);
+  vozRadio.desbloquear();   // (y lo mismo para los anuncios y el micrófono, que llegan más tarde)
   avisarRadio(true);
 }
 
@@ -3216,7 +3217,7 @@ const vozVista = (() => {
     return d;
   };
   // ¿Se puede usar? Sólo en la sala del parlante (modo mpv) y con la voz en la rockola.
-  const sirve = (s = last) => !!s && s.mode === "mpv" && !(s.room && !s.room.main) && infoRockola.voz;
+  const sirve = (s = last) => !!s && s.mode === "mpv" && infoRockola.voz;   // (en cualquier sala de música: cada una tiene lo suyo)
 
   function pintarBoton(s = last) {
     // Apagado, no escondido (la barra es la misma en todos lados). Abierta, prendido: que se pueda cerrar.
@@ -3225,24 +3226,31 @@ const vozVista = (() => {
     boton.setAttribute("aria-pressed", String(abierta));
     boton.title = abierta ? "Voz: volver a la cola, la letra y el chat"
       : !admin ? "Voz: micrófono abierto y anuncios (hace falta el PIN: 🔒)"
-      : !sirve(s) ? "La voz es de la sala que suena en el parlante" : "Voz: micrófono abierto y anuncios que se repiten";
+      : !sirve(s) ? "La voz anda en el modo con mpv" : "Voz: micrófono abierto y anuncios que se repiten (de esta sala)";
     boton.setAttribute("aria-label", boton.title);
   }
 
   async function hablar(on) {
     if (on === micOn) return;
     if (!on) {
+      // Primero se deja que el grabador largue el último pedazo (llega después de stop()), se manda, y recién ahí se cierra.
+      const rec = corriendo; corriendo = null;
+      if (rec && rec.state !== "inactive") await new Promise(r => { rec.addEventListener("stop", r, { once: true }); rec.stop(); });
+      rec?.stream.getTracks().forEach(x => x.stop());
+      await pegado.catch(() => {});
       micOn = false;
-      corriendo?.stop(); corriendo?.stream.getTracks().forEach(x => x.stop()); corriendo = null;
-      await pegado.catch(() => {}); await llamar("/api/voz-mic", { on: false });
+      await llamar("/api/voz-mic", { on: false });
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       await api("/api/voz-mic", { on: true });
-      const rec = new MediaRecorder(stream);
+      // En webm/opus: es lo único que la radio (MediaSource) sabe enganchar. Firefox y Safari graban en ogg y mp4 por defecto.
+      const mime = ["audio/webm;codecs=opus", "audio/webm"].find(m => window.MediaRecorder?.isTypeSupported?.(m));
+      if (!mime) toast("Este navegador no graba en webm: se va a oír en el parlante, pero no por la radio", true);
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
       rec.stream = stream; corriendo = rec; micOn = true; pegado = Promise.resolve();
-      rec.ondataavailable = e => { if (e.data.size) pegado = pegado.then(() => crudo("/api/voz-chunk", e.data)).catch(err => { toast(err.message, true); hablar(false); }); };
+      rec.ondataavailable = e => { if (e.data.size) pegado = pegado.then(() => crudo(conSala("/api/voz-chunk"), e.data)).catch(err => { if (micOn) { toast(err.message, true); hablar(false); } }); };
       rec.start(300);
     } catch (err) {
       micOn = false; corriendo = null; toast(err.name === "NotAllowedError" ? "No dejaste usar el micrófono" : err.message, true);
@@ -3267,7 +3275,7 @@ const vozVista = (() => {
     } catch (err) { toast(err.name === "NotAllowedError" ? "No dejaste usar el micrófono" : err.message, true); }
   }
   async function subir(blob, nombre) {
-    try { datos = (await crudo(`/api/voz-anuncio?nombre=${encodeURIComponent(nombre)}&by=${encodeURIComponent(nameInput.value.trim())}`, blob)).voz; toast("Anuncio guardado: ahora elegí cada cuánto suena"); }
+    try { datos = (await crudo(conSala(`/api/voz-anuncio?nombre=${encodeURIComponent(nombre)}&by=${encodeURIComponent(nameInput.value.trim())}`), blob)).voz; toast("Anuncio guardado: ahora elegí cada cuánto suena"); }
     catch (err) { toast(err.message, true); }
   }
 
@@ -3286,7 +3294,7 @@ const vozVista = (() => {
     firma = f;
     $("#vozTtl").textContent = "VOZ" + (datos.mic ? " · 🎙️ micrófono abierto" : datos.suena ? " · 🔊 suena un anuncio" : "");
     if (!admin || !sirve()) {
-      return cuerpo.replaceChildren(el("div", { class: "vacio" }, !admin ? "Hace falta el PIN: tocá 🔒 arriba." : "La voz es de la sala que suena en el parlante: elegila arriba."));
+      return cuerpo.replaceChildren(el("div", { class: "vacio" }, !admin ? "Hace falta el PIN: tocá 🔒 arriba." : "La voz anda en el modo con mpv."));
     }
     const lista = datos.anuncios.map(a => el("div", { class: "fila" },
       el("div", { class: "info" },
@@ -3365,8 +3373,97 @@ const vozVista = (() => {
 
   boton.onclick = () => abierta ? cerrar() : abrir();
   addEventListener("popstate", () => location.pathname === "/voz" ? abrir(false) : cerrar(false));
-  return { abrir, cerrar, alEstado, link, abierta: () => abierta };
+  return { abrir, cerrar, alEstado, link, abierta: () => abierta, hablando: () => micOn };
 })();
+
+// ---------- 🎙️ voz por 📻 radio ----------
+// Quien escucha con la radio oye también los anuncios y el micrófono de la sala. El anuncio se baja y
+// entra a la par (s.voice.t: el segundo en que va); el micrófono llega en pedacitos (MediaRecorder →
+// MediaSource) con un segundo o dos de demora. Mientras suena la voz, la música de acá baja. Quien
+// está hablando desde esta página no se oye a sí mismo (eco).
+const vozRadio = (() => {
+  // Dos elementos de audio fijos, que se «desbloquean» con el clic de 📻 (ver prenderRadio): un navegador
+  // sólo deja sonar solo a los que ya sonaron por un clic; uno nuevo, creado cuando llega el anuncio, no.
+  const audAnuncio = new Audio(), audMic = new Audio();
+  const SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  let aud = null, audId = null, mic = null, fallo = 0, avisado = false;
+  function desbloquear() {
+    for (const a of [audAnuncio, audMic]) { a.src = SILENCIO; a.play().then(() => a.pause()).catch(() => {}); }
+  }
+  const pausa = ms => new Promise(r => setTimeout(r, ms));
+  const bajarMusica = on => { audio.volume = on ? 0.25 : 1; };
+
+  function pararAnuncio() {
+    if (aud) { aud.pause(); aud.removeAttribute("src"); aud.load(); aud = null; audId = null; }
+  }
+  const fallaAnuncio = err => toast(`No pude pasar el anuncio por la radio (${err?.name || err})`, true);
+  function anuncio(v) {
+    if (!v?.id || !radio.on) { pararAnuncio(); return; }
+    if (v.id === audId) return;
+    pararAnuncio();
+    audId = v.id; aud = audAnuncio; aud.src = `/api/voz-audio/${v.id}`;
+    const a = aud, desde = v.t || 0;
+    a.onloadedmetadata = () => { if (desde > 0.5 && desde < (a.duration || 0) - 0.2) a.currentTime = desde; };
+    a.onended = () => { if (aud === a) { aud = null; } };
+    a.onerror = () => { if (aud === a) fallaAnuncio(a.error ? new Error(a.error.message || "audio") : "audio"); };
+    a.play().catch(fallaAnuncio);
+  }
+
+  async function micEmpezar(sala) {
+    if (!window.MediaSource || !MediaSource.isTypeSupported('audio/webm;codecs=opus')) {
+      if (!avisado) { avisado = true; toast("Este navegador no puede oír el micrófono por la radio (probá con Chrome)", true); }
+      fallo = Date.now(); return;
+    }
+    const ses = { vivo: true, el: audMic };
+    mic = ses;
+    try {
+      const ms = new MediaSource();
+      ses.el.src = URL.createObjectURL(ms);
+      await new Promise(r => ms.addEventListener("sourceopen", r, { once: true }));
+      const sb = ms.addSourceBuffer('audio/webm;codecs=opus');
+      sb.mode = "sequence";
+      ses.el.play().catch(() => {});
+      let desde = 0;
+      while (ses.vivo) {
+        const r = await fetch(conSala(`/api/voz-mic-stream?desde=${desde}`)).catch(() => null);
+        if (!r || r.status === 410) break;
+        if (!r.ok) { await pausa(1000); continue; }
+        if (!ses.sono) { ses.sono = true; ses.el.play().catch(err => { toast("El navegador no deja sonar el micrófono: tocá 📻 de nuevo", true); }); }
+        desde = Number(r.headers.get("X-Seq")) || desde;
+        const buf = await r.arrayBuffer();
+        if (!buf.byteLength || !ses.vivo) continue;
+        while (sb.updating) await pausa(20);
+        sb.appendBuffer(buf);
+        while (sb.updating) await pausa(20);
+        const b = sb.buffered;
+        if (b.length) {   // siempre cerca del presente: si se atrasó, saltar; y no juntar de más
+          const fin = b.end(b.length - 1);
+          if (fin - ses.el.currentTime > 1.5) ses.el.currentTime = fin - 0.3;
+          if (ses.el.currentTime > 15 && !sb.updating) sb.remove(0, ses.el.currentTime - 10);
+        }
+      }
+    } catch (err) {   // se corta: se avisa una vez y se vuelve a intentar en unos segundos si sigue abierto
+      console.error("micrófono por radio:", err);
+      if (!avisado) { avisado = true; toast(`No pude enganchar el micrófono por la radio (${err.name || err})`, true); }
+      fallo = Date.now();
+    }
+    ses.vivo = false; ses.el.pause(); ses.el.removeAttribute("src"); ses.el.load();
+    if (mic === ses) mic = null;
+  }
+  function micParar() { if (mic) { mic.vivo = false; } }
+
+  // Con cada estado (y cada segundo: por si prenden o apagan la radio con la voz sonando).
+  function alEstado(s) {
+    const v = s?.voice;
+    anuncio(v);
+    const quiere = !!(radio.on && v?.mic && !vozVista.hablando());
+    if (!v?.mic) avisado = false;   // (otra vez que abran el micrófono, avisar de nuevo si falla)
+    if (quiere && !mic && Date.now() - fallo > 5000) micEmpezar(sala); else if (!quiere) micParar();
+    bajarMusica(!!(radio.on && (v?.mic || v?.id)));
+  }
+  return { alEstado, desbloquear };
+})();
+setInterval(() => vozRadio.alEstado(last), 1000);
 
 // ---------- 📊 recap ----------
 // Lo más escuchado de la sala (o de todas) en un período. Es otra vista de esta misma página, con

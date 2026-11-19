@@ -84,6 +84,7 @@ MAX_ALBUMES = 4           # álbumes que aparecen, como mucho, al buscar
 MAX_VIDEOS = 12           # videos que aparecen, como mucho, al buscar para una sala de tv
 DATOS_TEMA = ("videoId", "title", "artist", "duration", "thumb", "album")   # los de un tema, sin más
 MAX_SUELTOS = 20          # temas sueltos que se suman de una vez a una ♫ playlist
+ID_ANUNCIO = re.compile(r"[0-9a-f]{10}")
 RANGO = re.compile(r"bytes=(\d*)-(\d*)")   # el pedazo de un archivo que pide el navegador
 FUENTE = re.compile(r"/fuentes/([a-z0-9-]+\.woff2)")   # la letra de las páginas (static/fuentes)
 UN_ANIO = 365 * 24 * 3600
@@ -330,6 +331,8 @@ def borrar_sala(sala):
             return
         del salas[sala.id]
         guardar_salas()
+        if voz:
+            threading.Thread(target=voz.borrar_sala, args=(sala.id,), daemon=True).start()
         for g in state["saving"]:   # lo que esperaba bajarse sólo para esta sala, ya no
             if sala.id in g["salas"]:
                 g["salas"].remove(sala.id)
@@ -345,32 +348,33 @@ def borrar_sala(sala):
         threading.Thread(target=director.descargas.quitar_sala, args=(sala.id,), daemon=True).start()
 
 
-def _bump_principal():
+def _bump_sala(sid):
     with lock:
-        bump(salas[PRINCIPAL])
+        if sid in salas:
+            bump(salas[sid])
 
 
-def voz_estado():
+def voz_estado(sala):
     if not voz:
         raise ApiError(409, "La voz sólo anda en modo mpv")
-    return {"voz": voz.estado()}
+    return {"voz": voz.estado(sala.id)}
 
 
 def voz_accion(sala, path, body):
-    """Lo que se le pide a la voz con un JSON (con el PIN): el micrófono, y cambiar un anuncio."""
-    if not voz or not sala.principal:
-        raise ApiError(409, "La voz es de la sala que suena en el parlante (en modo mpv)")
+    """Lo que se le pide a la voz de una sala con un JSON (con el PIN de la sala): el micrófono, y cambiar un anuncio."""
+    if not voz:
+        raise ApiError(409, "La voz sólo anda en modo mpv")
     aid = str(body.get("id", ""))
     if path == "/api/voz-estado":   # (es POST: los GET de la página no llevan el PIN)
         pass
     elif path == "/api/voz-mic":
-        voz.mic_abrir() if body.get("on") else voz.mic_cerrar()
+        voz.mic_abrir(sala.id) if body.get("on") else voz.mic_cerrar(sala.id)
     elif path == "/api/voz-anuncio-editar":
-        voz.anuncio_editar(aid, body)
+        voz.anuncio_editar(sala.id, aid, body)
     elif path == "/api/voz-anuncio-borrar":
-        voz.anuncio_borrar(aid)
+        voz.anuncio_borrar(sala.id, aid)
     elif path == "/api/voz-anuncio-sonar":
-        voz.anuncio_sonar(aid)
+        voz.anuncio_sonar(sala.id, aid)
     else:
         raise ApiError(404, "No existe")
 
@@ -1526,7 +1530,7 @@ def public_state(sala, client=None, since=None, radio=False):
             "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
             "online": state["online"],           # si la rockola tiene internet (el led)
             # Un anuncio o el micrófono en el aire (sólo en la sala del parlante): {"mic", "anuncio"}, o None
-            "voice": (lambda v: v if v["mic"] or v["anuncio"] else None)(voz.en_el_aire()) if voz and sala.principal else None,
+            "voice": (lambda v: v if v["mic"] or v["anuncio"] else None)(voz.en_el_aire(sala.id)) if voz else None,
             "weather": state["weather"],         # el clima, para la barra de arriba
         }
 
@@ -2144,8 +2148,8 @@ def _sonar(sala, item):
         # (las reacciones que tuvo quedan con ella en «sonaron recién»)
         sala.history = (sala.history + [dict(sala.now, reacciones=cuentas) if cuentas else sala.now])[-30:]
     sala.now = item
-    if item and sala.principal and voz:
-        voz.cancion_nueva()   # (para los anuncios «cada X canciones»)
+    if item and voz:
+        voz.cancion_nueva(sala.id)   # (para los anuncios «cada X canciones», de cada sala)
     sala.saltear, sala.reacciones, sala.anotadas = [], {}, set()   # los votos para saltear y las reacciones eran de la otra
     if item:
         item.pop("reacciones", None)         # (si vuelve a sonar, empieza de cero)
@@ -3349,9 +3353,9 @@ class Handler(BaseHTTPRequestHandler):
         data, gz = pagina(name)
         self.send_bytes(data, "text/html; charset=utf-8", gz=gz)
 
-    def send_audio(self, ruta):
+    def send_audio(self, ruta, tipo=None):
         """Un archivo de audio, entero o el pedazo que diga Range: así el navegador puede
-        arrancar por cualquier parte de la canción."""
+        arrancar por cualquier parte de la canción. `tipo`: su Content-Type, si se sabe."""
         with open(ruta, "rb") as f:
             tam = os.fstat(f.fileno()).st_size
             desde, hasta = 0, tam - 1
@@ -3370,7 +3374,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
             self.send_response(206 if parcial else 200)
-            self.send_header("Content-Type", TIPOS_AUDIO.get(Path(ruta).suffix.lower(), "application/octet-stream"))
+            self.send_header("Content-Type", tipo or TIPOS_AUDIO.get(Path(ruta).suffix.lower(), "application/octet-stream"))
             self.send_header("Content-Length", str(hasta - desde + 1))
             self.send_header("Accept-Ranges", "bytes")
             if parcial:
@@ -3505,6 +3509,14 @@ class Handler(BaseHTTPRequestHandler):
                                                  qs.get("client", [""])[0][:64]))
             if u.path == "/api/playlist":
                 return self.send_json(playlist_info(qs.get("q", [""])[0][:300]))
+            if u.path == "/api/voz-mic-stream":   # 📻 radio: el micrófono en vivo
+                return self.voz_mic_stream(qs)
+            if u.path.startswith("/api/voz-audio/"):   # 📻 radio: el audio de un anuncio que suena
+                aid = u.path.removeprefix("/api/voz-audio/")
+                ruta = voz and ID_ANUNCIO.fullmatch(aid) and voz.archivo(aid)
+                if not ruta or not any(e["id"] == aid for s in list(salas) for e in [voz.en_el_aire(s)]):
+                    raise ApiError(404, "Ese anuncio no está sonando")
+                return self.send_audio(ruta, voz.tipo(ruta))
             if u.path.startswith("/api/audio/"):   # 📻 radio
                 return self.send_audio(audio_sonando(u.path.removeprefix("/api/audio/")))
             if u.path == "/api/lyrics":
@@ -3611,7 +3623,7 @@ class Handler(BaseHTTPRequestHandler):
                     voz_accion(sala, path, body)
                 except ErrorVoz as e:
                     raise ApiError(e.code, e.msg)
-                return self.send_json(voz_estado())
+                return self.send_json(voz_estado(sala))
             if path == "/api/room-delete":
                 borrar_sala(sala)
                 return self.send_json({"ok": True})
@@ -3662,10 +3674,11 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_errors(route)
 
     def voz_crudo(self, path):
-        """Audio crudo (un pedacito del micrófono, o un anuncio entero): con el PIN, y a la sala del
-        parlante. El contenido va en el cuerpo; lo demás, en la dirección."""
-        principal = sala_de("")
-        if not self.es_admin(principal):
+        """Audio crudo (un pedacito del micrófono, o un anuncio entero): con el PIN de la sala (`sala`, en la
+        dirección). El contenido va en el cuerpo; lo demás, en la dirección."""
+        qs = parse_qs(urlparse(self.path).query)
+        sala = sala_de(qs.get("sala", [""])[0])
+        if not self.es_admin(sala):
             raise ApiError(403, "Para eso hace falta el PIN")
         if not voz:
             raise ApiError(409, "La voz sólo anda en modo mpv")
@@ -3678,16 +3691,41 @@ class Handler(BaseHTTPRequestHandler):
         if n <= 0 or n > tope:
             raise ApiError(413, "Tamaño inválido")
         data = self.rfile.read(n)
-        qs = parse_qs(urlparse(self.path).query)
         try:
             if path == "/api/voz-chunk":
-                voz.mic_pedazo(data)
+                voz.mic_pedazo(sala.id, data)
             else:
-                voz.anuncio_nuevo(data, qs.get("nombre", [""])[0], qs.get("cada_min", ["0"])[0],
+                voz.anuncio_nuevo(sala.id, data, qs.get("nombre", [""])[0], qs.get("cada_min", ["0"])[0],
                                   qs.get("cada_canciones", ["0"])[0], qs.get("by", [""])[0])
         except ErrorVoz as e:
             raise ApiError(e.code, e.msg)
-        return self.send_json(voz_estado())
+        return self.send_json(voz_estado(sala))
+
+    def voz_mic_stream(self, qs):
+        """📻 radio: lo que va llegando del micrófono de la sala, desde el pedazo `desde` (sin PIN: es
+        lo que se oye por el parlante). Si pide desde 0, el primero (con el encabezado) va adelante.
+        Espera unos segundos a que haya algo nuevo; 410 si el micrófono no está abierto."""
+        if not voz:
+            raise ApiError(409, "La voz sólo anda en modo mpv")
+        sala = sala_de(qs.get("sala", [""])[0])
+        try:
+            desde = max(0, int(qs.get("desde", ["0"])[0]))
+        except ValueError:
+            desde = 0
+        r = voz.mic_leer(sala.id, desde)
+        if r is None:
+            raise ApiError(410, "El micrófono está cerrado")
+        init, nuevos, seq = r
+        # (sumándose a mitad de camino: el encabezado, y de ahí en adelante los más nuevos)
+        data = (init if desde == 0 and init else b"") + b"".join(d for n, d in nuevos if not (desde == 0 and n == 1))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Seq", str(seq))
+        self.send_header("Access-Control-Expose-Headers", "X-Seq")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def tv(self, que, body):
         """Los pedidos de una sala de tv (📺). Poner videos, chatear y el control (pausa, ir a otro
@@ -3726,7 +3764,7 @@ class Handler(BaseHTTPRequestHandler):
         # No llenar la consola con los polls de estado.
         path = getattr(self, "path", "")  # no existe si la conexión venció antes del pedido
         if any(p in path for p in ("/api/state", "/api/tv/state", "/api/progress", "/api/info", "/api/qr",
-                                   "/api/audio", "/fuentes/", "/tapas/")):
+                                   "/api/audio", "/api/voz-audio", "/api/voz-mic-stream", "/fuentes/", "/tapas/")):
             return
         super().log_message(fmt, *args)
 
@@ -3781,8 +3819,8 @@ def main():
             director.con_crossfade(True)   # (el segundo mpv, ya listo para el primer cambio de tema)
         from reproductor import _lanzar
         from voz import Voz
-        voz = Voz(carpeta() / "anuncios", director.bajar_musica, _lanzar, MPV_ARGS, al_cambiar=lambda: _bump_principal(),
-                  mpv="mpv")
+        voz = Voz(carpeta() / "anuncios", director.bajar_musica, _lanzar, MPV_ARGS, al_cambiar=_bump_sala,
+                  mpv="mpv", principal=PRINCIPAL)
         averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
         if director.descargas.limite:   # (si se guardan canciones)
             from tapas import Tapas
