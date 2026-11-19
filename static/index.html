@@ -298,6 +298,7 @@
      el mouse o con el dedo (touch-action: que el dedo no desplace la página). Mientras, las
      otras filas se corren para mostrar dónde va a quedar (ver empezarArrastre). */
   .agarre { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .fila.azar { opacity: .7; }   /* las que eligió el azar para después: más apagadas que las pedidas */
   .filas.ordenando .fila { transition: transform .15s ease; }
   .filas.ordenando .fila.movida { transition: none; position: relative; z-index: 1; background: var(--bg1);
                                   box-shadow: 0 0 0 1px var(--acc), 0 6px 14px rgba(0, 0, 0, .5); }
@@ -1060,6 +1061,7 @@ document.fonts?.ready.then(reacomodar);
 
 // `n`: cuántas hay en la cola (con una sola no hay nada que ordenar).
 function accionesCola(it, i, n) {
+  if (it.azar) return el("div", { class: "acts" });   // (las que eligió el azar: no se votan, ni se mueven, ni se quitan)
   if (admin) {
     return el("div", { class: "acts" },
       botonLista(it), botonVoto(it),
@@ -1109,7 +1111,7 @@ function lugarAlSoltar(cajas, de, dy) {
 function empezarArrastre(ev, it, i) {
   if (arrastre || (ev.pointerType === "mouse" && ev.button !== 0)) return;
   const agarre = ev.currentTarget, fila = agarre.closest(".fila");
-  const filas = fila ? [...fila.parentElement.children] : [], de = filas.indexOf(fila);
+  const filas = fila ? [...fila.parentElement.children].filter(f => f.dataset.azar !== "1") : [], de = filas.indexOf(fila);   // (las elegidas al azar no se arrastran ni se pasan)
   if (de < 0 || filas.length < 2) return;
   ev.preventDefault();
   try { agarre.setPointerCapture(ev.pointerId); } catch {}   // que siga llegando aunque el puntero se vaya del botón
@@ -1241,8 +1243,9 @@ function pintarCola(s, forzar) {
       pos: i + 1,
       extra: el("div", { class: "sub" }, "pedida por ", el("span", { class: it.mine ? "mia" : "quien" }, it.mine ? "vos" : it.by),
                 it.playlist && ` · ${iconoDe(it.playlist)} ${it.playlist.title}`),
-      action: accionesCola(it, i, s.queue.length),
+      action: accionesCola(it, i, s.queue.filter(x => !x.azar).length),
     });
+    if (it.azar) { f.classList.add("azar"); f.dataset.azar = "1"; }
     f.dataset.id = it.id;   // (para arrastrarla, y para devolverle el foco)
     return f;
   }, { arriba: [...herramientasCola(s.queue), ...listasEnCola(s.queue)], vacio: "La cola está vacía.",
@@ -1256,7 +1259,7 @@ function render(s) {
   const forzar = s === last;
   last = s;
   current = s.now; progress = s.progress; progressAt = performance.now();
-  queuedIds = new Set([...s.queue.map(i => i.videoId), s.now?.videoId].filter(Boolean));
+  queuedIds = new Set([...s.queue.filter(i => !i.azar).map(i => i.videoId), s.now?.videoId].filter(Boolean));   // (sin las elegidas al azar: esas se pueden pedir)
   const sinParlante = !!s.room && !s.room.main;   // se escucha sólo con 📻 radio
   pintarSalas(s);
   pintarLed(s.online ?? null);
@@ -1355,8 +1358,8 @@ function render(s) {
   if (s.lists && s.lists.v !== listasSala.v && s.lists.v !== listasSala.yendo) refrescarListas();
   if (!arrastrando && s.volume != null) { vol.value = s.volume; mostrarVol(s.volume); }
 
-  const total = s.queue.reduce((a, i) => a + (i.duration || 0), 0);
-  $("#queueTitle").textContent = s.queue.length ? `PRÓXIMAS · ${s.queue.length} · ${fmt(total)}` : "PRÓXIMAS";
+  const pedidas = s.queue.filter(i => !i.azar), total = pedidas.reduce((a, i) => a + (i.duration || 0), 0);   // (la cuenta es de lo pedido)
+  $("#queueTitle").textContent = pedidas.length ? `PRÓXIMAS · ${pedidas.length} · ${fmt(total)}` : "PRÓXIMAS";
   pintarCola(s, forzar);
 
   // Lo que sonó va después: le queda el lugar que deja la cola, hasta abajo (por eso, si la cola

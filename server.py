@@ -123,6 +123,7 @@ class Sala:
         self.version = 0                   # sube con cada cambio; las páginas esperan a que cambie
         self.now = None                    # canción sonando
         self.queue = []                    # próximas
+        self.previstas = []                # con el aleatorio prendido: las (hasta 3) que van a sonar si nadie pide (ver rellenar_previstas)
         self.history = []                  # ya sonaron
         self.progress = {"t": 0, "d": 0, "playing": False}
         self.loading = False               # bajando la que tiene que sonar
@@ -396,7 +397,7 @@ def en_uso():
     with lock:
         usa = set()
         for s in salas.values():
-            usa |= {i["videoId"] for i in [s.now, *s.queue[:PREDESCARGAR or None], *s.history[-1:]] if i}
+            usa |= {i["videoId"] for i in [s.now, *s.queue[:PREDESCARGAR or None], *s.previstas, *s.history[-1:]] if i}
         return usa
 
 
@@ -1490,10 +1491,11 @@ def public_state(sala, client=None, since=None, radio=False):
             "rooms": [s.publica() for s in salas.values()],
             "tvs": teles.publicas(),   # las salas de tv (📺): otra página, /tv
             "now": sala.now,
+            # Lo pedido y, con el aleatorio, las elegidas al azar hasta completar PREVISTAS (con `azar`: no se votan ni se tocan)
             "queue": [dict(i, mine=bool(client) and sala.owners.get(i["id"]) == client,
                            votes=len(sala.votos.get(i["id"], ())),
                            voted=bool(client) and client in sala.votos.get(i["id"], ()))
-                      for i in sala.queue],
+                      for i in sala.queue] + [dict(p, mine=False, votes=0, voted=False) for p in previstas_visibles(sala)],
             # Saltear por votos: cuántos van, cuántos hacen falta y si este ya votó (None: no se vota).
             "skip": {"votes": len(sala.saltear), "needed": VOTOS_SALTEAR,
                      "voted": bool(client) and client in sala.saltear} if VOTOS_SALTEAR and sala.now else None,
@@ -2124,7 +2126,14 @@ def advance(sala, body, por=None, registro=None):
         now = sala.now
         if (now["id"] if now else None) != finished:
             return False
-        sig = sala.queue.pop(0) if sala.queue else cancion_al_azar(sala)
+        if sala.queue:
+            sig = sala.queue.pop(0)
+            if sala.previstas:
+                sala.previstas.pop(0)   # (la elegida que esa había desplazado)
+        elif sala.previstas:
+            sig = sala.previstas.pop(0)
+        else:
+            sig = cancion_al_azar(sala)
         if now is None and sig is None:
             return False   # no sonaba nada y sigue sin sonar: no cambió nada
         if now and por is not None:
@@ -2159,6 +2168,9 @@ def _sonar(sala, item):
     sala.progress = {"t": 0, "d": 0, "playing": False}
     sala.trabajo, sala.lista = None, False   # (sin parlante: Director.mover la baja y la arranca)
     sala.reanudar = None
+    if item:   # (si una elegida es la que acaba de sonar de otra forma, que no vuelva)
+        sala.previstas = [p for p in sala.previstas if p["videoId"] != item["videoId"]]
+    rellenar_previstas(sala)
     bump(sala)
 
 
@@ -2179,6 +2191,35 @@ def play_now(sala, body):
         anotar(sala, "▶", name, f"puso “{meta['title']}”" + (f" (cortó “{sala.now['title']}”)" if sala.now else ""),
                str(body.get("client", ""))[:64])
         _sonar(sala, dict(meta, id=uuid.uuid4().hex[:10], by=name))
+
+
+PREVISTAS = 3   # cuántas de las que vienen se muestran (con el aleatorio): lo que pidan va reemplazando a las primeras
+
+
+def rellenar_previstas(sala):
+    """Con el aleatorio prendido, la lista de próximas siempre muestra PREVISTAS temas: los que
+    pidieron, y los que faltan para llegar a esa cantidad, ya elegidos al azar. Lo que piden
+    reemplaza al primero elegido y deja los otros: [azar1, azar2, azar3] → [pedida, azar2, azar3].
+    Cuando suena una pedida, se va también el elegido que había desplazado, y entra uno nuevo al
+    final. Llamar con el lock tomado."""
+    if not (sala.shuffle and director):
+        sala.previstas = []
+        return
+    ocupadas = {i["videoId"] for i in sala.queue} | {p["videoId"] for p in sala.previstas}
+    if sala.now:
+        ocupadas.add(sala.now["videoId"])
+    while len(sala.previstas) < PREVISTAS:
+        c = director.descargas.al_azar(ocupadas, sala.id)
+        if not c:
+            break
+        ocupadas.add(c["videoId"])
+        sala.previstas.append(dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True))
+
+
+def previstas_visibles(sala):
+    """Las elegidas al azar que se muestran ahora: las que no quedaron tapadas por lo que pidieron."""
+    vids = {i["videoId"] for i in sala.queue} | ({sala.now["videoId"]} if sala.now else set())
+    return [p for p in sala.previstas[len(sala.queue):] if p["videoId"] not in vids]
 
 
 def cancion_al_azar(sala):
@@ -2206,6 +2247,7 @@ def set_shuffle(sala, body):
     on = bool(body.get("on"))
     with lock:
         sala.shuffle = on
+        rellenar_previstas(sala)
         bump(sala)
         if not sala.principal:
             guardar_salas()
@@ -2621,6 +2663,11 @@ class Director:
         with lock:
             bump()
         averiguar_generos()   # (el de su artista, si todavía no se sabe)
+        with lock:   # (con una guardada nueva puede haber de dónde elegir las que vienen)
+            for s in salas.values():
+                if s.shuffle and len(s.previstas) < PREVISTAS:
+                    rellenar_previstas(s)
+                    bump(s)
         copiar_tapas()        # (y que quede una copia de su tapa…)
         copiar_letras()       # (…y de su letra)
 
@@ -3815,6 +3862,9 @@ def main():
         except ErrorMpv as e:
             sys.exit(f"Error: {e}")
         director.arrancar()
+        with lock:   # (con el aleatorio prendido de antes: ya elegir las que vienen)
+            for s in salas.values():
+                rellenar_previstas(s)
         if state["crossfade"]:
             director.con_crossfade(True)   # (el segundo mpv, ya listo para el primer cambio de tema)
         from reproductor import _lanzar

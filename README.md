@@ -316,6 +316,12 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   radio. Quien está hablando no se oye a sí mismo por la radio de su página. Ojo: con el micrófono
   en la misma sala del parlante puede haber acople (usá auriculares, o mandalo desde otro lugar).
 - **Música de fondo:** con el PIN, **🔀** (al azar: abajo a la derecha de los controles, chiquito).
+  Con el 🔀 prendido, **PRÓXIMAS** siempre muestra tres temas: los que pidieron y, para completar, los
+  que el azar ya eligió (más apagados, con «🔀 al azar»), así se ve qué viene. Lo que piden va
+  reemplazando a los elegidos desde el primero y deja los otros: con [azar1, azar2, azar3], una
+  pedida deja [pedida, azar2, azar3]; otra, [pedida1, pedida2, azar3]; con tres pedidas ya no se
+  muestra ninguno al azar. Cuando suena una pedida, el elegido que había desplazado se va y entra
+  uno nuevo al final. Los elegidos no se votan, mueven ni quitan.
   Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
   recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
   en 10 segundos nadie pidió nada, se prende solo y arranca a sonar** (con un parlante Bluetooth,
