@@ -414,8 +414,8 @@
 
   /* ---------- ⬇ descargas: otra vista de esta misma página, como el recap. Una sola lista, angosta
      (para que el título y sus botones no queden lejos), que en la compu se desplaza debajo de la barra. ---------- */
-  #descargas .contenido { max-width: min(var(--ancho), 110ch); margin: 0 auto; padding: 0 var(--margen) 4em; }
-  @media (min-width: 1000px) and (min-height: 600px) { #descargas { flex: 1; min-height: 0; overflow-y: auto; } }
+  #voz .contenido, #descargas .contenido { max-width: min(var(--ancho), 110ch); margin: 0 auto; padding: 0 var(--margen) 4em; }
+  @media (min-width: 1000px) and (min-height: 600px) { #voz, #descargas { flex: 1; min-height: 0; overflow-y: auto; } }
   #descargas .cabeza { color: var(--dim); }
   #descargas .bajando { color: var(--ok); font-weight: 700; }
   #descargas .mal { color: var(--red); }
@@ -464,7 +464,7 @@
     /* la cuenta de las descargas, pegada al ícono (el botón acá es ancho) */
     #descargasBtn .cuenta { top: 2px; right: auto; left: calc(50% + .8ch); font-size: .6em; }
     main { padding-bottom: calc(var(--menu) + 5em); }
-    #recap .contenido, #descargas .contenido { padding-bottom: calc(var(--menu) + 4em); }
+    #recap .contenido, #voz .contenido, #descargas .contenido { padding-bottom: calc(var(--menu) + 4em); }
     #toast { bottom: var(--menu); }
   }
 </style>
@@ -493,6 +493,8 @@
     <button id="descargasBtn" type="button" aria-pressed="false" aria-label="Descargas"
             title="Descargas: las canciones que esperan para bajarse">⬇<span
             class="cuenta" id="descargasCuenta" hidden></span></button>
+    <button id="vozBtn" type="button" aria-pressed="false" aria-label="Voz" disabled
+            title="Voz: micrófono abierto y anuncios que se repiten (con el PIN)">🎙️</button>
     <button id="lockBtn" type="button" aria-pressed="false" aria-label="Controlar la música"
             title="Controlar la música (pide PIN)">🔒</button>
   </nav>
@@ -677,6 +679,17 @@
       <b>⤒ ↑ ↓</b> cambian el orden.</div>
   </div>
 </section>
+<!-- 🎙️ voz: el micrófono abierto y los anuncios (ver vozVista) -->
+<section id="voz" hidden aria-labelledby="vozTtl">
+  <div class="contenido">
+    <section class="panel">
+      <span class="ttl" id="vozTtl">VOZ</span>
+      <div id="vozCuerpo"><div class="vacio">conectando…</div></div>
+    </section>
+    <div class="hint">El micrófono y los anuncios suenan en el parlante, encima de la música (que baja un rato). Hacen falta el PIN (🔒)
+      y que la sala sea la del parlante.</div>
+  </div>
+</section>
 <dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
   <form method="dialog" class="panel" id="dlgForm" novalidate>
     <span class="ttl" id="dlgTitulo">CONFIRMAR</span>
@@ -718,7 +731,7 @@ function irASala(id, aviso) {
   store.set("sala", id);
   if (radio.on) avisarRadio(false);
   // (si está en el 📊 recap o en ⬇ descargas, va a lo mismo de la otra sala)
-  location.href = descargasVista.abierta() ? descargasVista.link(id) : recapVista.link(id);
+  location.href = descargasVista.abierta() ? descargasVista.link(id) : vozVista.abierta() ? vozVista.link(id) : recapVista.link(id);
 }
 
 const nameInput = $("#name");
@@ -867,6 +880,7 @@ function pintarControl() {
   b.setAttribute("aria-pressed", String(admin));
   b.title = admin ? "Controlando la música: tocá para dejar de controlar" : "Controlar la música (pide PIN)";
   $("#controls").hidden = !admin;
+  vozVista.alEstado(last);
   if (armando && !armando.mine && !admin) ponerArmando(null);   // era de otro: la cambiaba con el PIN
   if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
   pintarListas(); pintarArmando();           // (y las playlists se cargan enteras y se cambian)
@@ -896,7 +910,7 @@ function salirDeControl() {
 }
 
 function pedirPin() {
-  recapVista.cerrar(); descargasVista.cerrar();   // (el formulario está en la vista de la cola)
+  recapVista.cerrar(); descargasVista.cerrar(); vozVista.cerrar();   // (el formulario está en la vista de la cola)
   $("#pinPanel").hidden = false; reacomodar();
   $("#pinPanel").scrollIntoView({ block: "nearest" });
   $("#pinInput").focus();
@@ -1191,7 +1205,7 @@ async function moverEnCola(id, to) {
 function ponerTitulo(enRecap = recapVista.abierta()) {
   const otra = last?.room && !last.room.main;   // una sala sin parlante
   document.title = (otra ? `Rockola · ${last.room.name}` : "Rockola")
-    + (enRecap ? " · recap" : descargasVista.abierta() ? " · descargas" : "");
+    + (enRecap ? " · recap" : descargasVista.abierta() ? " · descargas" : vozVista.abierta() ? " · voz" : "");
 }
 
 let current = null, progress = null, progressAt = 0, last = null;
@@ -1359,6 +1373,7 @@ function render(s) {
   });
   descargasVista.alEstado(s);
   seguirGuardando(s);
+  vozVista.alEstado(s);
 }
 
 // Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción,
@@ -1667,7 +1682,7 @@ function elegirSala(v) {
     ? "Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat. El PIN es para quitar videos de otros y para borrarla."
     : "Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio, cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).";
   $("#salaNombre").placeholder = salaDeTv ? "nombre: Almuerzo" : "nombre: Ventas";
-  recapVista.cerrar(); descargasVista.cerrar();
+  recapVista.cerrar(); descargasVista.cerrar(); vozVista.cerrar();
   $("#salaPanel").hidden = false; reacomodar();
   $("#salaPanel").scrollIntoView({ block: "nearest" });
   $("#salaNombre").focus();
@@ -3068,7 +3083,7 @@ const descargasVista = (() => {
 
   function abrir(apilar = true) {
     if (abierta) return;
-    recapVista.cerrar(false);   // (de a una vista)
+    recapVista.cerrar(false); vozVista.cerrar(false);   // (de a una vista)
     scrollCola = scrollY;
     abierta = true;
     $("main").hidden = true; caja.hidden = false;
@@ -3171,6 +3186,179 @@ const descargasVista = (() => {
   return { abrir, cerrar, alEstado, link, abierta: () => abierta };
 })();
 
+// ---------- 🎙️ voz ----------
+// Otra vista de esta misma página, como ⬇ descargas: el micrófono abierto y los anuncios que se
+// repiten. /voz abre la página directo acá. El navegador sólo deja usar el micrófono en páginas
+// seguras (https), y la rockola abre un segundo puerto https con certificado propio: por http el
+// micrófono y grabar no se ofrecen (los anuncios que ya están, o subidos como archivo, sí), así
+// la advertencia del certificado la ve sólo quien toca «abrir por https» para hablar. Todo con el PIN.
+let infoRockola = { https: 0, voz: false };
+fetch("/api/info").then(r => r.json()).then(i => { infoRockola = i; if (last) render(last); }).catch(() => {});
+const vozVista = (() => {
+  const boton = $("#vozBtn"), caja = $("#voz"), cuerpo = $("#vozCuerpo");
+  let abierta = false, scrollCola = 0, datos = { mic: false, suena: null, anuncios: [] };
+  let micOn = false, corriendo = null, grabando = null, pegado = Promise.resolve(), pidiendo = 0;
+  const link = (paraSala = sala, aca = abierta) =>
+    (aca ? "/voz" : "/") + (paraSala !== PRINCIPAL ? `?sala=${encodeURIComponent(paraSala)}` : "");
+  const seguro = () => window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
+  const llamar = async (path, body) => {
+    try { datos = (await api(path, body)).voz; } catch (err) { toast(err.message, true); }
+    pintar();
+  };
+  const crudo = async (path, blob) => {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/octet-stream", ...(pin ? { "X-Pin": pin } : {}) }, body: blob });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+    return d;
+  };
+  // ¿Se puede usar? Sólo en la sala del parlante (modo mpv) y con la voz en la rockola.
+  const sirve = (s = last) => !!s && s.mode === "mpv" && !(s.room && !s.room.main) && infoRockola.voz;
+
+  function pintarBoton(s = last) {
+    // Apagado, no escondido (la barra es la misma en todos lados). Abierta, prendido: que se pueda cerrar.
+    boton.disabled = !abierta && !(admin && sirve(s));
+    boton.classList.toggle("on", abierta);
+    boton.setAttribute("aria-pressed", String(abierta));
+    boton.title = abierta ? "Voz: volver a la cola, la letra y el chat"
+      : !admin ? "Voz: micrófono abierto y anuncios (hace falta el PIN: 🔒)"
+      : !sirve(s) ? "La voz es de la sala que suena en el parlante" : "Voz: micrófono abierto y anuncios que se repiten";
+    boton.setAttribute("aria-label", boton.title);
+  }
+
+  async function hablar(on) {
+    if (on === micOn) return;
+    if (!on) {
+      micOn = false;
+      corriendo?.stop(); corriendo?.stream.getTracks().forEach(x => x.stop()); corriendo = null;
+      await pegado.catch(() => {}); await llamar("/api/voz-mic", { on: false });
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      await api("/api/voz-mic", { on: true });
+      const rec = new MediaRecorder(stream);
+      rec.stream = stream; corriendo = rec; micOn = true; pegado = Promise.resolve();
+      rec.ondataavailable = e => { if (e.data.size) pegado = pegado.then(() => crudo("/api/voz-chunk", e.data)).catch(err => { toast(err.message, true); hablar(false); }); };
+      rec.start(300);
+    } catch (err) {
+      micOn = false; corriendo = null; toast(err.name === "NotAllowedError" ? "No dejaste usar el micrófono" : err.message, true);
+    }
+    datos.mic = micOn; pintar();
+  }
+
+  async function grabar() {
+    if (grabando) { grabando.rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const rec = new MediaRecorder(stream), trozos = [];
+      grabando = { rec };
+      rec.ondataavailable = e => trozos.push(e.data);
+      rec.onstop = async () => {
+        stream.getTracks().forEach(x => x.stop()); grabando = null;
+        const nombre = await preguntar({ titulo: "NUEVO ANUNCIO", texto: "¿Cómo se llama este anuncio?", valor: "Anuncio", si: "guardar", max: 60 });
+        if (nombre != null) await subir(new Blob(trozos, { type: rec.mimeType }), nombre);
+        pintar();
+      };
+      rec.start(); pintar();
+    } catch (err) { toast(err.name === "NotAllowedError" ? "No dejaste usar el micrófono" : err.message, true); }
+  }
+  async function subir(blob, nombre) {
+    try { datos = (await crudo(`/api/voz-anuncio?nombre=${encodeURIComponent(nombre)}&by=${encodeURIComponent(nameInput.value.trim())}`, blob)).voz; toast("Anuncio guardado: ahora elegí cada cuánto suena"); }
+    catch (err) { toast(err.message, true); }
+  }
+
+  function numero(a, clave, etiqueta, tope) {
+    return el("label", { class: "dim" }, etiqueta, " ", el("input", { type: "number", min: 0, max: tope, value: a[clave], style: "width:6ch",
+      onchange: ev => llamar("/api/voz-anuncio-editar", { id: a.id, [clave]: ev.target.value }) }));
+  }
+  // Los renglones se arman de nuevo sólo si cambia algo (y no mientras se escribe en uno de los números).
+  let firma = null;
+  function pintar(forzar = false) {
+    if (!abierta) return;
+    const https = infoRockola.https, aqui = location.protocol === "https:";
+    const f = JSON.stringify([datos, admin, sirve(), https, micOn, !!grabando]);
+    if (!forzar && f === firma) return;
+    if (document.activeElement?.closest?.("#voz") && document.activeElement.tagName === "INPUT" && !forzar) return;
+    firma = f;
+    $("#vozTtl").textContent = "VOZ" + (datos.mic ? " · 🎙️ micrófono abierto" : datos.suena ? " · 🔊 suena un anuncio" : "");
+    if (!admin || !sirve()) {
+      return cuerpo.replaceChildren(el("div", { class: "vacio" }, !admin ? "Hace falta el PIN: tocá 🔒 arriba." : "La voz es de la sala que suena en el parlante: elegila arriba."));
+    }
+    const lista = datos.anuncios.map(a => el("div", { class: "fila" },
+      el("div", { class: "info" },
+        el("div", { class: "t", title: a.nombre }, a.nombre, datos.suena === a.id && " 🔊"),
+        el("div", { class: "sub" }, numero(a, "cada_min", "cada", 1440), " min · ", numero(a, "cada_canciones", "o cada", 200), " canciones (0: no)")),
+      el("div", { class: "acts" },
+        el("button", { type: "button", class: a.activo ? "on" : "", "aria-pressed": String(a.activo), title: a.activo ? "Se repite: tocá para pausarlo" : "Pausado: tocá para que se repita",
+                       onclick: () => llamar("/api/voz-anuncio-editar", { id: a.id, activo: !a.activo }) }, a.activo ? "↻" : "⏸"),
+        el("button", { type: "button", title: "Probarlo ahora", disabled: !!datos.suena, onclick: () => llamar("/api/voz-anuncio-sonar", { id: a.id }) }, "▶"),
+        el("button", { type: "button", title: "Borrarlo", onclick: async () => await preguntar({ titulo: "BORRAR ANUNCIO", texto: `¿Borrar «${a.nombre}»?`, peligro: true, si: "🗑 borrar" }) && llamar("/api/voz-anuncio-borrar", { id: a.id }) }, "🗑"))));
+    // Varios a la vez; también videos (mp4, webm…: se usa sólo el audio). Cada uno con su nombre.
+    const subirArchivo = el("input", { type: "file", multiple: true, hidden: true,
+      accept: "audio/*,video/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.mp4,.webm", onchange: async ev => {
+      const fs = [...ev.target.files]; ev.target.value = "";
+      for (const f of fs) {
+        if (f.size > 30 * 1024 * 1024) { toast(`«${f.name}» pesa más de 30 MB`, true); continue; }
+        const nombre = await preguntar({ titulo: "NUEVO ANUNCIO", texto: `¿Cómo se llama «${f.name}»?`, valor: f.name.replace(/\.[^.]+$/, "").slice(0, 60), si: "subir", max: 60 });
+        if (nombre != null) await subir(f, nombre);
+      }
+      pintar(true); } });
+    // Los botones, uno al lado del otro: abrir el micrófono, grabar y subir audios (los dos primeros, sólo por https).
+    const subir_ = el("button", { type: "button", onclick: () => subirArchivo.click() }, "＋ subir audios (mp3, m4a, ogg, wav…)");
+    cuerpo.replaceChildren(...[
+      !seguro() && el("div", { class: "hint" }, aqui ? "⚠ Este navegador no da acceso al micrófono."
+            : https ? ["Para hablar o grabar, abrí la rockola por https (el navegador va a avisar que el certificado es propio: es normal, aceptalo una vez). ",
+               el("a", { class: "boton", href: `https://${location.hostname}:${https}/voz${location.search}` }, "abrir por https")]
+            : "El micrófono necesita https y esta rockola no lo tiene (https_puerto = 0, o falta openssl)."),
+      el("div", { class: "botonera" },
+        seguro() && el("button", { type: "button", class: micOn || datos.mic ? "primario" : "", "aria-pressed": String(micOn),
+                                   onclick: () => hablar(!micOn) }, micOn ? "🎙️ micrófono abierto: tocá para cerrar" : "🎙️ abrir el micrófono"),
+        seguro() && el("button", { type: "button", class: grabando ? "primario" : "", onclick: grabar }, grabando ? "⏹ terminar de grabar" : "⏺ grabar un anuncio"),
+        subir_, subirArchivo),
+      lista.length ? el("div", {}, lista) : el("div", { class: "vacio" }, "Todavía no hay anuncios. Grabá uno o subí un audio: suena encima de la música, que baja un rato."),
+    ].filter(Boolean));
+  }
+
+  // Trae lo de ahora (con el PIN: es un POST, que lleva el PIN; un GET no).
+  async function traer() {
+    if (!abierta || !admin || !sirve() || micOn || grabando) return pintar();
+    const mio = ++pidiendo;
+    try { const d = (await api("/api/voz-estado", {})).voz; if (mio === pidiendo) datos = d; }
+    catch (err) { if (err.status !== 403) toast(err.message, true); }
+    pintar();
+  }
+
+  function abrir(apilar = true) {
+    if (abierta) return;
+    recapVista.cerrar(false); descargasVista.cerrar(false);   // (de a una vista)
+    scrollCola = scrollY;
+    abierta = true;
+    $("main").hidden = true; caja.hidden = false;
+    scrollTo(0, 0);
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    firma = null; pintar(true); traer();
+  }
+
+  function cerrar(apilar = true) {
+    if (!abierta) return;
+    if (micOn) hablar(false);   // (el micrófono no queda abierto sin la vista)
+    abierta = false;
+    caja.hidden = true; $("main").hidden = false;
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    reacomodar();
+    scrollTo(0, scrollCola);
+  }
+
+  // Con cada estado de la sala: el botón y, si se está mirando, lo de ahora (p. ej. un anuncio que empezó solo).
+  function alEstado(s) { pintarBoton(s); if (abierta) traer(); }
+
+  boton.onclick = () => abierta ? cerrar() : abrir();
+  addEventListener("popstate", () => location.pathname === "/voz" ? abrir(false) : cerrar(false));
+  return { abrir, cerrar, alEstado, link, abierta: () => abierta };
+})();
+
 // ---------- 📊 recap ----------
 // Lo más escuchado de la sala (o de todas) en un período. Es otra vista de esta misma página, con
 // la misma barra de arriba: no se recarga nada y la 📻 radio sigue sonando. 📊 la abre y la
@@ -3225,7 +3413,7 @@ const recapVista = (() => {
 
   function abrir(apilar = true) {
     if (!abierta) {
-      descargasVista.cerrar(false);   // (de a una vista)
+      descargasVista.cerrar(false); vozVista.cerrar(false);   // (de a una vista)
       scrollCola = scrollY;
       abierta = true;
       $("main").hidden = true; $("#recap").hidden = false;
@@ -3467,6 +3655,7 @@ const recapVista = (() => {
   if (location.pathname === "/recap") abrir(false);
   return { abrir, cerrar, alEstado, link, abierta: () => abierta };
 })();
+if (location.pathname === "/voz") vozVista.abrir(false);
 if (location.pathname === "/descargas") descargasVista.abrir(false);   // (acá, con el recap ya definido: se cierran entre sí)
 
 // Recordar el PIN en este dispositivo; después, el aviso que dejó la página antes de cambiar de

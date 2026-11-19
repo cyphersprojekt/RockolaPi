@@ -8,6 +8,9 @@ pin = "CAMBIAR"
 
 # Puerto de la página web.
 puerto = 8000
+# Segundo puerto, https con certificado propio, para usar el micrófono (los navegadores sólo lo
+# dejan en páginas seguras). 0: sin él. Hace falta openssl (viene con Raspberry Pi OS).
+https_puerto = 8443
 
 # Canciones pendientes que puede tener cada persona en la cola (y videos, en una sala de tv).
 max_por_persona = 3

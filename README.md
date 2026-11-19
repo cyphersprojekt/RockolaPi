@@ -56,6 +56,9 @@ escuchado (de hoy, de la semana, del año, por turno) y vuelve. El QR y lo que s
   desde la web) no tienen parlante y se escuchan con 📻 radio. Cada una tiene su cola, su PIN, su
   🔀 al azar y sus guardadas: lo que pide ventas no se mezcla con lo de tu equipo, pero un tema
   que ya bajó otra sala suena al instante, sin bajarlo de nuevo.
+- **🎙️ Voz:** el micrófono abierto en el parlante (la música baja mientras hablás) y anuncios
+  grabados o subidos (mp3, memes…) que se repiten cada X minutos o X canciones: casi una radio,
+  para eventos y fiestas.
 - **💬 Chat** en cada sala, con el registro de quién salteó, quién votó saltear y quién reaccionó.
 - **📺 Salas de tv:** para mirar videos de YouTube entre varios, cada uno en su navegador. Van a
   la par: si alguien pausa, adelanta o salta el video, les pasa a todos. Con su cola y su chat.
@@ -125,7 +128,7 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 
 ## Usarla
 
-Los cuatro botones de la barra de arriba (**📻** radio, **📊** recap, **⬇** descargas y **🔒**
+Los cinco botones de la barra de arriba (**📻** radio, **📊** recap, **⬇** descargas, **🎙️** voz y **🔒**
 controlar) son sólo el ícono: qué es cada uno lo dice al pasarle el mouse, y el que está prendido
 (la radio sonando, la vista abierta, el PIN puesto) lleva el recuadro resaltado. En el celular
 no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
@@ -289,6 +292,20 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
 - **Mezclar la cola:** con el PIN, **🔀 mezclar** arriba de las próximas. Las pone en otro orden al
   azar, una vez: lo que pidan después va al final, como siempre. Sirve, por ejemplo, después de
   cargar una playlist (ojo, que mezcla también los pedidos que ya estaban).
+- **🎙️ Voz** (con el PIN, en la sala del parlante): **🎙️** en la barra de arriba cambia la cola por
+  la pestaña **VOZ**, como el recap o ⬇ descargas (apagado sin el PIN; su link es `/voz`), con dos cosas:
+  - **Micrófono abierto:** hablás desde tu celular o compu y se escucha en el parlante, con la
+    música más baja (a un cuarto) hasta que cerrás; si dejan de llegar datos, se cierra solo.
+  - **Anuncios:** **⏺ grabar un anuncio** (o **＋ subir audios**: mp3, m4a, ogg, wav… hasta 30 MB cada uno, de a varios; también sirve el audio de un video) y elegís **cada X minutos**
+    y/o **cada X canciones**; se repite solo, encima de la música (que baja un rato). Cada uno
+    se puede pausar (↻/⏸), probar (▶) o borrar (🗑). Quedan en `~/.cache/rockola/anuncios`.
+  Los navegadores sólo dejan usar el micrófono en páginas **https**, así que la rockola abre un
+  segundo puerto (`https_puerto`, 8443) con un certificado propio, que se hace solo con openssl.
+  Los demás entran por `http://` como siempre y no ven ninguna advertencia: el panel, por http,
+  ofrece **abrir por https** (el navegador avisa una vez que el certificado es propio: se acepta)
+  y recién ahí aparecen el micrófono y grabar. Subir un audio ya hecho y manejar los anuncios
+  andan por http. Ojo: se escuchan en el parlante, no por 📻 radio; y con un micrófono en la
+  misma sala del parlante puede haber acople (usá auriculares, o mandalo desde otro lugar).
 - **Música de fondo:** con el PIN, **🔀** (al azar: abajo a la derecha de los controles, chiquito).
   Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
   recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
@@ -404,6 +421,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 |---|---|---|
 | `pin` | al azar | PIN para controlar desde la web (vacío = sólo desde la máquina) |
 | `puerto` | `8000` | |
+| `https_puerto` | `8443` | un segundo puerto con https y certificado propio, sólo para el 🎙️ micrófono (0: sin él) |
 | `max_por_persona` | `3` | canciones pendientes por persona (y videos, en una sala de tv) |
 | `duracion_maxima` | `600` | segundos (0 = sin límite) |
 | `votos_para_saltear` | `3` | cuántas personas tienen que votar ⏭ para que la que suena se saltee sola (0 = no se vota) |
@@ -428,6 +446,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── listas.py             las ♫ playlists que se arman en la rockola, por sala (listas.json)
 ├── tapas.py              las copias de las tapas de las guardadas (para verlas sin internet)
 ├── letras.py             las copias de las letras de las guardadas (lo mismo)
+├── voz.py                anuncios y micrófono abierto, y el certificado https
 ├── tele.py               las 📺 salas de tv: el video que va, su reloj, la cola y el chat (tv.json)
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
@@ -551,6 +570,13 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
   lo acepta (la página de pedidos pasa de unos 180 KB a 50; se comprime una sola vez), y la
   página arma de nuevo sólo lo que cambió: un mensaje en el chat o un cambio de volumen no
   vuelven a dibujar la cola.
+- **HTTPS y micrófono:** los navegadores sólo dejan usar el micrófono en páginas seguras, así
+  que la rockola abre un segundo puerto (`https_puerto`, 8443) con un certificado autofirmado,
+  que hace sola con `openssl` la primera vez (y de nuevo si cambia la IP; queda en
+  `~/.cache/rockola/https`). Es un certificado propio: el navegador avisa una vez, y la página
+  sólo manda ahí a quien toca **abrir por https** para hablar; los demás siguen por `http://`
+  sin ninguna advertencia. El micrófono llega en pedacitos (MediaRecorder) por POST y un `mpv`
+  aparte lo toca en vivo; los anuncios los toca otro `mpv`. Todo exige el PIN.
 - **La letra de las páginas** ([JetBrains Mono](https://www.jetbrains.com/lp/mono/), licencia
   OFL) la sirve la rockola misma, desde `static/fuentes/` (66 KB entre todos los alfabetos; el
   navegador baja sólo los que usa, casi siempre los 31 KB del latino, y los guarda). No se le

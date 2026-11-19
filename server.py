@@ -21,6 +21,7 @@ import argparse
 import gzip
 import hashlib
 import hmac
+import ssl
 import itertools
 import json
 import math
@@ -46,12 +47,14 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from ytmusicapi import YTMusic
 
+from voz import ErrorVoz
 from listas import MAX_TEMAS as MAX_TEMAS_LISTA, ErrorLista, Listas, _orden as _orden_nombre
 from tele import ErrorTele, Teles
 
 # ------------------------------------------------------------------ ajustes
 # Valores por defecto. Se cambian en rockola.toml (ver rockola.ejemplo.toml), no acá.
 PORT = 8000
+HTTPS_PORT = 8443      # el micrófono necesita https: un segundo puerto con certificado propio (0: sin él)
 MAX_PER_PERSON = 3        # canciones pendientes por persona en la cola
 MAX_DURATION = 10 * 60    # duración máxima en segundos (0 = sin límite)
 VOLUME = 80               # volumen inicial en modo mpv (0-130)
@@ -101,7 +104,7 @@ state = {
     "weather": None,   # el clima (ver bucle_clima): { temp, text, icon, symbol, city }, o None si no se sabe
 }
 REACCIONES = ("🔥", "❤️", "😴")   # con las que se reacciona a la que suena
-MAX_GUARDANDO = 40     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
+MAX_GUARDANDO = 100     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
 PRINCIPAL = "principal"
 MAX_SALAS = 8          # contando la principal
 MAX_CHAT = 100         # mensajes que se recuerdan por sala (en memoria: al reiniciar, se borran)
@@ -153,6 +156,7 @@ director = None        # Director en modo mpv
 stats = None           # Estadisticas: lo que sonó, para el recap (/recap)
 listas = None          # Listas: las ♫ playlists que se arman en la rockola, de cada sala
 teles = None           # Teles: las salas de tv (📺), para mirar videos de YouTube entre varios
+voz = None             # Voz: los anuncios y el micrófono (ver voz.py)
 tapas = None           # Tapas: las copias de las tapas de las canciones guardadas (ver tapas.py)
 letras_guardadas = None   # Letras: las copias de las letras de las canciones guardadas (ver letras.py)
 videos = {}            # videoId -> datos de un video (de lo que se buscó para una sala de tv)
@@ -163,13 +167,14 @@ _local = threading.local()
 
 def cargar_config(ruta):
     """Lee rockola.toml (si existe) y pisa los valores por defecto."""
-    global PORT, MAX_PER_PERSON, MAX_DURATION, VOLUME, NORMALIZAR, MPV_ARGS, PIN, IP_FIJA, MODO
+    global HTTPS_PORT, PORT, MAX_PER_PERSON, MAX_DURATION, VOLUME, NORMALIZAR, MPV_ARGS, PIN, IP_FIJA, MODO
     global GUARDAR_GB, CARPETA, PREDESCARGAR, AZAR_AL_PRENDER, CLIMA, CROSSFADE, VOTOS_SALTEAR
     if not ruta.exists():
         return
     with open(ruta, "rb") as f:
         c = tomllib.load(f)
     PORT = int(c.get("puerto", PORT))
+    HTTPS_PORT = int(c.get("https_puerto", HTTPS_PORT))
     MAX_PER_PERSON = int(c.get("max_por_persona", MAX_PER_PERSON))
     MAX_DURATION = int(c.get("duracion_maxima", MAX_DURATION))
     VOLUME = int(c.get("volumen", VOLUME))
@@ -338,6 +343,36 @@ def borrar_sala(sala):
         listas.borrar_sala(sala.id)
     if director:
         threading.Thread(target=director.descargas.quitar_sala, args=(sala.id,), daemon=True).start()
+
+
+def _bump_principal():
+    with lock:
+        bump(salas[PRINCIPAL])
+
+
+def voz_estado():
+    if not voz:
+        raise ApiError(409, "La voz sólo anda en modo mpv")
+    return {"voz": voz.estado()}
+
+
+def voz_accion(sala, path, body):
+    """Lo que se le pide a la voz con un JSON (con el PIN): el micrófono, y cambiar un anuncio."""
+    if not voz or not sala.principal:
+        raise ApiError(409, "La voz es de la sala que suena en el parlante (en modo mpv)")
+    aid = str(body.get("id", ""))
+    if path == "/api/voz-estado":   # (es POST: los GET de la página no llevan el PIN)
+        pass
+    elif path == "/api/voz-mic":
+        voz.mic_abrir() if body.get("on") else voz.mic_cerrar()
+    elif path == "/api/voz-anuncio-editar":
+        voz.anuncio_editar(aid, body)
+    elif path == "/api/voz-anuncio-borrar":
+        voz.anuncio_borrar(aid)
+    elif path == "/api/voz-anuncio-sonar":
+        voz.anuncio_sonar(aid)
+    else:
+        raise ApiError(404, "No existe")
 
 
 def copiar_tapas(limpiar=False):
@@ -2107,6 +2142,8 @@ def _sonar(sala, item):
         # (las reacciones que tuvo quedan con ella en «sonaron recién»)
         sala.history = (sala.history + [dict(sala.now, reacciones=cuentas) if cuentas else sala.now])[-30:]
     sala.now = item
+    if item and sala.principal and voz:
+        voz.cancion_nueva()   # (para los anuncios «cada X canciones»)
     sala.saltear, sala.reacciones, sala.anotadas = [], {}, set()   # los votos para saltear y las reacciones eran de la otra
     if item:
         item.pop("reacciones", None)         # (si vuelve a sonar, empieza de cero)
@@ -2608,7 +2645,7 @@ class Director:
                     medir(pr, progreso_ahora(p)["t"])   # al pausar, que quede donde iba de verdad
                     pr["playing"] = sonando
                     bump(p)
-            elif nombre == "volume" and valor is not None and not self.fundiendo():
+            elif nombre == "volume" and valor is not None and not self.fundiendo() and not getattr(self, "bajada", False):
                 # (durante un crossfade los dos mpv van subiendo y bajando: el volumen es el del estado)
                 v = round(valor)
                 if state["volume"] != v:
@@ -2851,7 +2888,21 @@ class Director:
         f = self.fundido
         return f is not None and f["entra"] is not None
 
+    BAJA_MUSICA = 0.25   # cuánto queda la música mientras suena una voz (ver bajar_musica)
+
+    def bajar_musica(self, on):
+        """Mientras suena una voz (un anuncio, el micrófono) la música baja, y después vuelve. El
+        volumen del estado no cambia: es el que se restaura."""
+        self.bajada = bool(on)
+        v = state["volume"] or 0
+        self.mpv.fijar_volumen(v * self.BAJA_MUSICA if on else v)
+
     def fijar_volumen(self, valor):
+        if getattr(self, "bajada", False):   # (con la música baja: se anota, y se aplica bajo)
+            with lock:
+                state["volume"] = round(max(0.0, min(130.0, float(valor))))
+                bump(self.principal)
+            return self.mpv.fijar_volumen(state["volume"] * self.BAJA_MUSICA)
         if not self.fundiendo():
             return self.mpv.fijar_volumen(valor)
         with lock:   # en pleno crossfade: queda en el estado, y fundir() lo va aplicando
@@ -2859,7 +2910,7 @@ class Director:
             bump(self.principal)
 
     def cambiar_volumen(self, delta):
-        if not self.fundiendo():
+        if not self.fundiendo() and not getattr(self, "bajada", False):
             return self.mpv.cambiar_volumen(delta)
         self.fijar_volumen((state["volume"] or 0) + delta)
 
@@ -3214,6 +3265,9 @@ def lan_ip():
         s.close()
 
 
+https_activo = False   # si el puerto https está andando
+
+
 def url_publica():
     # Se calcula cada vez: en una Raspberry el wifi puede conectarse después de arrancar.
     return f"http://{IP_FIJA or lan_ip()}:{PORT}/"
@@ -3364,7 +3418,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(u.query)
 
         def route():
-            if u.path in ("/", "/recap", "/descargas"):   # (la misma página, abierta en 📊 recap o en ⬇ descargas)
+            if u.path in ("/", "/recap", "/descargas", "/voz"):   # (la misma página, abierta en 📊 recap o en ⬇ descargas)
                 return self.send_page("index.html")
             if u.path == "/pantalla":
                 return self.send_page("pantalla.html")
@@ -3478,7 +3532,8 @@ class Handler(BaseHTTPRequestHandler):
                                             qs.get("persona", [""])[0]))
             if u.path == "/api/info":
                 return self.send_json({"url": url_publica(), "mode": state["mode"],
-                                       "pin": bool(PIN)})
+                                       "pin": bool(PIN), "https": HTTPS_PORT if https_activo else 0,
+                                       "voz": voz is not None})
             if u.path == "/api/qr.svg":
                 try:
                     svg = qr_svg(url_publica())
@@ -3493,6 +3548,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         def route():
+            if path in ("/api/voz-chunk", "/api/voz-anuncio"):   # audio crudo, no JSON
+                return self.voz_crudo(path)
             body = self.read_body()
             if path.startswith("/api/tv/"):
                 return self.tv(path.removeprefix("/api/tv/"), body)
@@ -3547,6 +3604,12 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/api/load", "/api/playlist"):   # una colección entera a la cola (/api/playlist: un link)
                 r = cargar_entera(sala, body if path == "/api/load" else dict(body, **{"from": "youtube"}))
                 return self.send_json(dict(r, state=public_state(sala, client)))
+            if path.startswith("/api/voz-"):
+                try:
+                    voz_accion(sala, path, body)
+                except ErrorVoz as e:
+                    raise ApiError(e.code, e.msg)
+                return self.send_json(voz_estado())
             if path == "/api/room-delete":
                 borrar_sala(sala)
                 return self.send_json({"ok": True})
@@ -3596,6 +3659,34 @@ class Handler(BaseHTTPRequestHandler):
 
         self.handle_errors(route)
 
+    def voz_crudo(self, path):
+        """Audio crudo (un pedacito del micrófono, o un anuncio entero): con el PIN, y a la sala del
+        parlante. El contenido va en el cuerpo; lo demás, en la dirección."""
+        principal = sala_de("")
+        if not self.es_admin(principal):
+            raise ApiError(403, "Para eso hace falta el PIN")
+        if not voz:
+            raise ApiError(409, "La voz sólo anda en modo mpv")
+        import voz as v
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise ApiError(400, "Content-Length inválido")
+        tope = v.MAX_CHUNK if path == "/api/voz-chunk" else v.MAX_ANUNCIO
+        if n <= 0 or n > tope:
+            raise ApiError(413, "Tamaño inválido")
+        data = self.rfile.read(n)
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            if path == "/api/voz-chunk":
+                voz.mic_pedazo(data)
+            else:
+                voz.anuncio_nuevo(data, qs.get("nombre", [""])[0], qs.get("cada_min", ["0"])[0],
+                                  qs.get("cada_canciones", ["0"])[0], qs.get("by", [""])[0])
+        except ErrorVoz as e:
+            raise ApiError(e.code, e.msg)
+        return self.send_json(voz_estado())
+
     def tv(self, que, body):
         """Los pedidos de una sala de tv (📺). Poner videos, chatear y el control (pausa, ir a otro
         segundo, ⏭) son de todos; con el PIN, además, lo de la cola de otros y borrar la sala."""
@@ -3639,7 +3730,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global director, stats, listas, teles, tapas, letras_guardadas, PORT, IP_FIJA
+    global director, stats, listas, teles, tapas, letras_guardadas, voz, https_activo, PORT, IP_FIJA
     ap = argparse.ArgumentParser(description="Rockola de oficina")
     ap.add_argument("--modo", choices=["mpv", "navegador"],
                     help="dónde suena la música (por defecto: mpv si está instalado)")
@@ -3686,6 +3777,10 @@ def main():
         director.arrancar()
         if state["crossfade"]:
             director.con_crossfade(True)   # (el segundo mpv, ya listo para el primer cambio de tema)
+        from reproductor import _lanzar
+        from voz import Voz
+        voz = Voz(carpeta() / "anuncios", director.bajar_musica, _lanzar, MPV_ARGS, al_cambiar=lambda: _bump_principal(),
+                  mpv="mpv")
         averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
         if director.descargas.limite:   # (si se guardan canciones)
             from tapas import Tapas
@@ -3715,6 +3810,19 @@ def main():
         threading.Thread(target=bucle_clima, daemon=True, name="clima").start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    if HTTPS_PORT and modo == "mpv":
+        from voz import certificado
+        cert = certificado(carpeta() / "https", IP_FIJA or lan_ip())
+        if cert:
+            try:
+                seguro = ThreadingHTTPServer(("0.0.0.0", HTTPS_PORT), Handler)
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ctx.load_cert_chain(*map(str, cert))
+                seguro.socket = ctx.wrap_socket(seguro.socket, server_side=True)
+                threading.Thread(target=seguro.serve_forever, daemon=True, name="https").start()
+                https_activo = True
+            except (OSError, ssl.SSLError) as e:
+                print(f"  ⚠ no pude abrir el puerto https {HTTPS_PORT}: {e}", flush=True)
 
     def terminar(*_):
         raise KeyboardInterrupt
