@@ -13,6 +13,7 @@ Todo es de la sala que suena en el parlante, y de quien tiene el PIN.
 """
 import json
 import os
+import random
 import re
 import subprocess
 import threading
@@ -23,6 +24,7 @@ from pathlib import Path
 MAX_ANUNCIO = 30 * 1024 * 1024    # bytes de un anuncio
 MAX_ANUNCIOS = 30
 MAX_CHUNK = 1024 * 1024
+PASO = 2                          # segundos entre una mirada y otra a los anuncios (ver _bucle)
 MIC_VENCE = 6                     # segundos sin recibir nada: se cierra el micrófono
 ID = re.compile(r"[0-9a-f]{10}")
 
@@ -85,6 +87,12 @@ class Voz:
             return {"mic": self.mic is not None, "suena": self.suena,
                     "anuncios": sorted((dict(a, archivo=None) for a in self.anuncios.values()), key=lambda a: a["creado"])}
 
+    def en_el_aire(self):
+        """Lo que suena ahora, para las páginas y la pantalla (sin PIN): {"mic": bool, "anuncio": nombre o None}."""
+        with self.lock:
+            a = self.anuncios.get(self.suena) if self.suena else None
+            return {"mic": self.mic is not None, "anuncio": a["nombre"] if a else None}
+
     # --- anuncios
 
     def _escribir(self, a):
@@ -111,7 +119,7 @@ class Voz:
             (self.carpeta / archivo).write_bytes(data)
             a = {"id": aid, "archivo": archivo, "nombre": " ".join(str(nombre or "").split())[:60] or "Anuncio",
                  "cada_min": self._num(cada_min, 24 * 60), "cada_canciones": self._num(cada_canciones, 200),
-                 "activo": True, "creado": time.time(), "ultimo": time.time(),
+                 "activo": True, "azar": False, "creado": time.time(), "ultimo": time.time(),
                  "desde": self.canciones, "por": str(por)[:30]}
             self.anuncios[aid] = a
             self._escribir(a)
@@ -129,6 +137,10 @@ class Voz:
                 a["cada_canciones"] = self._num(cambios["cada_canciones"], 200)
             if "activo" in cambios:
                 a["activo"] = bool(cambios["activo"])
+            if "azar" in cambios:
+                a["azar"] = bool(cambios["azar"])
+                if a["azar"] and not a["cada_min"]:
+                    a["cada_min"] = 30   # (en promedio, cada tanto: si no, nunca sonaría)
             a["ultimo"], a["desde"] = time.time(), self.canciones   # (los "cada X" cuentan desde el cambio)
             self._escribir(a)
         self.al_cambiar()
@@ -242,7 +254,7 @@ class Voz:
 
     def _bucle(self):
         while True:
-            time.sleep(2)
+            time.sleep(PASO)
             with self.lock:
                 m = self.mic
                 if m and time.monotonic() - m["visto"] > MIC_VENCE:
@@ -260,6 +272,10 @@ class Voz:
     def _toca(self, a):
         if not a["activo"]:
             return False
+        if a.get("azar"):
+            # Al azar: `cada_min` es cada cuánto suena EN PROMEDIO. Se tira una moneda en cada vuelta
+            # (cada 2 s) con la chance justa para eso: puede sonar dos veces seguidas o tardar una hora.
+            return bool(a["cada_min"]) and random.random() < PASO / (a["cada_min"] * 60)
         if a["cada_min"] and time.time() - a["ultimo"] >= a["cada_min"] * 60:
             return True
         return bool(a["cada_canciones"]) and self.canciones - a["desde"] >= a["cada_canciones"]

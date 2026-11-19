@@ -237,7 +237,9 @@
   @media (max-width: 480px) { .disco { font-size: .8em; } }
   .now .info { flex: 1; min-width: 0; }
   .estado { font-weight: 700; color: var(--ok); }
-  .estado.pausa, .estado.carga { color: var(--acc); }
+  .estado.pausa, .estado.carga, .estado.voz { color: var(--acc); }
+  .estado.voz { animation: titilar 1.2s steps(2, jump-none) infinite; }
+  @media (prefers-reduced-motion: reduce) { .estado.voz { animation: none; } }
   .titulo { font-size: 1.2em; font-weight: 700; line-height: 1.25; margin-top: .25em;
             overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .barra { white-space: pre; overflow: hidden; margin-top: .5em; }
@@ -1266,7 +1268,9 @@ function render(s) {
 
   const now = $("#now");
   if (s.now) {
-    const [txt, cls] = s.loading ? ["⏳ CARGANDO…", "estado carga"]
+    // Un anuncio o el micrófono en el aire: ocupa el lugar de «sonando ahora» (sin correr nada).
+    const [txt, cls] = s.voice ? [s.voice.mic ? "🎙️ HABLANDO EN VIVO" : `📢 ANUNCIO: ${s.voice.anuncio}`, "estado voz"]
+      : s.loading ? ["⏳ CARGANDO…", "estado carga"]
       : s.progress.playing ? ["▶ SONANDO AHORA", "estado"]
       : s.waiting ? ["📻 EN ESPERA: NADIE ESCUCHA", "estado pausa"] : ["⏸ EN PAUSA", "estado pausa"];
     // El disco no sale nunca de la página mientras suena algo: si se saca y se vuelve a poner, el
@@ -1281,7 +1285,7 @@ function render(s) {
       artFor = undefined;   // lienzos nuevos (p. ej. después de perder la conexión): dibujar la tapa
     }
     const vieja = now.querySelector(":scope > .info");
-    const firma = JSON.stringify([s.now, !!s.loading, !!s.progress.playing, !!s.waiting,
+    const firma = JSON.stringify([s.now, s.voice, !!s.loading, !!s.progress.playing, !!s.waiting,
                                   s.reactions?.counts, s.reactions?.mine, s.skip, armandoV]);
     if (forzar || !vieja || firma !== pintado.ahora) {
       pintado.ahora = firma;
@@ -3287,8 +3291,13 @@ const vozVista = (() => {
     const lista = datos.anuncios.map(a => el("div", { class: "fila" },
       el("div", { class: "info" },
         el("div", { class: "t", title: a.nombre }, a.nombre, datos.suena === a.id && " 🔊"),
-        el("div", { class: "sub" }, numero(a, "cada_min", "cada", 1440), " min · ", numero(a, "cada_canciones", "o cada", 200), " canciones (0: no)")),
+        el("div", { class: "sub" }, a.azar
+          ? ["🎲 al azar, en promedio cada ", numero(a, "cada_min", "", 1440), " min"]
+          : [numero(a, "cada_min", "cada", 1440), " min · ", numero(a, "cada_canciones", "o cada", 200), " canciones (0: no)"])),
       el("div", { class: "acts" },
+        el("button", { type: "button", class: a.azar ? "on" : "", "aria-pressed": String(!!a.azar),
+                       title: a.azar ? "Al azar: suena en momentos impredecibles (tocá para volver a horarios fijos)" : "Programarlo al azar: suena cuando le da la gana, en promedio cada tanto",
+                       onclick: () => llamar("/api/voz-anuncio-editar", { id: a.id, azar: !a.azar }) }, "🎲"),
         el("button", { type: "button", class: a.activo ? "on" : "", "aria-pressed": String(a.activo), title: a.activo ? "Se repite: tocá para pausarlo" : "Pausado: tocá para que se repita",
                        onclick: () => llamar("/api/voz-anuncio-editar", { id: a.id, activo: !a.activo }) }, a.activo ? "↻" : "⏸"),
         el("button", { type: "button", title: "Probarlo ahora", disabled: !!datos.suena, onclick: () => llamar("/api/voz-anuncio-sonar", { id: a.id }) }, "▶"),

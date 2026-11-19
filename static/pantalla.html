@@ -220,7 +220,8 @@ function render() {
 
   if (s.now) {
     const st = $("#status");
-    if (s.loading) { st.textContent = "⏳ CARGANDO…"; st.className = "status loading"; }
+    if (s.voice) { st.textContent = s.voice.mic ? "🎙️ HABLANDO EN VIVO" : `📢 ANUNCIO: ${s.voice.anuncio}`; st.className = "status loading"; }
+    else if (s.loading) { st.textContent = "⏳ CARGANDO…"; st.className = "status loading"; }
     else if (s.progress.playing) { st.textContent = "▶ SONANDO AHORA"; st.className = "status"; }
     else { st.textContent = "⏸ EN PAUSA"; st.className = "status paused"; }
     $("#title").textContent = s.now.title;

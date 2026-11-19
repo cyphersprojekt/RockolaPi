@@ -1525,6 +1525,8 @@ def public_state(sala, client=None, since=None, radio=False):
             "savingOthers": sum(not g["error"] and sala.id not in g["salas"] for g in state["saving"]),
             "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
             "online": state["online"],           # si la rockola tiene internet (el led)
+            # Un anuncio o el micrófono en el aire (sólo en la sala del parlante): {"mic", "anuncio"}, o None
+            "voice": (lambda v: v if v["mic"] or v["anuncio"] else None)(voz.en_el_aire()) if voz and sala.principal else None,
             "weather": state["weather"],         # el clima, para la barra de arriba
         }
 

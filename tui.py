@@ -432,7 +432,10 @@ class Rockola(App):
             t.append("\ny pedí un tema.", style="dim")
             info.update(t)
             return
-        if s.get("loading"):
+        v = s.get("voice")
+        if v:   # un anuncio o el micrófono en el aire: ocupa el lugar de «sonando ahora»
+            estado, estilo = ("🎙️ HABLANDO EN VIVO" if v.get("mic") else f"📢 ANUNCIO: {v.get('anuncio')}"), "bold yellow"
+        elif s.get("loading"):
             estado, estilo = "⏳ CARGANDO…", "bold yellow"
         elif p.get("playing"):
             estado, estilo = "▶ SONANDO AHORA", "bold green"

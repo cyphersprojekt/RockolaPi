@@ -298,7 +298,9 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
     música más baja (a un cuarto) hasta que cerrás; si dejan de llegar datos, se cierra solo.
   - **Anuncios:** **⏺ grabar un anuncio** (o **＋ subir audios**: mp3, m4a, ogg, wav… hasta 30 MB cada uno, de a varios; también sirve el audio de un video) y elegís **cada X minutos**
     y/o **cada X canciones**; se repite solo, encima de la música (que baja un rato). Cada uno
-    se puede pausar (↻/⏸), probar (▶) o borrar (🗑). Quedan en `~/.cache/rockola/anuncios`.
+    se puede pausar (↻/⏸), probar (▶) o borrar (🗑), o pasar a **🎲 al azar**: suena en momentos
+    impredecibles, en promedio cada X minutos (puede sonar dos veces seguidas o tardar una hora:
+    ideal para memes y sustos). Quedan en `~/.cache/rockola/anuncios`.
   Los navegadores sólo dejan usar el micrófono en páginas **https**, así que la rockola abre un
   segundo puerto (`https_puerto`, 8443) con un certificado propio, que se hace solo con openssl.
   Los demás entran por `http://` como siempre y no ven ninguna advertencia: el panel, por http,
