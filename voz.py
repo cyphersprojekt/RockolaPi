@@ -19,7 +19,10 @@ import json
 import os
 import random
 import re
+import shutil
+import socket
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -77,6 +80,130 @@ def certificado(carpeta, ip):
     return cert, clave
 
 
+def _morir_con_el_padre():
+    """Que mpv reciba SIGTERM si el servidor muere (no quedan mpv huérfanos)."""
+    try:
+        import ctypes
+        import signal
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)   # PR_SET_PDEATHSIG
+    except Exception:
+        pass
+
+
+class MpvFijo:
+    """Un mpv que queda siempre levantado, en espera (`--idle`), sólo para los anuncios del parlante. Levantar
+    uno por anuncio tarda unos segundos en una Raspberry; con este, cargar el audio es cosa de décimas.
+    Se maneja por IPC, de a un anuncio por vez (`lock`). Si se cae, el próximo `cargar` lo levanta."""
+
+    def __init__(self, lanzar, mpv, args_mpv):
+        self.lanzar, self.mpv, self.args = lanzar, mpv, list(args_mpv)
+        self.lock = threading.Lock()
+        self.proc = self.sock = self.dir = None
+        self.buf = b""
+        self.ids = 0
+
+    def _vivo(self):
+        return self.proc is not None and self.proc.poll() is None and self.sock is not None
+
+    def asegurar(self, limite=15):
+        """Lo levanta si no está (con el lock tomado, o desde el arranque)."""
+        if self._vivo():
+            return
+        self.cerrar()
+        self.dir = tempfile.mkdtemp(prefix="rockola-voz-")
+        ruta = os.path.join(self.dir, "ipc")
+        self.proc = self.lanzar([self.mpv, "--idle=yes", "--no-config", "--no-video", "--really-quiet", "--force-window=no",
+                                 "--audio-display=no", "--ytdl=no", "--input-terminal=no", *self.args,
+                                 f"--input-ipc-server={ruta}"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, preexec_fn=_morir_con_el_padre)
+        fin = time.monotonic() + limite
+        while True:
+            if self.proc.poll() is not None:
+                raise OSError("el mpv de voz se cerró al arrancar")
+            try:
+                c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                c.connect(ruta)
+                break
+            except OSError:
+                c.close()
+                if time.monotonic() > fin:
+                    raise OSError("el mpv de voz no abrió el socket")
+                time.sleep(0.05)
+        c.settimeout(1)
+        self.sock, self.buf = c, b""
+
+    def cerrar(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.sock = None
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+        self.proc = None
+        if self.dir:
+            shutil.rmtree(self.dir, ignore_errors=True)
+            self.dir = None
+
+    def _enviar(self, *comando):
+        self.ids += 1
+        self.sock.sendall(json.dumps({"command": list(comando), "request_id": self.ids}).encode() + b"\n")
+
+    def _esperar(self, evento, limite):
+        """Lee lo que manda mpv hasta que llega `evento` (con cuenta de lo que pasa en el medio: un end-file
+        con error corta). Devuelve el mensaje."""
+        fin = time.monotonic() + limite
+        while True:
+            while b"\n" in self.buf:
+                linea, self.buf = self.buf.split(b"\n", 1)
+                try:
+                    m = json.loads(linea)
+                except ValueError:
+                    continue
+                if m.get("event") == evento:
+                    return m
+                if m.get("event") == "end-file" and m.get("reason") in ("error", "unknown"):
+                    raise OSError(f"mpv no pudo con el audio ({m.get('file_error') or m.get('reason')})")
+            if time.monotonic() > fin:
+                raise TimeoutError(evento)
+            if self.proc.poll() is not None:
+                raise OSError("el mpv de voz se cayó")
+            try:
+                trozo = self.sock.recv(65536)
+            except TimeoutError:
+                continue
+            if not trozo:
+                raise OSError("el mpv de voz cerró el socket")
+            self.buf += trozo
+
+    def cargar(self, ruta, limite=20):
+        """Carga el audio y lo deja en pausa, listo para sonar. Con el lock tomado."""
+        self.asegurar()
+        self.sock.setblocking(False)   # (se tira lo que haya quedado de antes)
+        try:
+            while self.sock.recv(65536):
+                pass
+        except (BlockingIOError, OSError):
+            pass
+        self.sock.settimeout(1)
+        self.buf = b""
+        self._enviar("set_property", "pause", True)
+        self._enviar("loadfile", str(ruta), "replace")
+        self._esperar("file-loaded", limite)
+
+    def sonar(self, limite=300):
+        """Lo hace sonar y espera a que termine."""
+        self._enviar("set_property", "pause", False)
+        self._esperar("end-file", limite)
+
+    def parar(self):
+        try:
+            self._enviar("stop")
+        except (OSError, AttributeError):
+            pass
+
+
 class ErrorVoz(Exception):
     def __init__(self, code, msg):
         super().__init__(msg)
@@ -109,6 +236,8 @@ class Voz:
                     self.anuncios[a["id"]] = a
             except (OSError, ValueError, KeyError, TypeError):
                 pass
+        self.fijo = MpvFijo(lanzar, mpv, self.args_mpv)
+        threading.Thread(target=self._calentar, daemon=True, name="voz-mpv").start()   # (así el primero ya sale rápido)
         threading.Thread(target=self._bucle, daemon=True, name="voz").start()
 
     # --- lo que ven las páginas
@@ -274,18 +403,134 @@ class Voz:
         except (OSError, ValueError, subprocess.SubprocessError):
             return 30.0
 
+    def _calentar(self):
+        with self.fijo.lock:
+            try:
+                self.fijo.asegurar()
+            except Exception as e:
+                print(f"  ⚠ no pude dejar levantado el mpv de los anuncios ({e!r}): se levanta uno por anuncio", flush=True)
+
+    def _tocar_en_parlante(self, sala, a):
+        """Lo toca en el parlante, con el mpv que queda levantado: se carga el audio (la música sigue igual),
+        y recién cuando está listo baja la música y suena. Si ese mpv no anda, uno por anuncio."""
+        with self.fijo.lock:
+            try:
+                self.fijo.cargar(self.carpeta / a["archivo"])
+            except Exception as e:
+                print(f"  ⚠ el mpv fijo de los anuncios no anduvo ({e!r}): lo paso con uno nuevo", flush=True)
+                self.fijo.cerrar()
+                return self._tocar_lanzando(sala, a)
+            self._subir(+1)   # (cargado: ahora sí baja la música)
+            try:
+                with self.lock:
+                    if sala in self.suena:
+                        self.suena[sala]["desde"] = time.monotonic()   # (la radio se alinea con cuando suena de verdad)
+                self.fijo.sonar()
+            except Exception as e:
+                print(f"  ⚠ no pude pasar el anuncio: {e!r}", flush=True)
+                self.fijo.cerrar()   # (si quedó a medias, mejor uno limpio)
+            finally:
+                self.fijo.parar()
+                self._subir(-1)
+
+    def _tocar_lanzando(self, sala, a):
+        """Lo toca en el parlante. mpv tarda unos segundos en arrancar (en una Raspberry más), y la música no
+        tiene que bajar durante ese rato: se lo levanta con el audio cargado y en pausa, y recién cuando está
+        listo baja la música y suena (con `desde`, el momento en que suena de verdad, se alinea la radio).
+        Si no se puede por IPC, se hace como antes: bajar la música y que mpv suene solo. Al terminar
+        vuelve a subir la música."""
+        ruta = str(self.carpeta / a["archivo"])
+        base = [self.mpv, "--no-config", "--no-video", "--really-quiet", *self.args_mpv]
+        directorio = tempfile.mkdtemp(prefix="rockola-voz-")
+        p = None
+        try:
+            sock = os.path.join(directorio, "ipc")
+            p = self.lanzar([*base, "--pause", f"--input-ipc-server={sock}", ruta], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ipc = self._ipc_listo(p, sock)
+            if ipc is None:
+                raise OSError("mpv no quedó listo")
+        except Exception as e:   # (sin IPC: el camino de siempre)
+            print(f"  ⚠ el anuncio sin mpv pausado ({e!r}): lo paso de la forma simple", flush=True)
+            if p and p.poll() is None:
+                p.kill()
+            shutil.rmtree(directorio, ignore_errors=True)
+            self._subir(+1)
+            try:
+                p = self.lanzar([*base, ruta], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._esperar(p)
+            finally:
+                self._subir(-1)
+            return
+        self._subir(+1)   # (listo para sonar: ahora sí baja la música)
+        try:
+            try:
+                ipc.sendall(b'{"command":["set_property","pause",false]}\n')
+            except OSError:
+                pass
+            with self.lock:
+                if sala in self.suena:
+                    self.suena[sala]["desde"] = time.monotonic()
+            self._esperar(p)
+        finally:
+            try:
+                ipc.close()
+            except OSError:
+                pass
+            if p.poll() is None:
+                p.kill()
+            shutil.rmtree(directorio, ignore_errors=True)
+            self._subir(-1)
+
+    @staticmethod
+    def _esperar(p):
+        try:
+            p.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+    @staticmethod
+    def _ipc_listo(p, sock, limite=20):
+        """Se conecta al socket de ese mpv y espera a que tenga el audio cargado (ya sabe cuánto dura).
+        Devuelve el socket, o None si mpv se cerró o no llegó a tiempo."""
+        fin = time.monotonic() + limite
+        c = None
+        while time.monotonic() < fin:
+            if p.poll() is not None:
+                return None
+            if c is None:
+                try:
+                    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    c.settimeout(2)
+                    c.connect(sock)
+                except OSError:
+                    c.close() if c else None
+                    c = None
+                    time.sleep(0.05)
+                    continue
+            try:
+                c.sendall(b'{"command":["get_property","duration"],"request_id":7}\n')
+                datos = b""
+                while b"\n" not in datos or b'"request_id":7' not in datos:
+                    trozo = c.recv(4096)
+                    if not trozo or time.monotonic() > fin:   # (mpv se cerró, o se acabó el tiempo)
+                        return None
+                    datos += trozo
+                if b'"error":"success"' in datos:
+                    return c
+            except (OSError, ValueError):
+                c.close()
+                c = None
+            time.sleep(0.05)
+        if c:
+            c.close()
+        return None
+
     def _sonar(self, sala, a):
         parlante = sala == self.principal
         try:
             if parlante:
-                self._subir(+1)
-                p = self.lanzar([self.mpv, "--no-config", "--no-video", "--really-quiet", *self.args_mpv,
-                                 str(self.carpeta / a["archivo"])], stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                try:
-                    p.wait(timeout=300)
-                except subprocess.TimeoutExpired:
-                    p.kill()
+                self._tocar_en_parlante(sala, a)
             else:   # sin parlante: sólo lo oye la radio, que lo baja; acá se espera lo que dura
                 dur = self.duracion_de(self.carpeta / a["archivo"])
                 with self.lock:
@@ -303,8 +548,6 @@ class Voz:
                 except OSError:
                     pass
                 self.suena.pop(sala, None)
-            if parlante:
-                self._subir(-1)
             self.al_cambiar(sala)
 
     def _subir(self, delta):

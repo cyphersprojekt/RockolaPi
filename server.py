@@ -1625,12 +1625,12 @@ def pagina(name):
     with _paginas_lock:
         hay = _paginas.get(name)
         if hay and hay[0] == cuando:
-            return hay[1], hay[2]
+            return hay[1], hay[2], f'"{cuando:x}"'
     data = ruta.read_bytes()
     gz = gzip.compress(data, compresslevel=9)
     with _paginas_lock:
         _paginas[name] = (cuando, data, gz)
-    return data, gz
+    return data, gz, f'"{cuando:x}"'   # (el ETag cambia con el archivo: ver send_page)
 
 
 class ApiError(Exception):
@@ -3474,7 +3474,7 @@ class Handler(BaseHTTPRequestHandler):
     def acepta_gzip(self):
         return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
 
-    def send_bytes(self, data, ctype, code=200, cache=False, gz=None):
+    def send_bytes(self, data, ctype, code=200, cache=False, gz=None, etag=None):
         """`cache`: False, que el navegador no lo guarde (lo de siempre); True, que decida él; un
         número, que lo guarde esos segundos sin volver a preguntar.
         `gz`: lo mismo ya comprimido (las páginas, ver pagina). Si no, lo que es texto y pesa
@@ -3492,7 +3492,10 @@ class Handler(BaseHTTPRequestHandler):
         if comprimido:
             self.send_header("Content-Encoding", "gzip")
         self.send_header("Vary", "Accept-Encoding")
-        if not cache:
+        if etag:   # (una página: se guarda y se pregunta cada vez si cambió)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+        elif not cache:
             self.send_header("Cache-Control", "no-store")
         elif cache is not True:   # (segundos: algo que no cambia nunca, como la letra)
             self.send_header("Cache-Control", f"public, max-age={int(cache)}, immutable")
@@ -3506,8 +3509,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(texto.encode(), "application/json; charset=utf-8", code)
 
     def send_page(self, name):
-        data, gz = pagina(name)
-        self.send_bytes(data, "text/html; charset=utf-8", gz=gz)
+        """Una página de static/. El navegador la guarda, pero antes de usarla pregunta si cambió (ETag +
+        no-cache): si no cambió, contesta 304 sin mandar nada; si cambió (la copiaron nueva), la baja
+        sola, sin Ctrl+F5."""
+        data, gz, etag = pagina(name)
+        gzip_ok = self.acepta_gzip()
+        etag = etag[:-1] + ('-gz"' if gzip_ok else '"')   # (comprimida o no, no es el mismo cuerpo)
+        if etag in [e.strip() for e in (self.headers.get("If-None-Match") or "").split(",")]:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.send_bytes(data, "text/html; charset=utf-8", gz=gz, etag=etag)
 
     def send_audio(self, ruta, tipo=None):
         """Un archivo de audio, entero o el pedazo que diga Range: así el navegador puede
