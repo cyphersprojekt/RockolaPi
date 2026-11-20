@@ -102,6 +102,7 @@ state = {
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
     "sin_red": False,  # no hay internet: las de "saving" esperan a que vuelva (ver bucle_guardar)
     "online": None,    # si hay internet (ver bucle_internet): el led de las páginas y de la pantalla. None: todavía no se sabe
+    "cpu_temp": None,  # la temperatura del procesador en °C (ver bucle_temperatura), o None si esta máquina no la da
     "weather": None,   # el clima (ver bucle_clima): { temp, text, icon, symbol, city }, o None si no se sabe
 }
 REACCIONES = ("🔥", "❤️", "😴")   # con las que se reacciona a la que suena
@@ -1588,6 +1589,7 @@ def public_state(sala, client=None, since=None, radio=False):
             # Un anuncio o el micrófono en el aire (sólo en la sala del parlante): {"mic", "anuncio"}, o None
             "voice": (lambda v: v if v["mic"] or v["anuncio"] else None)(voz.en_el_aire(sala.id)) if voz else None,
             "weather": state["weather"],         # el clima, para la barra de arriba
+            "cpu_temp": state["cpu_temp"],       # la temperatura del procesador, junto al clima
         }
 
 
@@ -1796,6 +1798,34 @@ def bucle_clima(cada=600, reintento=60, vence=2 * 3600):
                 state["weather"] = nuevo
                 bump()
         time.sleep(espera)
+
+
+# ------------------------------------------------------------ temperatura del procesador
+# Junto al led y al clima. Se lee del sistema (en la Raspberry, /sys/class/thermal): sin ese archivo
+# (otra máquina) no se muestra nada. Pasados los 80 °C la Pi empieza a bajar la velocidad.
+ARCHIVO_TEMP = Path("/sys/class/thermal/thermal_zone0/temp")
+
+
+def leer_temperatura():
+    """Los °C del procesador, redondeados, o None si no se pueden leer."""
+    try:
+        return round(int(ARCHIVO_TEMP.read_text()) / 1000)
+    except (OSError, ValueError):
+        return None
+
+
+def bucle_temperatura(cada=10):
+    """Mira la temperatura cada `cada` segundos y la deja en state["cpu_temp"] (avisa sólo cuando cambia
+    el grado). Si esta máquina no la da, termina."""
+    if leer_temperatura() is None:
+        return
+    while True:
+        t = leer_temperatura()
+        with lock:
+            if t != state["cpu_temp"]:
+                state["cpu_temp"] = t
+                bump()
+        time.sleep(cada)
 
 
 def _se_guarda():
@@ -3979,6 +4009,7 @@ def main():
     threading.Thread(target=bucle_internet, daemon=True, name="internet").start()
     if CLIMA is not False:
         threading.Thread(target=bucle_clima, daemon=True, name="clima").start()
+        threading.Thread(target=bucle_temperatura, daemon=True, name="temperatura").start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     if HTTPS_PORT and modo == "mpv":

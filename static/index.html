@@ -135,7 +135,9 @@
   @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
   /* El clima, después del led: lo que mida (o nada, si no se sabe) se lo lleva el hueco que
      separa esto de lo de la derecha, así que no mueve la barra. */
-  .clima { margin-right: auto; color: var(--dim); white-space: nowrap; cursor: default; }
+  .clima, .cpu { color: var(--dim); white-space: nowrap; cursor: default; }
+  .barra-datos { display: flex; align-items: center; gap: 1.2ch; margin-right: auto; }
+  .cpu.caliente { color: var(--red); }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
   /* Los cuatro botones de la barra (📻 radio, 📊 recap, ⬇ descargas, 🔒 controlar): sólo el ícono,
@@ -476,7 +478,7 @@
 <div class="top">
   <span class="logo">♫ ROCKOLA</span>
   <span class="led" id="led" role="img" aria-label="Conectando con la rockola…" title="Conectando con la rockola…"></span>
-  <span class="clima" id="clima"></span>
+  <span class="barra-datos"><span class="clima" id="clima"></span><span class="cpu" id="cpu"></span></span>
   <div class="salas"><span class="largo" aria-hidden="true">sala:</span>
     <div class="selector">
       <button type="button" id="salaBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="salaMenu"
@@ -1264,6 +1266,7 @@ function render(s) {
   pintarSalas(s);
   pintarLed(s.online ?? null);
   pintarClima(s.weather);
+  pintarCpu(s.cpu_temp);
   // Los avisos de la rockola (una canción salteada, por votos o porque no se pudo bajar; el
   // crossfade que se apagó…): los que llegan con la página abierta se muestran abajo.
   if (s.notice && avisoVisto !== null && s.notice.id !== avisoVisto) toast(s.notice.text, true);
@@ -1885,6 +1888,15 @@ function pintarClima(w) {
   if (c.textContent === texto && c.title === detalle) return;
   c.textContent = texto; c.title = detalle;
   if (w) c.setAttribute("aria-label", `El clima: ${detalle}`); else c.removeAttribute("aria-label");
+}
+
+// La temperatura del procesador de la rockola, después del clima (sin dato —otra máquina—: nada). En rojo desde los 70 °C.
+function pintarCpu(t) {
+  const c = $("#cpu");
+  const texto = typeof t === "number" ? `🌡️ ${t}°` : "", detalle = typeof t === "number" ? `Procesador de la rockola: ${t} °C` : "";
+  if (c.textContent === texto && c.title === detalle) return;
+  c.textContent = texto; c.title = detalle;
+  c.classList.toggle("caliente", typeof t === "number" && t >= 70);
 }
 
 // El led de la barra: si la rockola tiene internet. `online` viene con cada estado (true, false

@@ -383,11 +383,20 @@ class Rockola(App):
             t.append("   (modo navegador: pausa y volumen desde /player)", style="dim")
         elif self.estado and self.estado.get("shuffle"):
             t.append("   🔀 al azar", style=f"bold {self.acento}")
-        # A la derecha, el clima (lo trae la rockola): «☁ 18° nublado», o lo que entre.
+        # A la derecha, el clima (lo trae la rockola): «☁ 18° nublado», y la temperatura del procesador
+        # («CPU 52°», en rojo desde los 70), o lo que entre.
         w = (self.estado or {}).get("weather") if self.conectado else None
-        if w:
-            for clima in (Text.assemble((f"{w['symbol']} {w['temp']}°", "bold"), (f" {w['text']}", "dim")),
-                          Text(f"{w['symbol']} {w['temp']}°", style="bold")):
+        cpu = (self.estado or {}).get("cpu_temp") if self.conectado else None
+        cpu = cpu if isinstance(cpu, (int, float)) else None
+        parte_cpu = Text.assemble(("CPU ", "dim"), (f"{cpu}°", "bold red" if cpu >= 70 else "bold")) if cpu is not None else None
+        if w or parte_cpu:
+            # De lo más completo a lo más corto: lo primero que entra.
+            climas = [Text.assemble((f"{w['symbol']} {w['temp']}°", "bold"), (f" {w['text']}", "dim")),
+                      Text(f"{w['symbol']} {w['temp']}°", style="bold")] if w else []
+            candidatos = [Text("  ").join([c, parte_cpu]) for c in climas] if parte_cpu else climas
+            if parte_cpu:
+                candidatos.append(parte_cpu)
+            for clima in candidatos:
                 libre = self.size.width - 2 - t.cell_len - clima.cell_len
                 if libre >= 2:
                     t.append(" " * libre)
