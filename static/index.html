@@ -1923,7 +1923,8 @@ async function loop() {
 // YouTube: sus álbumes (se tocan para ver sus temas; se cargan enteros o se ⬇ guardan) y sus
 // temas. Primero las guardadas. Enter busca en YouTube sin esperar.
 const MAX_SUGERIDAS = 10;
-const ESPERA_YOUTUBE = 600;   // ms sin escribir antes de buscar en YouTube
+const ESPERA_YOUTUBE = 300;   // ms sin escribir antes de buscar en YouTube
+const ESPERA_ALBUMES = 350;   // ms que se les da a los álbumes, después de los temas, para salir juntos
 let sugeridas = { q: "", items: [], total: 0 }, sugeridasPedido = 0, sugerirTimer = null;
 let busqueda = null, busquedaPedido = 0;   // la última de YouTube: null, { q, aviso } o { q, res, discos }
 let buscandoYT = null, youtubeTimer = null;   // el texto que se va a buscar (o se está buscando) en YouTube
@@ -2001,7 +2002,8 @@ function pintarResultados() {
   const nada = yt?.res && !buscandoYT && !locales.length && !deYT.length && !discos.length && !pl;
   const arriba = [...(pl ? [tarjetaPlaylist()] : []),
                   el("div", { class: "hint" }, nada ? "No encontré nada con eso." : partes.join(" · "))];
-  pintarLista(box, [...locales.map(s => ({ ...s, saved: true })), ...discos, ...deYT],
+  const lista = yt?.tarde ? [...deYT, ...discos] : [...discos, ...deYT];   // (álbumes que llegaron tarde: al final)
+  pintarLista(box, [...locales.map(s => ({ ...s, saved: true })), ...lista],
               it => it.browseId ? filaDisco(it) : filaResultado(it),
               { arriba, pag: pagResultados, nombre: "Páginas de los resultados", alCambiar: pintarResultados });
 }
@@ -2267,13 +2269,21 @@ async function buscarEnYouTube(q) {
     ? api(`/api/playlist?q=${encodeURIComponent(q)}`).then(info => ({ q, info }), err => ({ q, error: err.message }))
     : null;
   // Los álbumes, a la par. Si eso falla, igual se ven los temas.
-  const discos = !esLink(q) ? api(`/api/albums?q=${encodeURIComponent(q)}`).catch(() => []) : [];
+  const discos = !esLink(q) ? api(`/api/albums?q=${encodeURIComponent(q)}`).catch(() => []) : Promise.resolve([]);
   try {
     const res = await api(`/api/search?q=${encodeURIComponent(q)}`);
     const lista = pl ? await pl : null;
-    const albumes = await discos;
+    // Los temas no esperan a los álbumes: sólo un ratito (si llegan juntos, salen en su lugar de siempre, arriba).
+    // Si tardan más, los temas se ven ya y los álbumes se suman al final cuando llegan (así nada de lo que se ve salta).
+    const pronto = await Promise.race([discos, new Promise(r => setTimeout(r, ESPERA_ALBUMES, null))]);
     if (pedido !== busquedaPedido) return;   // mientras tanto escribieron otra cosa o limpiaron
-    busqueda = { q, res, discos: albumes }; playlistVista = lista;
+    busqueda = { q, res, discos: pronto || [], tarde: pronto === null }; playlistVista = lista;
+    if (pronto === null) {
+      buscandoYT = null; pagResultados.pagina = 0; pintarResultados();
+      const albumes = await discos;
+      if (pedido !== busquedaPedido) return;
+      busqueda = { ...busqueda, discos: albumes };
+    }
   } catch (err) {
     if (pedido !== busquedaPedido) return;
     busqueda = { q, aviso: "⚠ " + err.message }; playlistVista = null;

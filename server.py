@@ -164,7 +164,6 @@ letras_guardadas = None   # Letras: las copias de las letras de las canciones gu
 videos = {}            # videoId -> datos de un video (de lo que se buscó para una sala de tv)
 fallos_pin = {}        # ip -> (intentos fallidos, bloqueado hasta)
 
-_local = threading.local()
 
 
 def cargar_config(ruta):
@@ -661,11 +660,58 @@ def retomar_colas(en_pausa=False):
 
 # ------------------------------------------------------------- YouTube Music
 
+class _PozoYT:
+    """Unas pocas sesiones de YTMusic que se reutilizan. requests.Session no es thread-safe, así que cada
+    llamada toma una para ella sola y la devuelve al terminar. (Antes había una por hilo, pero el servidor
+    hace un hilo por pedido: cada búsqueda armaba una sesión nueva y un handshake TLS nuevo con YouTube.)"""
+    MAX = 4
+
+    def __init__(self):
+        self.libres = []
+        self.lock = threading.Lock()
+
+    def __getattr__(self, nombre):
+        def llamar(*a, **kw):
+            with self.lock:
+                api = self.libres.pop() if self.libres else None   # (la última que se usó: la más "caliente")
+            if api is None:
+                api = YTMusic()
+            try:
+                return getattr(api, nombre)(*a, **kw)
+            finally:
+                with self.lock:
+                    if len(self.libres) < self.MAX:
+                        self.libres.append(api)
+        return llamar
+
+
+_pozo_yt = _PozoYT()
+
+
 def yt():
-    # Una instancia por hilo: requests.Session no es thread-safe.
-    if not hasattr(_local, "yt"):
-        _local.yt = YTMusic()
-    return _local.yt
+    return _pozo_yt
+
+
+_busquedas = {}              # (qué, texto) -> (cuándo, resultado): las últimas búsquedas, un rato
+_busquedas_lock = threading.Lock()
+BUSQUEDA_VALE, BUSQUEDAS_MAX = 120, 64   # segundos que vale una búsqueda repetida, y cuántas se recuerdan
+
+
+def _recordada(que, q, buscar):
+    """`buscar(q)`, pero si hace poco se buscó lo mismo (borrar una letra, volver a escribirla) se
+    contesta al toque, sin ir a YouTube. Devuelve copias: quien llama puede tocarlas."""
+    clave, ahora = (que, " ".join(q.casefold().split())), time.monotonic()
+    with _busquedas_lock:
+        hay = _busquedas.get(clave)
+    if hay and ahora - hay[0] < BUSQUEDA_VALE:
+        return [dict(x) for x in hay[1]]
+    res = buscar(q)
+    with _busquedas_lock:
+        if len(_busquedas) >= BUSQUEDAS_MAX:
+            for k in sorted(_busquedas, key=lambda k: _busquedas[k][0])[:BUSQUEDAS_MAX // 4]:
+                del _busquedas[k]
+        _busquedas[clave] = (ahora, res)
+    return [dict(x) for x in res]
 
 
 def _thumb(thumbs):
@@ -962,6 +1008,10 @@ def lookup(video_id, fresh=False):
 
 
 def search(q):
+    return _recordada("temas", q, _search)
+
+
+def _search(q):
     m = URL_ID.search(q)
     if m:  # pegaron un link de YouTube / YouTube Music
         found = lookup(m.group(1))
@@ -987,6 +1037,10 @@ TIPOS_DE_DISCO = {"album": "Álbum", "ep": "EP"}
 
 
 def buscar_albumes(q):
+    return _recordada("albumes", q, _buscar_albumes)
+
+
+def _buscar_albumes(q):
     """Los álbumes de YouTube Music que coinciden con lo buscado, para guardarlos enteros (⬇).
 
     Sólo los que tienen todas las palabras buscadas en el nombre o en el artista: buscando un
