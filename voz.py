@@ -5,7 +5,8 @@
   habilita el micrófono sólo ahí: quien entra por http:// no ve ninguna advertencia, y quien
   quiere hablar toca un botón que lo lleva al https://.
 - **Anuncios** (`Voz.anuncio_*`): audios que se graban en la página (o se suben), con "cada X
-  minutos" y/o "cada X canciones". Suenan encima de la música, que baja de volumen mientras tanto.
+  minutos" y/o "cada X canciones", al azar, o a horas fijas ("14:00", o "*:00" = al minuto 0 de cada
+  hora). Suenan encima de la música, que baja de volumen mientras tanto.
 - **Micrófono abierto** (`Voz.mic_*`): la página manda el audio en pedacitos (MediaRecorder) y
   un mpv aparte lo toca en vivo, con la música más baja. Se cierra solo si dejan de llegar.
 
@@ -32,6 +33,27 @@ MAX_PEDAZOS = 4000                # pedazos de micrófono que se recuerdan para 
 PASO = 2                          # segundos entre una mirada y otra a los anuncios (ver _bucle)
 MIC_VENCE = 6                     # segundos sin recibir nada: se cierra el micrófono
 ID = re.compile(r"[0-9a-f]{10}")
+MAX_HORARIOS = 48
+
+
+def horarios(texto):
+    """De lo que se escribe ("14, 18:30, *:00, :15") a la lista normalizada de "HH:MM" (todos los días a esa
+    hora) y "*:MM" (al minuto MM de cada hora). "14" es 14:00; ":00" o "*:00", al minuto 0 de cada hora.
+    Lo que no se entiende se ignora."""
+    if isinstance(texto, (list, tuple)):
+        texto = ",".join(map(str, texto))
+    salida = []
+    for t in re.split(r"[\s,;]+", str(texto or "")):
+        m = re.fullmatch(r"(\d{1,2}|\*)?(?:[:.h](\d{1,2}))?", t.strip().lower().replace("hs", ""))
+        if not t or not m or not (m[1] or m[2] is not None):
+            continue
+        h, mi = m[1], int(m[2] or 0)
+        if mi > 59 or (h not in (None, "*") and int(h) > 23):
+            continue
+        h = "*" if h in (None, "*") else f"{int(h):02d}"
+        if f"{h}:{mi:02d}" not in salida:
+            salida.append(f"{h}:{mi:02d}")
+    return sorted(salida)[:MAX_HORARIOS]
 
 
 def certificado(carpeta, ip):
@@ -77,6 +99,7 @@ class Voz:
         self.mic = {}              # sala -> {"proc" (o None, sin parlante), "visto", "init", "pedazos", "seq", "cond"}
         self.canciones = {}        # sala -> canciones empezadas (para los "cada X canciones")
         self.suena = {}            # sala -> {"id", "desde", "dur"}
+        self.pasado = {}           # anuncio -> el minuto ("AAAA-MM-DD HH:MM") en que ya sonó a horario (para que no suene dos veces)
         self.duracion_de = self._duracion   # (se cambia en las pruebas)
         for js in self.carpeta.glob("*.json"):
             try:
@@ -163,7 +186,7 @@ class Voz:
             (self.carpeta / archivo).write_bytes(data)
             a = {"id": aid, "sala": sala, "archivo": archivo, "nombre": " ".join(str(nombre or "").split())[:60] or "Anuncio",
                  "cada_min": self._num(cada_min, 24 * 60), "cada_canciones": self._num(cada_canciones, 200),
-                 "activo": True, "azar": False, "creado": time.time(), "ultimo": time.time(),
+                 "activo": True, "azar": False, "programado": False, "horario": [], "creado": time.time(), "ultimo": time.time(),
                  "desde": self.canciones.get(sala, 0), "por": str(por)[:30]}
             self.anuncios[aid] = a
             self._escribir(a)
@@ -181,8 +204,18 @@ class Voz:
                 a["cada_canciones"] = self._num(cambios["cada_canciones"], 200)
             if "activo" in cambios:
                 a["activo"] = bool(cambios["activo"])
+            if "horario" in cambios:
+                a["horario"] = horarios(cambios["horario"])
+            if "programado" in cambios:
+                a["programado"] = bool(cambios["programado"])
+                if a["programado"]:
+                    a["azar"] = False
+                    if not a.get("horario"):
+                        a["horario"] = ["*:00"]   # (en punto, cada hora: se cambia después)
             if "azar" in cambios:
                 a["azar"] = bool(cambios["azar"])
+                if a["azar"]:
+                    a["programado"] = False
                 if a["azar"] and not a["cada_min"]:
                     a["cada_min"] = 30   # (en promedio, cada tanto: si no, nunca sonaría)
             a["ultimo"], a["desde"] = time.time(), self.canciones.get(sala, 0)   # (los "cada X" cuentan desde el cambio)
@@ -193,6 +226,7 @@ class Voz:
         with self.lock:
             a = self._de(sala, aid)
             del self.anuncios[aid]
+            self.pasado.pop(aid, None)
             for f in (a["archivo"], f"{aid}.json"):
                 (self.carpeta / f).unlink(missing_ok=True)
         self.al_cambiar(sala)
@@ -380,6 +414,16 @@ class Voz:
     def _toca(self, a):
         if not a["activo"]:
             return False
+        if a.get("programado"):
+            # A horas fijas: suena una vez en cada minuto que está en el horario (la vuelta es de 2 s, así que
+            # se anota el minuto). Si en ese minuto la sala estaba ocupada, se saltea hasta la próxima.
+            ahora = time.localtime()
+            minuto = time.strftime("%Y-%m-%d %H:%M", ahora)
+            if self.pasado.get(a["id"]) == minuto or not any(
+                    h in (f"{ahora.tm_hour:02d}:{ahora.tm_min:02d}", f"*:{ahora.tm_min:02d}") for h in a.get("horario", ())):
+                return False
+            self.pasado[a["id"]] = minuto
+            return True
         if a.get("azar"):
             # Al azar: `cada_min` es cada cuánto suena EN PROMEDIO. Se tira una moneda en cada vuelta
             # (cada 2 s) con la chance justa para eso: puede sonar dos veces seguidas o tardar una hora.

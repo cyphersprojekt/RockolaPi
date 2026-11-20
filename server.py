@@ -2196,16 +2196,16 @@ def play_now(sala, body):
 PREVISTAS = 3   # cuántas de las que vienen se muestran (con el aleatorio): lo que pidan va reemplazando a las primeras
 
 
-def rellenar_previstas(sala):
+def rellenar_previstas(sala, evitar=()):
     """Con el aleatorio prendido, la lista de próximas siempre muestra PREVISTAS temas: los que
     pidieron, y los que faltan para llegar a esa cantidad, ya elegidos al azar. Lo que piden
     reemplaza al primero elegido y deja los otros: [azar1, azar2, azar3] → [pedida, azar2, azar3].
     Cuando suena una pedida, se va también el elegido que había desplazado, y entra uno nuevo al
-    final. Llamar con el lock tomado."""
+    final. `evitar`: videoIds que no tienen que volver a salir (ver recargar_previstas). Llamar con el lock tomado."""
     if not (sala.shuffle and director):
         sala.previstas = []
         return
-    ocupadas = {i["videoId"] for i in sala.queue} | {p["videoId"] for p in sala.previstas}
+    ocupadas = {i["videoId"] for i in sala.queue} | {p["videoId"] for p in sala.previstas} | set(evitar)
     if sala.now:
         ocupadas.add(sala.now["videoId"])
     while len(sala.previstas) < PREVISTAS:
@@ -2214,6 +2214,19 @@ def rellenar_previstas(sala):
             break
         ocupadas.add(c["videoId"])
         sala.previstas.append(dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True))
+
+
+def recargar_previstas(sala):
+    """🔄 en las próximas: las elegidas al azar se cambian por otras (que no sean las de recién, si alcanzan las guardadas)."""
+    with lock:
+        if not (sala.shuffle and director):
+            raise ApiError(409, "Hace falta el aleatorio (🔀) prendido")
+        viejas = {p["videoId"] for p in sala.previstas}
+        sala.previstas = []
+        rellenar_previstas(sala, viejas)
+        if len(sala.previstas) < PREVISTAS:   # (pocas guardadas: se completa con lo que haya)
+            rellenar_previstas(sala)
+        bump(sala)
 
 
 def previstas_visibles(sala):
@@ -2590,11 +2603,13 @@ class Director:
         self.lock_otro = threading.Lock()   # (levantarlo o cerrarlo, de a uno)
         self.fundido = None                 # el crossfade en curso: {"sale": id, "entra": id}
         self.pausado = False
-        self.mpv = self._mpv(VOLUME)   # el que toca lo que suena
+        guardado = leer_ajustes().get("volumen")
+        inicial = round(max(0, min(130, guardado))) if isinstance(guardado, (int, float)) else VOLUME
+        self.mpv = self._mpv(inicial)   # el que toca lo que suena
         self.mpv.iniciar()             # (desde acá llegan sus avisos: lo de arriba ya tiene que estar)
         self.ultimo_error = None
         with lock:
-            state["volume"] = VOLUME
+            state["volume"] = inicial
 
     @property
     def principal(self):
@@ -2904,8 +2919,13 @@ class Director:
 
         p = self.principal
         sin_archivo = 0
+        guardado = state["volume"]   # el último volumen que quedó en ajustes.json
         while True:
             time.sleep(1)
+            v = state["volume"]
+            if v is not None and v != guardado and not getattr(self, "bajada", False):
+                guardado = v   # (se mira acá, de a uno por segundo: arrastrar la barra no escribe mil veces)
+                guardar_ajustes(volumen=v)
             mpv = self.mpv   # (uno solo en toda la vuelta: un crossfade los cambia de lugar)
             pedido = mpv.pedido
             if pedido is None:
@@ -3031,11 +3051,16 @@ class Director:
                 now = p.now
                 if self.pausado or not now or now["id"] != sale_id or self.mpv.pedido != sale_id:
                     return
-                sig = p.queue[0] if p.queue else cancion_al_azar(p)
+                # (la misma que elegiría advance: lo pedido, y si no, la primera de las que se mostraban como próximas)
+                sig = p.queue[0] if p.queue else p.previstas[0] if p.previstas else cancion_al_azar(p)
                 if sig is None or not self.descargas.lista(sig["videoId"]):
                     return
                 if p.queue:
                     p.queue.pop(0)
+                    if p.previstas:
+                        p.previstas.pop(0)
+                elif p.previstas:
+                    p.previstas.pop(0)
                 d = p.progress.get("d") or now["duration"]
                 largo = max(0.5, min(CROSSFADE + 1, d - progreso_ahora(p)["t"] - 0.25))
                 sale, entra = self.mpv, self.otro
@@ -3701,6 +3726,8 @@ class Handler(BaseHTTPRequestHandler):
                 set_shuffle(sala, body)
             elif path == "/api/shuffle-queue":
                 mezclar_cola(sala)
+            elif path == "/api/reroll":
+                recargar_previstas(sala)
             elif path == "/api/crossfade":
                 set_crossfade(sala, body)
             elif path == "/api/pause":

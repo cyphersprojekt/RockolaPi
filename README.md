@@ -292,6 +292,7 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
 - **Mezclar la cola:** con el PIN, **🔀 mezclar** arriba de las próximas. Las pone en otro orden al
   azar, una vez: lo que pidan después va al final, como siempre. Sirve, por ejemplo, después de
   cargar una playlist (ojo, que mezcla también los pedidos que ya estaban).
+  Con el aleatorio prendido, **🔄** (al lado) cambia las tres elegidas al azar por otras tres.
 - **🎙️ Voz** (con el PIN de la sala; **cada sala tiene lo suyo**: sus anuncios, su micrófono, sus
   «cada X canciones»): **🎙️** en la barra de arriba cambia la cola por
   la pestaña **VOZ**, como el recap o ⬇ descargas (apagado sin el PIN; su link es `/voz`), con dos cosas:
@@ -301,7 +302,10 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
     y/o **cada X canciones**; se repite solo, encima de la música (que baja un rato). Cada uno
     se puede pausar (↻/⏸), probar (▶) o borrar (🗑), o pasar a **🎲 al azar**: suena en momentos
     impredecibles, en promedio cada X minutos (puede sonar dos veces seguidas o tardar una hora:
-    ideal para memes y sustos). Quedan en `~/.cache/rockola/anuncios`.
+    ideal para memes y sustos), o a **🕐 horas fijas**: escribís `14:00, 18:30` (todos los días a esa
+    hora) o `*:00` (al minuto 0 de cada hora, «en punto»; `*:30` a y media), y suena sólo a esos
+    horarios (si en ese minuto la sala está ocupada con otro anuncio o el micrófono, espera al
+    próximo). Quedan en `~/.cache/rockola/anuncios`.
   Los navegadores sólo dejan usar el micrófono en páginas **https**, así que la rockola abre un
   segundo puerto (`https_puerto`, 8443) con un certificado propio, que se hace solo con openssl.
   Los demás entran por `http://` como siempre y no ven ninguna advertencia: el panel, por http,
@@ -440,7 +444,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 | `max_por_persona` | `3` | canciones pendientes por persona (y videos, en una sala de tv) |
 | `duracion_maxima` | `600` | segundos (0 = sin límite) |
 | `votos_para_saltear` | `3` | cuántas personas tienen que votar ⏭ para que la que suena se saltee sola (0 = no se vota) |
-| `volumen` | `80` | volumen inicial (0–130) |
+| `volumen` | `80` | volumen la primera vez (0–130); después queda el último que se dejó |
 | `normalizar` | `false` | iguala el volumen entre canciones |
 | `crossfade` | `6` | segundos que se pisan dos canciones con el 🎚️ crossfade prendido (se prende desde la web; 0 = no ofrecerlo) |
 | `modo` | automático | `mpv` o `navegador` |

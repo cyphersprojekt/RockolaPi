@@ -307,7 +307,7 @@
   @media (prefers-reduced-motion: reduce) { .filas.ordenando .fila { transition: none; } }
   .hint { color: var(--dim); margin-top: .7em; }
   .fila.playlist .t { color: var(--acc); font-weight: 700; }
-  .herr { display: flex; justify-content: flex-end; margin-bottom: .3em; }
+  .herr { display: flex; justify-content: flex-end; gap: .4em; margin-bottom: .3em; }
   .listas { margin-bottom: .5em; padding-bottom: .5em; border-bottom: 1px dashed var(--line); }
   .listas .fila { padding: .2em 0; }
   .listas .fila + .fila { border-top: 0; }
@@ -1438,9 +1438,12 @@ function botonVoto(it) {
 
 // Con el PIN y dos o más en la cola: 🔀 mezclar (una vez; lo que pidan después va al final).
 function herramientasCola(queue) {
-  if (!admin || queue.length < 2) return [];
+  const hayAzar = queue.some(i => i.azar);
+  if (!admin || (queue.length < 2 && !hayAzar)) return [];
   return [el("div", { class: "herr" },
-    el("button", { type: "button", title: "Poner la cola en otro orden, al azar (lo que pidan después va al final)",
+    hayAzar && el("button", { type: "button", "aria-label": "Cambiar las elegidas al azar", title: "Elegir otras tres canciones al azar",
+                              onclick: () => control("/api/reroll") }, "🔄"),
+    queue.length >= 2 && el("button", { type: "button", title: "Poner la cola en otro orden, al azar (lo que pidan después va al final)",
                    onclick: () => control("/api/shuffle-queue") }, "🔀 mezclar"))];
 }
 
@@ -3302,10 +3305,17 @@ const vozVista = (() => {
     const lista = datos.anuncios.map(a => el("div", { class: "fila" },
       el("div", { class: "info" },
         el("div", { class: "t", title: a.nombre }, a.nombre, datos.suena === a.id && " 🔊"),
-        el("div", { class: "sub" }, a.azar
+        el("div", { class: "sub" }, a.programado
+          ? ["🕐 a las ", el("input", { type: "text", value: (a.horario || []).join(", "), style: "width:18ch", maxlength: 200,
+              placeholder: "14:00, 18:30, *:00", title: "Horas (14, 18:30) o *:MM = al minuto MM de cada hora (*:00 = en punto)",
+              onchange: ev => llamar("/api/voz-anuncio-editar", { id: a.id, horario: ev.target.value }) })]
+          : a.azar
           ? ["🎲 al azar, en promedio cada ", numero(a, "cada_min", "", 1440), " min"]
           : [numero(a, "cada_min", "cada", 1440), " min · ", numero(a, "cada_canciones", "o cada", 200), " canciones (0: no)"])),
       el("div", { class: "acts" },
+        el("button", { type: "button", class: a.programado ? "on" : "", "aria-pressed": String(!!a.programado),
+                       title: a.programado ? "A horas fijas (tocá para volver a «cada X minutos»)" : "Programarlo a horas fijas: a las 14:00, o en punto cada hora (*:00)",
+                       onclick: () => llamar("/api/voz-anuncio-editar", { id: a.id, programado: !a.programado }) }, "🕐"),
         el("button", { type: "button", class: a.azar ? "on" : "", "aria-pressed": String(!!a.azar),
                        title: a.azar ? "Al azar: suena en momentos impredecibles (tocá para volver a horarios fijos)" : "Programarlo al azar: suena cuando le da la gana, en promedio cada tanto",
                        onclick: () => llamar("/api/voz-anuncio-editar", { id: a.id, azar: !a.azar }) }, "🎲"),
