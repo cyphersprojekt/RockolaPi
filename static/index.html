@@ -3649,7 +3649,19 @@ const vozRadio = (() => {
     for (const a of [audAnuncio, audMic]) { a.src = SILENCIO; a.play().then(() => a.pause()).catch(() => {}); }
   }
   const pausa = ms => new Promise(r => setTimeout(r, ms));
-  const bajarMusica = on => { audio.volume = on ? 0.25 : 1; };
+  let rampaAudio = null, metaAudio = 1;   // baja rápido y sube despacio, sin golpe
+  const bajarMusica = on => {
+    const meta = on ? 0.25 : 1;
+    if (metaAudio === meta) return;   // (se llama cada segundo: la rampa en marcha sigue)
+    metaAudio = meta;
+    clearInterval(rampaAudio);
+    const paso = (meta - audio.volume) / (on ? 5 : 20);   // cada 100 ms: medio segundo bajando, dos subiendo
+    rampaAudio = setInterval(() => {
+      const v = audio.volume + paso;
+      if ((paso < 0 && v <= meta) || (paso > 0 && v >= meta)) { audio.volume = meta; clearInterval(rampaAudio); rampaAudio = null; }
+      else audio.volume = v;
+    }, 100);
+  };
 
   function pararAnuncio() {
     if (aud) { aud.pause(); aud.removeAttribute("src"); aud.load(); aud = null; audId = null; }

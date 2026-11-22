@@ -3203,9 +3203,29 @@ class Director:
         volumen del estado no cambia: es el que se restaura."""
         self.bajada = bool(on)
         v = state["volume"] or 0
-        self.mpv.fijar_volumen(v * self.BAJA_MUSICA if on else v)
+        if self.fundiendo():   # (en pleno crossfade el volumen lo va poniendo fundir(): sin rampa propia)
+            return self.mpv.fijar_volumen(v * self.BAJA_MUSICA if on else v)
+        # Con rampa: baja rápido (así la voz se entiende enseguida) y sube despacio (sin golpe).
+        self._rampa_vol = n = getattr(self, "_rampa_vol", 0) + 1
+        mpv, hasta = self.mpv, v * self.BAJA_MUSICA if on else v
+        desde = v if on else v * self.BAJA_MUSICA
+        def correr():
+            pasos, seg = (8, 0.5) if on else (20, 2.0)
+            try:
+                for i in range(1, pasos + 1):
+                    if self._rampa_vol != n or self.fundiendo() or mpv is not self.mpv:
+                        return   # otro cambio de volumen (o de mpv) tomó el mando
+                    mpv.fijar_volumen(desde + (hasta - desde) * i / pasos)
+                    time.sleep(seg / pasos)
+            except Exception as e:
+                print(f"  ⚠ rampa de volumen: {e!r}", flush=True)
+        threading.Thread(target=correr, daemon=True, name="rampa-volumen").start()
+
+    def _cortar_rampa(self):
+        self._rampa_vol = getattr(self, "_rampa_vol", 0) + 1
 
     def fijar_volumen(self, valor):
+        self._cortar_rampa()   # (si estaba subiendo o bajando por una voz, que el cambio manual mande)
         if getattr(self, "bajada", False):   # (con la música baja: se anota, y se aplica bajo)
             with lock:
                 state["volume"] = round(max(0.0, min(130.0, float(valor))))
