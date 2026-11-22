@@ -4,6 +4,7 @@
     pw-dump | python3 salidas.py listar       lista numerada (* = la que se usa)
     pw-dump | python3 salidas.py id N         id de PipeWire de la salida número N
     pw-dump | python3 salidas.py bt MAC       id de la salida de ese parlante Bluetooth
+    pw-dump | python3 salidas.py nodo NOMBRE  id de la salida con ese node.name (p. ej. la de «todos los parlantes»)
 """
 import json
 import sys
@@ -38,3 +39,5 @@ elif modo == "id":
 elif modo == "bt":
     mac = sys.argv[2].replace(":", "_").upper()
     print(next((i for i, nombre, _ in salidas if nombre.upper().startswith("BLUEZ_OUTPUT." + mac)), ""))
+elif modo == "nodo":
+    print(next((i for i, nombre, _ in salidas if nombre == sys.argv[2]), ""))

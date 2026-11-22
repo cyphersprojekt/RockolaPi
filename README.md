@@ -177,6 +177,15 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   mismo orden. Y si no hay internet (p. ej. recién prendida la Raspberry), no se pierden:
   quedan esperando y se prueba de nuevo cada medio minuto. La fila es una sola para todas las
   salas; cada sala ve y ordena las suyas.
+- **📚 Biblioteca y lotes (para dejar muchos álbumes bajando, p. ej. un fin de semana):** en **⬇ descargas**,
+  la pestaña **📚 biblioteca** lista todos los álbumes guardados, con un filtro y una casilla en cada
+  uno (con **shift** se elige un tramo; **☑ todos** elige los que se ven). Con el PIN, **⬇ completar N**
+  les busca en YouTube Music lo que les falta y lo baja **sin el tope de la fila** (los pedidos de los
+  demás pasan adelante). Va de a poco: no pone más de 150 temas del lote en la fila a la vez, y a
+  medida que se bajan sigue con el próximo álbum. Sigue solo si la rockola se reinicia (el reinicio de las
+  6 de la mañana, p. ej.). Si se llena el espacio de `guardar_gb` el lote **espera** en lugar de borrar
+  canciones viejas. En **⬇ en curso** se ve cómo va (arriba a la derecha), los álbumes que no se
+  encontraron, y **✕ el lote** lo cancela.
 - **💿 Álbumes:** buscando un disco o un artista («bocanada», «soda stereo») aparecen también sus
   álbumes, con cuántos temas hay guardados. Tocando uno se ven sus temas, para pedirlos de a uno
   o, con el PIN, **▶ reproducir** el disco entero (corta la que suena; lo que estaba en la cola

@@ -422,6 +422,18 @@
   #voz .contenido, #descargas .contenido { max-width: min(var(--ancho), 110ch); margin: 0 auto; padding: 0 var(--margen) 4em; }
   @media (min-width: 1000px) and (min-height: 600px) { #voz, #descargas { flex: 1; min-height: 0; overflow-y: auto; } }
   #descargas .cabeza { color: var(--dim); }
+  /* las dos pestañas (en curso / biblioteca) y, a la derecha, cómo va el lote: un renglón que está siempre */
+  #descargas .pestanas { display: flex; align-items: center; gap: .6ch; margin-bottom: .6em; min-height: 2em; }
+  #descargas .pestanas .lote { margin-left: auto; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  #descargas .pestanas .lote.mal { color: var(--red); }
+  /* biblioteca: filtro y acciones arriba, y un renglón por álbum con su casilla */
+  #descargasBiblio .barra { display: flex; flex-wrap: wrap; align-items: center; gap: .6ch; padding-bottom: .5em; border-bottom: 1px solid var(--line); }
+  #descargasBiblio .barra input[type=search] { flex: 1 1 16ch; min-width: 0; }
+  #descargasBiblio .cuantos { flex-basis: 100%; color: var(--dim); font-size: .87em; }
+  #descargasBiblio .fila.bib { cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 3.6em; }
+  #descargasBiblio .fila.bib:hover .t { color: var(--acc); }
+  #descargasBiblio .fila.bib.elegido .t { color: var(--acc); font-weight: 700; }
+  #descargasBiblio input[type=checkbox] { flex: none; width: 1.3em; height: 1.3em; margin: 0; accent-color: var(--acc); cursor: pointer; }
   #descargas .bajando { color: var(--ok); font-weight: 700; }
   #descargas .mal { color: var(--red); }
   #descargas .fila.fallo .pos { color: var(--red); }
@@ -677,11 +689,20 @@
   <div class="contenido">
     <section class="panel">
       <span class="ttl" id="descargasTtl">DESCARGAS</span>
+      <div class="pestanas" role="group" aria-label="Qué ver">
+        <button type="button" id="descargasTabCurso" title="Lo que se baja y lo que espera">⬇ en curso</button>
+        <button type="button" id="descargasTabBiblio" title="Todos los álbumes guardados: elegir varios y completarlos">📚 biblioteca</button>
+        <span class="lote" id="descargasLote" role="status"></span>
+      </div>
       <div id="descargasLista"><div class="vacio">conectando…</div></div>
+      <div id="descargasBiblio" hidden></div>
     </section>
-    <div class="hint">Se bajan de a una, en este orden, después de la que tiene que sonar. Quedan anotadas: si la
+    <div class="hint" id="descargasHint">Se bajan de a una, en este orden, después de la que tiene que sonar. Quedan anotadas: si la
       rockola se reinicia, siguen. <b>✕</b> cancela las tuyas; con el PIN (🔒), cualquiera, y
       <b>⤒ ↑ ↓</b> cambian el orden.</div>
+    <div class="hint" id="descargasHintBiblio" hidden>Elegí álbumes (con <b>shift</b> se elige un tramo) y <b>⬇ completar</b> les baja lo que
+      les falta, <b>sin el tope</b> de la fila: se pueden dejar muchos andando (un fin de semana). Se bajan después de lo que
+      pidan los demás y siguen solos si la rockola se reinicia. Hace falta el PIN (🔒).</div>
   </div>
 </section>
 <!-- 🎙️ voz: el micrófono abierto y los anuncios (ver vozVista) -->
@@ -886,6 +907,7 @@ function pintarControl() {
   b.title = admin ? "Controlando la música: tocá para dejar de controlar" : "Controlar la música (pide PIN)";
   $("#controls").hidden = !admin;
   vozVista.alEstado(last);
+  descargasVista.alEstado(last);   // (con el PIN se puede completar álbumes y cancelar el lote)
   if (armando && !armando.mine && !admin) ponerArmando(null);   // era de otro: la cambiaba con el PIN
   if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
   pintarListas(); pintarArmando();           // (y las playlists se cargan enteras y se cambian)
@@ -3093,6 +3115,13 @@ $("#listaNueva").addEventListener("submit", async e => {
 const descargasVista = (() => {
   const boton = $("#descargasBtn"), caja = $("#descargas");
   let abierta = false, firma = null, scrollCola = 0, foco = null;
+  // La pestaña (en curso / biblioteca) se recuerda en este dispositivo.
+  let tab = store.get("descargasTab") === "biblioteca" ? "biblioteca" : "curso";
+  // Biblioteca: todos los álbumes guardados (sin sus temas), cuáles están elegidos y qué se filtra.
+  let discos = null, discosJson = null, discosError = null, discosPedido = 0, discosTimer = null, versionBiblio = null;
+  const elegidos = new Set(), filas = new Map();   // key -> { fila, casilla } de los que se ven
+  let filtro = "", visibles = [], ultimoElegido = null, firmaDiscos = null, armada = null;
+  const sinTildes = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
   const link = (paraSala = sala, aca = abierta) =>
     (aca ? "/descargas" : "/") + (paraSala !== PRINCIPAL ? `?sala=${encodeURIComponent(paraSala)}` : "");
@@ -3123,7 +3152,8 @@ const descargasVista = (() => {
     scrollTo(0, 0);
     if (apilar) history.pushState(null, "", link());
     pintarBoton(); ponerTitulo();
-    firma = null; pintar();
+    firma = null; firmaDiscos = null; pintar();
+    if (tab === "biblioteca") traerDiscos();
   }
 
   function cerrar(apilar = true) {
@@ -3144,9 +3174,59 @@ const descargasVista = (() => {
     foco = null;
   }
 
+  // Las dos pestañas, el renglón del lote (siempre está: cambia el texto, no el lugar) y lo que corresponde ver.
   function pintar(s = last) {
-    const lista = s?.saving || [], otras = s?.savingOthers || 0, hay = hayBiblio();
-    const f = JSON.stringify([lista, otras, admin, !!s, hay, s?.room?.name, s?.rooms?.length, s?.savingOffline]);
+    const bib = tab === "biblioteca";
+    $("#descargasLista").hidden = bib; $("#descargasBiblio").hidden = !bib;
+    $("#descargasHint").hidden = bib; $("#descargasHintBiblio").hidden = !bib;
+    for (const [id, activa] of [["#descargasTabCurso", !bib], ["#descargasTabBiblio", bib]]) {
+      $(id).classList.toggle("on", activa); $(id).setAttribute("aria-pressed", String(activa));
+    }
+    pintarLote(s);
+    if (bib) pintarBiblio(s); else pintarCurso(s);
+  }
+
+  function pestana(cual) {
+    if (tab === cual) return;
+    tab = cual; store.set("descargasTab", cual);
+    firma = null; firmaDiscos = null;
+    pintar();
+    if (cual === "biblioteca") traerDiscos();
+  }
+
+  // Cómo va el lote (⬇ completar varios álbumes): lo mismo en las dos pestañas.
+  function pintarLote(s) {
+    const b = s?.batch, r = $("#descargasLote");
+    let texto = "", mal = false, titulo = "";
+    if (b) {
+      const faltan = b.left > 0 ? ` · faltan ${b.left} ${b.left === 1 ? "álbum" : "álbumes"} por revisar` : "";
+      if (b.full) { texto = "⚠ sin lugar para más canciones: el lote espera"; mal = true; titulo = "Se llegó al espacio de guardar_gb (o al disco le queda poco). Borrá canciones o subí guardar_gb: sigue solo."; }
+      else if (b.left || b.queued) texto = `lote: ${b.queued} ${b.queued === 1 ? "tema" : "temas"} en la fila${faltan}`;
+      else texto = `lote terminado: ${b.done} ${b.done === 1 ? "álbum" : "álbumes"}, ${contarTemas(b.songs)} nuevos`;
+      if (b.failed.length) {
+        texto += ` · ⚠ ${b.failed.length} sin resolver`; mal = mal || !(b.left || b.queued);
+        titulo = (titulo ? titulo + "\n" : "") + b.failed.join("\n");
+      }
+    }
+    r.textContent = texto; r.title = titulo;
+    r.className = "lote" + (mal ? " mal" : " dim");
+  }
+
+  // Cancelar el lote (los álbumes que faltaban buscar y lo que esperaba en la fila), o cerrar el aviso de cómo terminó.
+  async function cancelarLote(b) {
+    const sigue = b.left || b.queued;
+    if (sigue && !await preguntar({ titulo: "CANCELAR EL LOTE", peligro: true, no: "volver", si: "✕ cancelar el lote",
+          texto: `Se sacan los ${b.left} álbumes que faltaban revisar y los ${b.queued} temas que esperan en la fila (la que se está bajando termina, pero no queda guardada). Lo que ya se bajó, queda.` })) return;
+    try {
+      const r = await api("/api/download-albums-cancel", { client });
+      if (sigue) toast(`Lote cancelado: ${r.albums} álbumes y ${contarTemas(r.songs)} sacados de la fila`);
+      render(r.state);
+    } catch (err) { toast(err.message, true); }
+  }
+
+  function pintarCurso(s = last) {
+    const lista = s?.saving || [], otras = s?.savingOthers || 0, hay = hayBiblio(), lote = s?.batch || null;
+    const f = JSON.stringify([lista, otras, admin, !!s, hay, s?.room?.name, s?.rooms?.length, s?.savingOffline, lote]);
     if (f === firma) return;
     firma = f;
     const van = lista.filter(g => !g.error), fallaron = lista.filter(g => g.error);
@@ -3155,7 +3235,7 @@ const descargasVista = (() => {
     $("#descargasTtl").textContent = "DESCARGAS" + enSala + (van.length ? ` · ${van.length}` : "");
     const vacio = !s ? "conectando…"
       : !hay ? "En esta rockola no se guardan canciones (modo navegador, o guardar_gb = 0): no hay nada para bajar."
-      : !lista.length && "No hay nada bajándose. Con ⬇ guardar (en los resultados del buscador, o en un álbum) una canción se baja para que quede entre las guardadas, sin ponerla en la cola.";
+      : !lista.length && !lote && "No hay nada bajándose. Con ⬇ guardar (en los resultados del buscador, o en un álbum) una canción se baja para que quede entre las guardadas, sin ponerla en la cola. Para dejar muchos álbumes andando, 📚 biblioteca.";
     const deOtras = otras > 0 && el("div", { class: "hint" },
       `Hay ${otras === 1 ? "una más" : `${otras} más`} de otras salas en la fila: se bajan de a una entre todas.`);
     if (vacio) return $("#descargasLista").replaceChildren(el("div", { class: "vacio" }, vacio), deOtras || "");
@@ -3191,10 +3271,13 @@ const descargasVista = (() => {
           onclick: () => cancelarGuardado([g.videoId]) })));
     const cuantas = [van.length > 0 && `${van.length} ${van.length === 1 ? "espera" : "esperan"} bajarse`,
                      fallaron.length > 0 && `${fallaron.length} no se ${fallaron.length === 1 ? "pudo" : "pudieron"} bajar`].filter(Boolean).join(" · ");
+    const sigueLote = lote && (lote.left || lote.queued);
     $("#descargasLista").replaceChildren(
       cortada || "",
       el("div", { class: "fila cabeza" },
         el("div", { class: "info" }, cuantas),
+        admin && lote && el("button", { type: "button", title: sigueLote ? "Sacar del lote lo que falta: los álbumes por revisar y los temas en la fila" : "Cerrar el aviso del lote",
+                                        onclick: () => cancelarLote(lote) }, sigueLote ? "✕ el lote" : "✕ cerrar el aviso"),
         cancelables.length > 1 && el("button", { type: "button", title: "Cancelar todas las que podés cancelar",
           onclick: async () => await preguntar({ titulo: "CANCELAR DESCARGAS", peligro: true, no: "volver",
                                                  si: `✕ cancelar ${cancelables.length}`,
@@ -3203,6 +3286,9 @@ const descargasVista = (() => {
       ...van.filter(g => g.active).map(g => fila(g, "⬇", el("span", { class: "bajando" }, "bajándose ahora…"))),
       ...esperan.map((g, i) => fila(g, i + 1, "⏳ en espera", i)),
       ...fallaron.map(g => fila(g, "⚠", el("span", { class: "mal" }, `no se pudo: ${g.error}`))),
+      // (álbumes del lote que no se encontraron en YouTube Music)
+      ...(lote?.failed || []).map(t => el("div", { class: "fila fallo" },
+        el("span", { class: "pos", "aria-hidden": "true" }, "⚠"), el("div", { class: "info" }, el("div", { class: "t mal", title: t }, t)))),
       deOtras || "");
     if (foco) {   // el botón que tocaron, si sigue prendido; si no, otro de la misma canción
       const [vid, que] = foco;
@@ -3210,10 +3296,144 @@ const descargasVista = (() => {
     }
   }
 
-  // Con cada estado de la sala: la cuenta del botón y, si se está mirando, la lista.
-  function alEstado(s) { pintarBoton(s); if (abierta) pintar(s); }
+  // ---- 📚 biblioteca: todos los álbumes guardados, para elegir varios y completarlos ----
+  async function traerDiscos() {
+    const pedido = ++discosPedido;
+    versionBiblio = last?.library?.v ?? null;
+    try {
+      const r = await api("/api/library?vista=discos");
+      if (pedido !== discosPedido) return;
+      const nueva = JSON.stringify(r.albums);
+      if (nueva !== discosJson || discosError) firmaDiscos = null;   // (si no cambió nada, no se arma de nuevo: no se pierde el foco)
+      discosJson = nueva;
+      discos = r.albums; discosError = null;
+      const hay = new Set(discos.map(a => a.key));
+      for (const k of [...elegidos]) if (!hay.has(k)) elegidos.delete(k);   // (ya no está: no se pide)
+    } catch (err) {
+      if (pedido !== discosPedido) return;
+      discosError = err.message; firmaDiscos = null;
+    }
+    if (abierta && tab === "biblioteca") pintar();
+  }
+
+  const elegir = (a, on, rango) => {
+    const aca = visibles.map(x => x.key), desde = aca.indexOf(ultimoElegido), hasta = aca.indexOf(a.key);
+    const cuales = rango && desde >= 0 && hasta >= 0 ? aca.slice(Math.min(desde, hasta), Math.max(desde, hasta) + 1) : [a.key];
+    for (const k of cuales) {
+      if (on) elegidos.add(k); else elegidos.delete(k);
+      const f = filas.get(k);
+      if (f) { f.casilla.checked = on; f.fila.classList.toggle("elegido", on); }
+    }
+    ultimoElegido = a.key;
+    pintarBarra();
+  };
+
+  function pintarBarra() {
+    if (!armada) return;
+    const n = elegidos.size, temas = (discos || []).filter(a => elegidos.has(a.key)).reduce((t, a) => t + a.count, 0);
+    const b = armada, todos = (discos || []).length;
+    b.cuantos.textContent = `${visibles.length === todos ? todos : `${visibles.length} de ${todos}`} álbumes · `
+      + (n ? `${n} ${n === 1 ? "elegido" : "elegidos"} (${contarTemas(temas)} guardados)` : "ninguno elegido");
+    b.completar.disabled = !admin || !n;
+    b.completar.textContent = n ? `⬇ completar ${n}` : "⬇ completar";
+    b.completar.title = admin ? "Bajar lo que les falta a los álbumes elegidos, sin el tope de la fila"
+                              : "Hace falta el PIN (🔒 arriba) para completar álbumes";
+    b.todos.disabled = !visibles.length;
+    b.ninguno.disabled = !n;
+  }
+
+  async function completar() {
+    const lista = (discos || []).filter(a => elegidos.has(a.key));
+    if (!lista.length) return;
+    const lib = last?.library, libre = lib?.limit ? Math.max(0, lib.limit - lib.bytes) : 0;
+    const gb = b => (b / 1024 ** 3).toFixed(1).replace(".", ",");
+    const ok = await preguntar({ titulo: "COMPLETAR ÁLBUMES", no: "volver", si: `⬇ completar ${lista.length}`,
+      texto: `Se busca en YouTube Music lo que le falta a ${lista.length === 1 ? "este álbum" : `estos ${lista.length} álbumes`} y se baja sin el tope de la fila, `
+        + "después de lo que pidan los demás. Sigue solo, también si la rockola se reinicia. "
+        + (libre ? `Quedan ${gb(libre)} GB de los ${gb(lib.limit)} GB para canciones: si se llenan, el lote espera (no borra nada).` : "") });
+    if (!ok) return;
+    try {
+      const r = await api("/api/download-albums", { albums: lista.map(a => ({ album: a.album, artist: a.artist })), client });
+      toast(r.text);
+      elegidos.clear(); ultimoElegido = null;
+      for (const f of filas.values()) { f.casilla.checked = false; f.fila.classList.remove("elegido"); }
+      pintarBarra();
+      render(r.state);
+    } catch (err) { toast(err.message, true); }
+  }
+
+  // La barra (filtro y acciones) se arma una sola vez: así no se pierde el foco al escribir.
+  function armarBiblio() {
+    const buscar = el("input", { type: "search", placeholder: "filtrar por álbum o artista…", "aria-label": "Filtrar los álbumes", autocomplete: "off",
+      oninput: ev => { filtro = sinTildes(ev.target.value).trim(); firmaDiscos = null; pintarBiblio(); } });
+    const todos = el("button", { type: "button", title: "Elegir todos los que se ven (los del filtro)", onclick: () => {
+      for (const a of visibles) { elegidos.add(a.key); const f = filas.get(a.key); if (f) { f.casilla.checked = true; f.fila.classList.add("elegido"); } }
+      pintarBarra(); } }, "☑ todos");
+    const ninguno = el("button", { type: "button", title: "No elegir ninguno", onclick: () => {
+      elegidos.clear(); ultimoElegido = null;
+      for (const f of filas.values()) { f.casilla.checked = false; f.fila.classList.remove("elegido"); }
+      pintarBarra(); } }, "☐ ninguno");
+    const completarBtn = el("button", { type: "button", class: "primario", onclick: completar }, "⬇ completar");
+    const cuantos = el("div", { class: "cuantos", role: "status" });
+    const lista = el("div", { class: "filas" });
+    const caja = $("#descargasBiblio");
+    caja.replaceChildren(el("div", { class: "barra" }, buscar, todos, ninguno, completarBtn, cuantos), lista);
+    armada = { buscar, todos, ninguno, completar: completarBtn, cuantos, lista };
+  }
+
+  function pintarBiblio(s = last) {
+    if (!armada) armarBiblio();
+    const hay = hayBiblio();
+    const f = JSON.stringify([discos?.length, discos?.[0]?.key, discosError, hay, filtro, !!s]);
+    if (f === firmaDiscos) { pintarBarra(); return; }
+    firmaDiscos = f;
+    const lista = armada.lista;
+    filas.clear();
+    const aviso = t => lista.replaceChildren(el("div", { class: "vacio" }, t));
+    visibles = [];
+    if (!s) aviso("conectando…");
+    else if (!hay) aviso("En esta rockola no se guardan canciones (modo navegador, o guardar_gb = 0): no hay biblioteca.");
+    else if (discosError) aviso("⚠ " + discosError);
+    else if (!discos) aviso("cargando…");
+    else if (!discos.length) aviso("Todavía no hay álbumes guardados. Quedan guardadas las que suenan acá y las que bajás con ⬇.");
+    else {
+      visibles = filtro ? discos.filter(a => sinTildes(`${a.album} ${a.artist}`).includes(filtro)) : discos;
+      if (!visibles.length) aviso("Ningún álbum coincide con el filtro.");
+      else {
+        lista.replaceChildren(...visibles.map(a => {
+          const casilla = el("input", { type: "checkbox", "aria-label": `Elegir ${a.album}` });
+          casilla.checked = elegidos.has(a.key);
+          const fila = el("div", { class: "fila bib" + (casilla.checked ? " elegido" : ""),
+            onclick: ev => { if (ev.target !== casilla) casilla.checked = !casilla.checked; elegir(a, casilla.checked, ev.shiftKey); } },
+            casilla,
+            el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
+            el("div", { class: "info" },
+              el("div", { class: "t", title: a.album }, a.album),
+              el("div", { class: "sub" }, [a.artist, contarTemas(a.count) + " guardados", fmt(a.duration)].filter(Boolean).join(" · "))));
+          filas.set(a.key, { fila, casilla });
+          return fila;
+        }));
+      }
+    }
+    pintarBarra();
+  }
+
+  // Con cada estado de la sala: la cuenta del botón y, si se está mirando, la lista. Si cambió lo
+  // guardado (se bajó algo), la biblioteca se vuelve a pedir, sin apuro (se juntan los cambios seguidos).
+  function alEstado(s) {
+    pintarBoton(s);
+    if (!abierta) return;
+    pintar(s);
+    if (tab === "biblioteca" && s?.library && s.library.v !== versionBiblio) {
+      versionBiblio = s.library.v;
+      clearTimeout(discosTimer);
+      discosTimer = setTimeout(traerDiscos, 3000);
+    }
+  }
 
   boton.onclick = () => abierta ? cerrar() : abrir();
+  $("#descargasTabCurso").onclick = () => pestana("curso");
+  $("#descargasTabBiblio").onclick = () => pestana("biblioteca");
   // (antes que el del recap, que está más abajo: al volver de acá al recap con ←, primero se cierra esta)
   addEventListener("popstate", () => location.pathname === "/descargas" ? abrir(false) : cerrar(false));
   return { abrir, cerrar, alEstado, link, abierta: () => abierta };

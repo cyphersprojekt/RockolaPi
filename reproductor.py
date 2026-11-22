@@ -310,6 +310,11 @@ class Descargas:
                 self.anticipando = False
             raise
 
+    def lleno(self, margen=100 * 1024 ** 2):
+        """Si lo que se guardó ya llega al límite de espacio (`limite`), o al disco le queda poco: bajar
+        más haría borrar canciones viejas (ver `conservar`)."""
+        return bool(self.limite) and (self.total + margen > self.limite or self._poco_lugar())
+
     def _poco_lugar(self):
         try:
             return shutil.disk_usage(self.carpeta).free < LIBRE_MINIMO
@@ -585,6 +590,17 @@ class Descargas:
         orden = self._en_orden(grupos.values())
         return {"total": len(orden), "songs": sum(len(a["songs"]) for a in orden),
                 "albums": orden[desde:desde + cuantos], "v": version}
+
+    def discos(self, buscar="", sala=None):
+        """Todos los álbumes guardados (de `sala`), sin sus temas: sólo nombre, artista, tapa, cuántos
+        temas tiene guardados y cuánto duran. Es la lista liviana de la biblioteca (⬇ descargas), para
+        elegir varios y completarlos; en orden alfabético, y los videos sueltos (sin álbum) no están."""
+        with self.lock:
+            grupos = self._por_album(sala, _para_buscar(buscar).split())
+        orden = [a for a in self._en_orden(grupos.values()) if a["album"]]
+        return {"albums": [{"key": a["key"], "album": a["album"], "artist": a["artist"], "thumb": a["thumb"],
+                            "count": len(a["songs"]), "duration": a["duration"]} for a in orden],
+                "total": len(orden)}
 
     @staticmethod
     def _clave_album(d):

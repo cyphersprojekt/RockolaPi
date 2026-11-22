@@ -117,15 +117,24 @@ if [ "$CON_TUI" = 1 ]; then
   else
     echo "   (no encontré raspi-config: configurá el login automático en tty1 a mano)"
   fi
+  # El control por HDMI-CEC (el dispositivo «vc4-hdmi») dice tener un puntero (REL_X/REL_Y): cage lo toma por
+  # un mouse y dibuja el cursor en la pantalla. Se le pide a libinput que lo ignore (no se usa para nada).
+  REGLA=/etc/udev/rules.d/90-rockola-sin-cursor.rules
+  if [ ! -f "$REGLA" ]; then
+    echo 'ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="vc4-hdmi", ENV{LIBINPUT_IGNORE_DEVICE}="1"' \
+      | sudo tee "$REGLA" >/dev/null && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input --action=change \
+      || echo "   (no pude escribir $REGLA: si se ve el cursor del mouse en la pantalla, mirá docs/raspberry.md)"
+  fi
   MARCA="# rockola: TUI a pantalla completa"
   if ! grep -qF "$MARCA" ~/.bash_profile 2>/dev/null; then
     cat >> ~/.bash_profile <<EOF
 
 $MARCA
 if [ "\$(tty)" = "/dev/tty1" ]; then
-  # cage: muestra un solo programa a pantalla completa; foot: la terminal.
+  # cage: muestra un solo programa a pantalla completa; foot: la terminal. WLR_LIBINPUT_NO_DEVICES=1: que arranque
+  # aunque no haya ningún teclado ni mouse conectado (sin eso, cage se cierra y la pantalla queda en negro).
   # Letra: cambiá size=14. Colores: agregá --tema nord (o tokyo-night, dracula…) al final.
-  exec cage -s -- foot --font=monospace:size=14 "$DIR/tui.sh"
+  exec env WLR_LIBINPUT_NO_DEVICES=1 cage -s -- foot --font=monospace:size=14 "$DIR/tui.sh"
 fi
 EOF
   fi

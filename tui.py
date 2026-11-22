@@ -402,7 +402,7 @@ class Rockola(App):
                     t.append(" " * libre)
                     t.append_text(clima)
                     break
-        self.query_one("#cabecera", Static).update(t)
+        self.poner(self.query_one("#cabecera", Static), t)
 
     def pintar_arte(self):
         arte = self.query_one("#arte", Static)
@@ -431,7 +431,7 @@ class Rockola(App):
         t = Text()
         if not s:
             t.append("\nConectando con la rockola…", style="dim")
-            info.update(t)
+            self.poner(info, t)
             return
         now, p = s.get("now"), s.get("progress") or {}
         if not now:
@@ -439,7 +439,7 @@ class Rockola(App):
             t.append("Escaneá el QR o entrá a\n", style="dim")
             t.append(self.url_publica or "…", style="bold underline")
             t.append("\ny pedí un tema.", style="dim")
-            info.update(t)
+            self.poner(info, t)
             return
         v = s.get("voice")
         if v:   # un anuncio o el micrófono en el aire: ocupa el lugar de «sonando ahora»
@@ -481,7 +481,15 @@ class Rockola(App):
             t.append("▮" * v, style=self.acento)
             t.append("▯" * (n - v), style="dim")
             t.append(f" {vol}%", style="dim")
-        info.update(t)
+        self.poner(info, t)
+
+    def poner(self, widget, t):
+        """`widget.update(t)`, pero sólo si el texto cambió: pintar_info corre dos veces por segundo y casi siempre
+        queda igual (el progreso avanza de a segundo). En una Raspberry, repintar de más era lo que más CPU gastaba."""
+        if getattr(widget, "_ultimo", None) == t:
+            return
+        widget._ultimo = t.copy()
+        widget.update(t)
 
     def renglon_de_reacciones(self, s):
         """Las reacciones a lo que suena (🔥 ♥ 😴, con cuántas van), los votos para saltearla y,
@@ -539,7 +547,7 @@ class Rockola(App):
             t.append("─" * (largo - lleno), style="dim")
             t.append(f"  {fmt(tt)} / {fmt(dur)}")
             t.append("  🔀 al azar" if now.get("azar") else f"  pedida por {now['by']}", style="dim")
-        self.query_one("#info", Static).update(t)
+        self.poner(self.query_one("#info", Static), t)
 
     def pintar_recap(self):
         """Abajo, en la vista de las estadísticas: los rankings, uno al lado del otro."""

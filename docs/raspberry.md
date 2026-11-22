@@ -152,8 +152,31 @@ Otros comandos:
 
 ```bash
 ./pi/bluetooth.sh estado   # ¿está conectado? ¿por dónde sale el audio?
-./pi/bluetooth.sh olvidar  # dejar de usarlo (por ejemplo, para cambiar de parlante)
+./pi/bluetooth.sh olvidar  # dejar de usarlos (por ejemplo, para cambiar de parlante)
 ```
+
+### Más de un parlante a la vez
+
+La Pi puede estar conectada a varios parlantes Bluetooth y hacer sonar la música en todos. Ponés el
+segundo en modo emparejar y:
+
+```bash
+./pi/bluetooth.sh agregar 00:11:22:33:44:55   # el segundo parlante (el primero se configuró con «conectar»)
+./pi/bluetooth.sh juntar                      # la música sale por todos
+./pi/bluetooth.sh separar                     # vuelve a sonar sólo por el primero
+```
+
+`juntar` crea una salida «Todos los parlantes» (PipeWire) y la deja como la salida de la rockola. Los
+parlantes que estén conectados suenan; el que esté apagado se suma solo cuando vuelve. Todos se
+reconectan solos, como el primero.
+
+- **Puede haber desfase entre parlantes.** Cada uno tiene su propia latencia Bluetooth y el sistema
+  no la compensa: con modelos distintos se puede notar un eco leve. No lo causa la rockola.
+- Con 2 parlantes suele andar bien; con 3 o más hay cortes (la antena se comparte con el wifi).
+  Un dongle Bluetooth USB ayuda.
+- Si son JBL compatibles con **PartyBoost**, es más prolijo conectar la Pi a uno solo y que él
+  reenvíe al otro: ellos sí se sincronizan entre sí.
+- `juntar` y `separar` reinician el audio y la rockola (la música se corta un instante).
 
 **Si no conecta:**
 - Muchos parlantes sólo aceptan un dispositivo a la vez: apagá el Bluetooth de los celulares
@@ -210,6 +233,21 @@ Lo más común:
 de `cage … foot --font=monospace:size=14 …`. Para otros colores, agregá al final
 `--tema nord` (o `tokyo-night`, `dracula`, `monokai`, `catppuccin-mocha`). Reiniciá para ver el
 cambio.
+
+**Si se ve el cursor del mouse en la pantalla:** el control por HDMI-CEC (`vc4-hdmi`) se anuncia como
+si tuviera un puntero y `cage` dibuja el cursor. `pi/instalar.sh` ya lo evita; a mano:
+
+```bash
+sudo tee /etc/udev/rules.d/90-rockola-sin-cursor.rules >/dev/null <<'EOF'
+ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="vc4-hdmi", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+EOF
+sudo reboot
+```
+
+La regla tiene que ir en **una sola línea**: partida en dos, la segunda mitad vale para todos los
+dispositivos y `cage` se queda sin teclado ni mouse. Por eso la línea de `cage` en `~/.bash_profile`
+lleva `WLR_LIBINPUT_NO_DEVICES=1` (`exec env WLR_LIBINPUT_NO_DEVICES=1 cage …`): sin eso, si no hay
+ningún dispositivo de entrada, `cage` se cierra y la pantalla queda en negro.
 
 ## 10. Uso diario y mantenimiento
 

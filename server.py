@@ -101,12 +101,18 @@ state = {
     "crossfade": False,  # si las canciones se pisan al cambiar (se prende desde la web; ver Director.fundir)
     "saving": [],      # las que pidieron guardar sin ponerlas en la cola (modo mpv), de todas las salas
     "sin_red": False,  # no hay internet: las de "saving" esperan a que vuelva (ver bucle_guardar)
+    "lote": [],        # ⬇ completar varios álbumes (con el PIN): los que faltan buscar, {"sala", "album", "artist", "client"} (ver bucle_lote)
+    "lote_resumen": {"hechos": 0, "temas": 0, "fallaron": [], "lleno": False},   # cómo va (se junta hasta que se vacía)
     "online": None,    # si hay internet (ver bucle_internet): el led de las páginas y de la pantalla. None: todavía no se sabe
     "cpu_temp": None,  # la temperatura del procesador en °C (ver bucle_temperatura), o None si esta máquina no la da
     "weather": None,   # el clima (ver bucle_clima): { temp, text, icon, symbol, city }, o None si no se sabe
 }
 REACCIONES = ("🔥", "❤️", "😴")   # con las que se reacciona a la que suena
 MAX_GUARDANDO = 100     # cuántas pueden estar esperando para bajarse así, entre todos (un álbum son ~12)
+LOTE_EN_FILA = 150      # el lote (⬇ completar varios álbumes) no tiene el tope de arriba, pero no pone más que esto en la fila
+                        # a la vez: a medida que se bajan, el lote va buscando los álbumes que siguen
+MAX_LOTE = 1000         # álbumes que se pueden pedir de una vez
+MAX_CANCELAR = 5000
 PRINCIPAL = "principal"
 MAX_SALAS = 8          # contando la principal
 MAX_CHAT = 100         # mensajes que se recuerdan por sala (en memoria: al reiniciar, se borran)
@@ -338,6 +344,7 @@ def borrar_sala(sala):
             if sala.id in g["salas"]:
                 g["salas"].remove(sala.id)
         state["saving"] = [g for g in state["saving"] if g["salas"] or g["error"]]
+        state["lote"] = [p for p in state["lote"] if p["sala"] != sala.id]
         bump()   # todas: que desaparezca de la lista (y las páginas que estaban en ella se enteren)
     teles.avisar()
     print(f"  🚪 Sala borrada: {sala.nombre}", flush=True)
@@ -479,7 +486,7 @@ def set_radio(sala, body):
 
 CLAVES_ITEM = ("id", "videoId", "title", "artist", "duration", "thumb", "album", "by", "playlist", "azar",
                "reacciones")
-CLAVES_A_BAJAR = ("videoId", "title", "artist", "datos", "album", "salas", "clientes")   # de state["saving"]
+CLAVES_A_BAJAR = ("videoId", "title", "artist", "datos", "album", "salas", "clientes", "lote")   # de state["saving"]
 MAX_COLA_GUARDADA = 2000
 lock_colas = threading.Lock()   # (escriben el hilo de bucle_colas y main, al apagar)
 colas_escritas = {"texto": None, "cerrado": False}
@@ -504,7 +511,7 @@ def foto_de_colas():
     # Las que esperan para bajarse (también la que se está bajando: si se corta, se baja de nuevo).
     # Las que fallaron no: son un aviso que dura un minuto.
     a_bajar = [{k: g[k] for k in CLAVES_A_BAJAR} for g in state["saving"] if not g["error"]]
-    return {"salas": fotos, "saving": a_bajar}
+    return {"salas": fotos, "saving": a_bajar, "lote": state["lote"], "lote_resumen": state["lote_resumen"]}
 
 
 def guardar_colas(final=False):
@@ -586,7 +593,19 @@ def _a_bajar_guardada(g):
             "datos": {"title": titulo, "artist": artista, "duration": duracion, "thumb": texto(datos.get("thumb")),
                       "album": texto(datos.get("album"))},
             "error": None, "hasta": 0, "album": album if isinstance(album, str) and ALBUM_ID.match(album) else None,
-            "salas": en, "clientes": [c[:64] for c in lista("clientes")], "bajando": False}
+            "salas": en, "clientes": [c[:64] for c in lista("clientes")], "bajando": False, "lote": g.get("lote") is True}
+
+
+def _lote_guardado(doc):
+    """El lote que esperaba (colas.json) y cómo iba: lo que se puede retomar, o ([], resumen vacío)."""
+    pedidos, r = [], doc.get("lote_resumen") if isinstance(doc.get("lote_resumen"), dict) else {}
+    for p in doc.get("lote") if isinstance(doc.get("lote"), list) else []:
+        if isinstance(p, dict) and p.get("sala") in salas and isinstance(p.get("album"), str) and p["album"].strip():
+            pedidos.append({"sala": p["sala"], "album": p["album"][:200], "artist": str(p.get("artist") or "")[:200],
+                            "client": str(p.get("client") or "")[:64]})
+    num = lambda k: r[k] if isinstance(r.get(k), int) and r[k] >= 0 else 0
+    fallaron = [str(x)[:200] for x in r.get("fallaron") or [] if isinstance(x, str)][:30] if isinstance(r.get("fallaron"), list) else []
+    return pedidos[:MAX_LOTE], {"hechos": num("hechos"), "temas": num("temas"), "fallaron": fallaron, "lleno": False}
 
 
 def retomar_colas(en_pausa=False):
@@ -646,13 +665,19 @@ def retomar_colas(en_pausa=False):
         a_bajar = doc.get("saving") if isinstance(doc.get("saving"), list) else []
         if state["mode"] == "mpv" and GUARDAR_GB > 0:
             for g in filter(None, map(_a_bajar_guardada, a_bajar)):
-                if len(state["saving"]) < MAX_GUARDANDO and not any(x["videoId"] == g["videoId"] for x in state["saving"]):
+                # (las del lote no cuentan para el tope: son las del fin de semana)
+                if (g["lote"] or sum(not x["lote"] for x in state["saving"]) < MAX_GUARDANDO) \
+                        and not any(x["videoId"] == g["videoId"] for x in state["saving"]):
                     state["saving"].append(g)
-            if state["saving"]:
+            state["lote"], state["lote_resumen"] = _lote_guardado(doc)
+            if state["saving"] or state["lote"]:
                 bump()
     if state["saving"]:
         n = len(state["saving"])
         print(f"  ⬇ Sigo con las descargas: {n} {'canción esperaba' if n == 1 else 'canciones esperaban'} para bajarse", flush=True)
+    if state["lote"]:
+        n = len(state["lote"])
+        print(f"  ⬇ Sigo con el lote: {n} {'álbum esperaba' if n == 1 else 'álbumes esperaban'} que se les busque lo que falta", flush=True)
     if cuantas:
         print(f"  ⏯ Retomo donde estaba: {cuantas} {'canción' if cuantas == 1 else 'canciones'} entre lo que "
               "sonaba y las colas", flush=True)
@@ -1584,6 +1609,12 @@ def public_state(sala, client=None, since=None, radio=False):
                        for g in state["saving"] if sala.id in g["salas"]],
             # (la fila para bajar es una sola: cuántas de otras salas hay esperando en ella)
             "savingOthers": sum(not g["error"] and sala.id not in g["salas"] for g in state["saving"]),
+            # ⬇ completar varios álbumes: los que faltan buscar, los temas del lote en la fila, y cómo va
+            "batch": (lambda r, falta, fila: {"left": falta, "queued": fila, "done": r["hechos"], "songs": r["temas"],
+                                              "failed": r["fallaron"], "full": r["lleno"]}
+                      if falta or fila or r["hechos"] else None)(
+                state["lote_resumen"], sum(p["sala"] == sala.id for p in state["lote"]),
+                sum(g["lote"] and not g["error"] and sala.id in g["salas"] for g in state["saving"])),
             "savingOffline": state["sin_red"],   # no hay conexión: esperan a que vuelva
             "online": state["online"],           # si la rockola tiene internet (el led)
             # Un anuncio o el micrófono en el aire (sólo en la sala del parlante): {"mic", "anuncio"}, o None
@@ -1833,13 +1864,30 @@ def _se_guarda():
         raise ApiError(409, "Las canciones se guardan sólo en modo mpv y con guardar_gb mayor que 0")
 
 
-def _a_guardar(meta, sala, client, album=None):
+def _a_guardar(meta, sala, client, album=None, lote=False):
     """Lo que va en state["saving"]. `album`: el browseId, si la pidieron con el álbum entero.
     `salas`: las que la pidieron (al bajarse, queda entre las guardadas de cada una).
-    `clientes`: quiénes (cada uno puede cancelar las suyas). `bajando`: es la que se está bajando."""
+    `clientes`: quiénes (cada uno puede cancelar las suyas). `bajando`: es la que se está bajando.
+    `lote`: viene de ⬇ completar varios álbumes: no cuenta para el tope (MAX_GUARDANDO) y se baja
+    después de las que piden los demás."""
     return {"videoId": meta["videoId"], "title": meta["title"], "artist": meta["artist"],
             "datos": datos_de(meta), "error": None, "hasta": 0, "album": album, "salas": [sala.id],
-            "clientes": [client] if client else [], "bajando": False}
+            "clientes": [client] if client else [], "bajando": False, "lote": lote}
+
+
+def _poner_en_fila(g):
+    """La suma a state["saving"] (con el lock tomado). Las del lote van al final; las demás, antes
+    de la primera del lote que todavía no se esté bajando: el fin de semana no hace esperar a nadie."""
+    fila = state["saving"]
+    if g["lote"]:
+        fila.append(g)
+    else:
+        fila.insert(next((i for i, x in enumerate(fila) if x["lote"] and not x["bajando"]), len(fila)), g)
+
+
+def _en_espera(sin_lote=True):
+    """Cuántas esperan para bajarse (con el lock tomado), sin contar (por defecto) las del lote."""
+    return sum(not g["error"] and not (sin_lote and g["lote"]) for g in state["saving"])
 
 
 def save_playlist(sala, body):
@@ -1925,10 +1973,10 @@ def save_song(sala, body):
             raise ApiError(409, "Esa canción ya se está bajando")
         if ya:   # la está bajando otra sala: que quede también en esta
             _sumar_pedido(ya, sala, client)
-        elif sum(not g["error"] for g in state["saving"]) >= MAX_GUARDANDO:
+        elif _en_espera() >= MAX_GUARDANDO:
             raise ApiError(429, f"Ya hay {MAX_GUARDANDO} canciones esperando para bajarse. Probá en un rato.")
         else:
-            state["saving"].append(_a_guardar(meta, sala, client))
+            _poner_en_fila(_a_guardar(meta, sala, client))
         bump()
     return False
 
@@ -1949,10 +1997,11 @@ def save_album(sala, body):
     return _guardar_coleccion(sala, client, bid, get_album(bid))
 
 
-def _guardar_coleccion(sala, client, clave, al):
+def _guardar_coleccion(sala, client, clave, al, lote=False):
     """Lo que tienen en común ⬇ un álbum y ⬇ una playlist de YouTube: baja los temas de `al`
     ({"title", "songs", "unavailable"}) que faltan. `clave`: con qué se los agrupa en la fila de
-    descargas (el browseId del álbum, o el id de la playlist)."""
+    descargas (el browseId del álbum, o el id de la playlist). `lote`: sin el tope de MAX_GUARDANDO
+    (ver bucle_lote)."""
     bid = clave
     ids = {c["videoId"] for c in al["songs"]}
     bajadas = {v for v in ids if director.descargas.datos(v)}
@@ -1962,7 +2011,7 @@ def _guardar_coleccion(sala, client, clave, al):
         # Las que fallaron antes se vuelven a intentar (y se va el aviso del error).
         state["saving"] = [g for g in state["saving"] if not (g["error"] and g["videoId"] in ids)]
         en_fila = {g["videoId"]: g for g in state["saving"]}
-        lugar = MAX_GUARDANDO - sum(not g["error"] for g in state["saving"])
+        lugar = float("inf") if lote else MAX_GUARDANDO - _en_espera()
         for c in al["songs"]:
             if c["videoId"] in bajadas:
                 continue
@@ -1977,7 +2026,8 @@ def _guardar_coleccion(sala, client, clave, al):
                 sin_lugar += 1
             else:
                 nuevas.append(c)
-        state["saving"].extend(_a_guardar(c, sala, client, album=bid) for c in nuevas)
+        for c in nuevas:
+            _poner_en_fila(_a_guardar(c, sala, client, album=bid, lote=lote))
         bump()   # aunque no haya nuevas: capaz se fueron avisos de error (o se sumaron guardadas)
     titulo, ya, minutos = al["title"], len(bajadas - sumadas), MAX_DURATION // 60
     if not al["songs"]:
@@ -2022,7 +2072,7 @@ def cancelar_guardado(sala, body, es_admin):
     se estaba bajando, la descarga termina pero no queda guardada). Las que fallaron, se van.
     Devuelve cuántas se cancelaron."""
     client = str(body.get("client", ""))[:64]
-    vids = {str(v) for v in (body.get("videoIds") or [])[:MAX_GUARDANDO]}
+    vids = {str(v) for v in (body.get("videoIds") or [])[:MAX_CANCELAR]}
     n = ajenas = 0
     with lock:
         for g in state["saving"]:
@@ -2068,6 +2118,61 @@ def mover_guardado(sala, body):
         else:
             fila.insert(lugar(otras[-1]) + 1 if otras else len(fila), g)
         bump()
+
+
+def _lote_vacio():
+    return {"hechos": 0, "temas": 0, "fallaron": [], "lleno": False}
+
+
+def completar_albumes(sala, body):
+    """⬇ completar varios álbumes de las guardadas (con el PIN): les baja a todos los temas que faltan,
+    sin el tope de MAX_GUARDANDO, para dejarlo andando (un fin de semana). `albums`: [{album, artist}].
+
+    No los busca ahora: los anota (en colas.json: si la rockola se reinicia, siguen) y bucle_lote
+    va buscando uno por uno lo que le falta a cada uno en YouTube Music, a medida que hay lugar en la
+    fila (LOTE_EN_FILA). Los temas del lote se bajan después de los que pidan los demás."""
+    _se_guarda()
+    client = str(body.get("client", ""))[:64]
+    pedidos = []
+    for a in (body.get("albums") if isinstance(body.get("albums"), list) else [])[:MAX_LOTE]:
+        nombre = str(a.get("album") or "").strip()[:200] if isinstance(a, dict) else ""
+        if nombre:
+            pedidos.append({"sala": sala.id, "album": nombre, "artist": str(a.get("artist") or "")[:200], "client": client})
+    if not pedidos:
+        raise ApiError(400, "No elegiste ningún álbum")
+    with lock:
+        if not state["lote"] and not any(g["lote"] for g in state["saving"]):
+            state["lote_resumen"] = _lote_vacio()   # (empieza un lote nuevo)
+        hay = {(p["sala"], p["album"], p["artist"]) for p in state["lote"]}
+        nuevos = [p for p in pedidos if (p["sala"], p["album"], p["artist"]) not in hay]
+        nuevos = nuevos[:max(0, MAX_LOTE - len(state["lote"]))]
+        state["lote"].extend(nuevos)
+        bump()
+    ya = len(pedidos) - len(nuevos)
+    if not nuevos:
+        raise ApiError(409, "Esos álbumes ya estaban en el lote" if ya == len(pedidos) else f"Ya hay {MAX_LOTE} álbumes en el lote")
+    n = len(nuevos)
+    return {"queued": n, "text": f"{n} {'álbum entró' if n == 1 else 'álbumes entraron'} en el lote: se baja lo que les falta, sin "
+                                 f"tope, después de lo que pida el resto." + (f" ({ya} ya estaban.)" if ya else "")}
+
+
+def cancelar_lote(sala):
+    """✕ del lote (con el PIN): los álbumes que faltaban buscar se sacan, y lo que ya esperaba en la
+    fila para esta sala, también (la que se está bajando termina, pero no queda guardada). Devuelve
+    (álbumes, temas) que se sacaron."""
+    with lock:
+        antes = len(state["lote"])
+        state["lote"] = [p for p in state["lote"] if p["sala"] != sala.id]
+        temas = 0
+        for g in state["saving"]:
+            if g["lote"] and sala.id in g["salas"]:
+                g["salas"].remove(sala.id)
+                temas += not g["error"]
+        state["saving"] = [g for g in state["saving"] if g["salas"]]
+        if not state["lote"]:
+            state["lote_resumen"] = _lote_vacio()
+        bump()
+    return antes - len(state["lote"]), temas
 
 
 def quitar_guardada(sala, body):
@@ -2705,6 +2810,7 @@ class Director:
         threading.Thread(target=self.bucle_predescarga, daemon=True, name="predescarga").start()
         threading.Thread(target=self.bucle_albumes, daemon=True, name="albumes").start()
         threading.Thread(target=self.bucle_guardar, daemon=True, name="guardar").start()
+        threading.Thread(target=self.bucle_lote, daemon=True, name="lote").start()
         threading.Thread(target=self.bucle_salas, daemon=True, name="salas").start()
 
     def _mpv(self, volumen, numero=0):
@@ -2887,8 +2993,18 @@ class Director:
                 sig = next((g for g in state["saving"] if not g["error"]), None)
                 if sig is None:
                     continue
-                sig["bajando"] = True
-                bump()
+                # Las del lote frenan si ya no hay lugar (guardar_gb): bajar más borraría canciones viejas.
+                lleno = sig["lote"] and self.descargas.lleno()
+                if lleno != state["lote_resumen"]["lleno"]:
+                    state["lote_resumen"]["lleno"] = lleno
+                    bump()
+                if not lleno:
+                    sig["bajando"] = True
+                    bump()
+            if lleno:
+                print("  ⚠ el lote espera: no queda lugar para canciones guardadas (guardar_gb)", flush=True)
+                time.sleep(60)
+                continue
             vid, error = sig["videoId"], None
             try:
                 if not self.descargas.datos(vid):   # (si estaba en la cola, capaz ya se bajó)
@@ -2968,6 +3084,41 @@ class Director:
         else:
             print("  🔀 Al azar, pero todavía no hay canciones guardadas: suena cuando pidan algo", flush=True)
         arrancar_al_azar(p)
+
+    def bucle_lote(self, pausa=3, sin_red=30):
+        """⬇ completar varios álbumes (ver completar_albumes): de a uno, le pregunta a YouTube Music qué
+        temas le faltan al álbum y los suma a la fila (sin el tope de MAX_GUARDANDO). Hay a lo sumo
+        LOTE_EN_FILA del lote en la fila: a medida que se bajan, sigue con el próximo álbum. Si no hay
+        internet, espera y reintenta; un álbum que no se encuentra queda anotado en el resumen."""
+        while True:
+            with changed:
+                while not (state["lote"] and sum(g["lote"] and not g["error"] for g in state["saving"]) < LOTE_EN_FILA):
+                    changed.wait(timeout=30)
+                pedido = state["lote"][0]
+            sala, fallo, temas = salas.get(pedido["sala"]), None, 0
+            try:
+                if sala is None:
+                    raise ApiError(404, "esa sala ya no existe")
+                bid = album_llamado(pedido["album"], pedido["artist"])
+                temas = _guardar_coleccion(sala, pedido["client"], bid, get_album(bid), lote=True)["added"]
+            except ApiError as e:
+                if e.code != 409:   # (409: no había nada para bajar: ya está entero, o ya se estaba bajando)
+                    fallo = e.msg
+            except Exception as e:   # YouTube Music, o la red
+                if not hay_internet():
+                    time.sleep(sin_red)
+                    continue
+                fallo = str(e)[:160] or type(e).__name__
+            with lock:
+                if state["lote"] and state["lote"][0] is pedido:   # (pudieron cancelarlo mientras tanto)
+                    state["lote"].pop(0)
+                    r = state["lote_resumen"]
+                    r["hechos"] += 1
+                    r["temas"] += temas
+                    if fallo:
+                        r["fallaron"] = (r["fallaron"] + [f"{pedido['album']}: {fallo}"])[-30:]
+                    bump()
+            time.sleep(pausa)
 
     def bucle_albumes(self, espera=20, pausa=2):
         """Las canciones que guardó una versión que no anotaba el álbum: se lo pregunta a
@@ -3711,6 +3862,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(director.descargas.artistas(desde, n, sala=sid))
                 if vista == "artista":   # lo de uno: sus temas y sus álbumes
                     return self.send_json(artista_guardado(sid, qs.get("artista", [""])[0][:200]))
+                if vista == "discos":   # todos los álbumes, sin sus temas: la biblioteca (⬇ descargas)
+                    return self.send_json(director.descargas.discos(qs.get("q", [""])[0][:100], sala=sid))
                 ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
                 return self.send_json(ver(qs.get("q", [""])[0][:100], desde, n, sala=sid))
             if u.path == "/api/stats":   # el recap
@@ -3820,6 +3973,12 @@ class Handler(BaseHTTPRequestHandler):
                 move_to(sala, body)
             elif path == "/api/download-move":   # ⤒ ↑ ↓ en ⬇ descargas: el orden en que se bajan
                 mover_guardado(sala, body)
+            elif path == "/api/download-albums":   # ⬇ completar varios álbumes, sin el tope (la biblioteca)
+                r = completar_albumes(sala, body)
+                return self.send_json(dict(r, state=public_state(sala, client)))
+            elif path == "/api/download-albums-cancel":   # ✕ el lote
+                albumes_n, temas_n = cancelar_lote(sala)
+                return self.send_json({"albums": albumes_n, "songs": temas_n, "state": public_state(sala, client)})
             elif path == "/api/remove-playlist":
                 remove_playlist(sala, body)
             elif path == "/api/shuffle":
