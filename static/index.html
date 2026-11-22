@@ -1282,7 +1282,8 @@ function render(s) {
   // cola…), así que se arma todo de nuevo.
   const forzar = s === last;
   last = s;
-  current = s.now; progress = s.progress; progressAt = performance.now();
+  current = s.now; progress = s.progress;
+  if (!forzar) progressAt = performance.now();   // (el mismo estado otra vez no es una medida nueva: si no, la posición vuelve atrás y la radio la sigue)
   queuedIds = new Set([...s.queue.filter(i => !i.azar).map(i => i.videoId), s.now?.videoId].filter(Boolean));   // (sin las elegidas al azar: esas se pueden pedir)
   const sinParlante = !!s.room && !s.room.main;   // se escucha sólo con 📻 radio
   pintarSalas(s);
@@ -2494,8 +2495,9 @@ function refrescarGuardadas(demora) {
 // Cuántas por página: en la compu, las que entran en el lugar de la lista (descontando el
 // paginado si hace falta, o sea si son más de `total`); en el celular, POR_PAGINA.
 function porPaginaGuardadas(total) {
-  if (!fijo() || $("#guardadas").hidden) return POR_PAGINA[vista];   // (escondidas no se pueden medir)
   const caja = $("#guardadas");
+  // (escondidas no se pueden medir; tampoco si lo escondido es la vista entera: recap, descargas, voz…)
+  if (!fijo() || caja.hidden || !caja.getClientRects().length) return biblio.n || POR_PAGINA[vista];
   const muestra = () => fila({ title: "–", artist: "–", duration: 1 }, { imagen: true, action: el("button", {}, "+ agregar") });
   const sonda = el("div", { class: "sonda" }, muestra(), muestra(), paginador(0, 2, () => {}, ""));   // invisibles
   caja.append(sonda);
@@ -2504,6 +2506,7 @@ function porPaginaGuardadas(total) {
   // La primera fila mide f1; cada una de las que siguen, f2 (con el borde de arriba, mida lo
   // que mida en esta pantalla); el paginado, desde el fondo de la última fila (con su margen).
   const lugar = caja.getBoundingClientRect().height, paginado = pg.bottom - f2.bottom;
+  if (!(lugar > 0 && f1.height > 0 && f2.height > 0)) return biblio.n || POR_PAGINA[vista];   // sin medidas de verdad: no cambiar nada
   const cuantas = h => Math.max(1, Math.floor((h - f1.height + 0.5) / f2.height) + 1);
   return total > cuantas(lugar) ? cuantas(lugar - paginado) : cuantas(lugar);
 }
