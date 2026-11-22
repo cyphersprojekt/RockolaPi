@@ -450,6 +450,37 @@
   #dialogo.peligro .panel { border-color: var(--red); }
   #dialogo.peligro .panel > .ttl { color: var(--red); }
   #dlgTexto { margin: 0; overflow-wrap: anywhere; }
+  /* 🗣️ generar tts: el mismo panel que las preguntas, más ancho y con sus ajustes */
+  #ttsDlg { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(64ch, calc(100vw - 32px)); max-width: none; overflow: visible; }
+  #ttsDlg::backdrop { background: rgba(29, 32, 33, .75); }
+  #ttsDlg[open] { animation: aparecer .15s ease-out; }
+  @media (prefers-reduced-motion: reduce) { #ttsDlg[open] { animation: none; } }
+  #ttsDlg .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--acc); padding: 1.3em 2ch 1em;
+                   display: block; }
+  #ttsDlg .cuerpo { display: grid; gap: .7em; max-height: calc(100vh - 6em); max-height: calc(100dvh - 6em); overflow-y: auto; overflow-x: hidden; padding-right: .5ch; color-scheme: dark; }
+  #ttsDlg .panel > .ttl { color: var(--acc); }
+  #ttsDlg textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 5em; font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line); padding: .5em 1ch; }
+  #ttsDlg textarea:focus-visible { outline: 1px solid var(--acc); border-color: var(--acc); }
+  #ttsDlg input[type=text], #ttsDlg select { width: 100%; box-sizing: border-box; }
+  #ttsDlg select { font: inherit; color: var(--fg); background: var(--bg1); border: 1px solid var(--line); padding: .35em 1ch; color-scheme: dark light; }
+  #ttsDlg select:focus-visible { outline: 1px solid var(--acc); border-color: var(--acc); }
+  #ttsDlg .ajuste { display: grid; grid-template-columns: 17ch minmax(0, 1fr) 9ch; align-items: center; gap: 1ch; }
+  #ttsDlg .ajuste.uno { grid-template-columns: 17ch minmax(0, 1fr); }
+  #ttsDlg .ajuste output { text-align: right; color: var(--dim); white-space: nowrap; }
+  #ttsDlg input[type=range] { width: 100%; accent-color: var(--acc); margin: 0; }
+  #ttsDlg input[type=checkbox] { accent-color: var(--acc); width: 1.2em; height: 1.2em; margin: 0; }
+  #ttsDlg details { border-top: 1px dashed var(--line); padding-top: .6em; }
+  #ttsDlg details[open] { display: grid; gap: .7em; }
+  #ttsDlg summary { cursor: pointer; color: var(--dim); }
+  #ttsDlg .estado { color: var(--dim); min-height: 1.3em; overflow-wrap: anywhere; }
+  #ttsDlg .estado.mal { color: var(--red); }
+  /* el reproductor del audio generado: botón, barra y tiempo, con los colores de la página */
+  #ttsDlg .oir { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 1ch; border: 1px solid var(--line); background: var(--bg1); padding: .35em 1ch; }
+  #ttsDlg .oir[hidden] { display: none; }
+  #ttsDlg .oir button { min-width: 3.4ch; padding: .2em .8ch; }
+  #ttsDlg .oir .tiempo { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #ttsDlg .botones { display: flex; flex-wrap: wrap; gap: .8ch; justify-content: flex-end; }
+  @media (max-width: 480px) { #ttsDlg .ajuste { grid-template-columns: minmax(0, 1fr) 9ch; } #ttsDlg .ajuste > label { grid-column: 1 / -1; } #ttsDlg .ajuste.uno { grid-template-columns: 1fr; } }
   #dlgInput { width: 100%; margin-top: .8em; }
   .dlgBotones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1ch; margin-top: 1.2em; }
   button.primario.peligro { background: var(--red); border-color: var(--red); }
@@ -726,6 +757,9 @@
       <button value="si" id="dlgSi" class="primario">sí</button>
     </div>
   </form>
+</dialog>
+<dialog id="ttsDlg" aria-labelledby="ttsTitulo">
+  <form method="dialog" class="panel" id="ttsForm" novalidate></form>
 </dialog>
 <div id="toast"></div>
 
@@ -3530,6 +3564,140 @@ const vozVista = (() => {
     catch (err) { toast(err.message, true); }
   }
 
+  // 🗣️ generar tts: un modal para escribir un texto y que una voz de Piper lo diga (static/piper/voz.js). Se
+  // genera en ESTE navegador, no en la rockola: la Raspberry sólo recibe el audio hecho, como cualquier
+  // anuncio. Se genera, se escucha y, si gusta, se guarda. El texto va tal cual: no se corrige nada solo.
+  const ttsModal = (() => {
+    const dlgTts = $("#ttsDlg"), forma = $("#ttsForm");
+    let modulo = null, armado = false, wav = null, urlWav = null, ocupado = false, ajustes = {};
+    const cargar = () => { try { return JSON.parse(store.get("tts") || "{}") || {}; } catch { return {}; } };
+    const guardarAjustes = () => store.set("tts", JSON.stringify(ajustes));
+    const refs = {};
+
+    const suelta = () => { wav = null; refs.guardar.disabled = true; refs.reproductor.hidden = true; refs.oir.pause(); refs.oir.removeAttribute("src"); ponerTiempo(); if (urlWav) URL.revokeObjectURL(urlWav); urlWav = null; };
+    const mmss = x => { x = Number.isFinite(x) ? Math.max(0, x) : 0; return `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`; };
+    function ponerTiempo() {
+      const o = refs.oir; if (!o || !refs.tiempo) return;
+      const d = Number.isFinite(o.duration) ? o.duration : 0;
+      refs.tiempo.textContent = `${mmss(o.currentTime)} / ${mmss(d)}`;
+      if (document.activeElement !== refs.barra) refs.barra.value = d ? Math.round(o.currentTime / d * 1000) : 0;
+      const suena = !o.paused && !o.ended;
+      refs.play.textContent = suena ? "⏸" : "▶"; refs.play.setAttribute("aria-label", suena ? "Pausar" : "Escuchar");
+    }
+    const aviso = (t, mal = false) => { refs.estado.textContent = t; refs.estado.classList.toggle("mal", mal); };
+    const cambio = () => { suelta(); guardarAjustes(); };
+
+    // Un ajuste con barra: etiqueta, barra y lo que vale. `ver` pasa el valor a texto; `nulo`: valor de «los de la voz».
+    function barra(clave, etiqueta, min, max, paso, ver, ayuda) {
+      const out = el("output"), input = el("input", { type: "range", min, max, step: paso, "aria-label": etiqueta, title: ayuda || "" });
+      const pintar = () => { const v = ajustes[clave] ?? AJ.AJUSTES[clave]; input.value = v ?? (min + max) / 2; out.textContent = ajustes[clave] == null && AJ.AJUSTES[clave] == null ? "de la voz" : ver(+input.value); };
+      input.oninput = () => { ajustes[clave] = +input.value; pintar(); cambio(); };
+      refs[clave] = { pintar };
+      return el("div", { class: "ajuste", title: ayuda || "" }, el("label", {}, etiqueta), input, out);
+    }
+    let AJ = null;   // el módulo (valores de fábrica y voces)
+
+    function armar() {
+      armado = true;
+      refs.texto = el("textarea", { rows: 4, maxlength: 600, "aria-label": "Texto a decir", placeholder: "Escribí lo que va a decir… (por ejemplo: Son las catorce horas)", oninput: cambio });
+      refs.nombre = el("input", { type: "text", maxlength: 60, "aria-label": "Nombre del anuncio", placeholder: "opcional: si no, el texto" });
+      refs.voz = el("select", { "aria-label": "Voz", onchange: () => { ajustes.voz = refs.voz.value; pintarVoz(); cambio(); } },
+        AJ.VOCES.map(v => el("option", { value: v.id }, `${v.nombre} · ${v.mb} MB`)));
+      refs.hablante = el("select", { "aria-label": "Hablante", onchange: () => { ajustes.hablante = +refs.hablante.value; cambio(); } },
+        [0, 1].map(n => el("option", { value: n }, `hablante ${n + 1}`)));
+      refs.filaHablante = el("div", { class: "ajuste uno" }, el("label", {}, "Hablante"), refs.hablante);
+      refs.normalizar = el("input", { type: "checkbox", "aria-label": "Normalizar", onchange: () => { ajustes.normalizar = refs.normalizar.checked; cambio(); } });
+      refs.estado = el("div", { class: "estado", "aria-live": "polite" });
+      // El reproductor del audio generado: el <audio> es de memoria (sin controles); lo que se ve es esto.
+      refs.oir = new Audio();
+      refs.play = el("button", { type: "button", "aria-label": "Escuchar", title: "Escuchar / pausar", onclick: () => { refs.oir.paused ? refs.oir.play().catch(() => {}) : refs.oir.pause(); } }, "▶");
+      refs.barra = el("input", { type: "range", min: 0, max: 1000, step: 1, value: 0, "aria-label": "Posición del audio",
+        oninput: () => { if (refs.oir.duration) refs.oir.currentTime = refs.barra.value / 1000 * refs.oir.duration; } });
+      refs.tiempo = el("span", { class: "tiempo" }, "0:00 / 0:00");
+      refs.reproductor = el("div", { class: "oir", hidden: true }, refs.play, refs.barra, refs.tiempo);
+      for (const e of ["timeupdate", "loadedmetadata", "durationchange", "ended", "emptied"]) refs.oir.addEventListener(e, ponerTiempo);
+      for (const e of ["play", "pause", "ended", "emptied"]) refs.oir.addEventListener(e, ponerTiempo);
+      refs.generar = el("button", { type: "button", class: "primario", onclick: generar }, "▶ generar y escuchar");
+      refs.guardar = el("button", { type: "button", disabled: true, onclick: guardar }, "＋ guardar como anuncio");
+      const s = x => x.toFixed(1).replace(/\.0$/, "");
+      forma.replaceChildren(
+        el("span", { class: "ttl", id: "ttsTitulo" }, "🗣️ GENERAR TTS"),
+        el("div", { class: "cuerpo" },
+        el("div", { class: "dim" }, "Una voz dice el texto y queda como un anuncio. Se genera en este navegador: la rockola no gasta nada."),
+        refs.texto,
+        el("div", { class: "ajuste uno" }, el("label", {}, "Voz"), refs.voz),
+        refs.filaHablante,
+        barra("velocidad", "Velocidad", 0.5, 1.8, 0.05, v => `${v.toFixed(2).replace(/0$/, "")}×`, "1× es la velocidad de la voz; más es más rápido"),
+        barra("volumen", "Volumen", 20, 200, 5, v => `${v} %`, "Del audio mismo. Con «normalizar», 100 % es lo más fuerte que da sin distorsionar; pasarse de 100 % puede distorsionar"),
+        el("div", { class: "ajuste uno" }, el("label", { title: "Sube el audio hasta el máximo antes de aplicar el volumen: la voz sale bastante baja" }, "Normalizar"), el("label", {}, refs.normalizar, " subir al máximo (recomendado)")),
+        el("details", {},
+          el("summary", {}, "más ajustes"),
+          barra("variacion", "Variación", 0, 1, 0.05, v => v.toFixed(2), "Cuánto cambia la entonación de una vez a otra: más es más expresiva (y más irregular). Por defecto, la de la voz"),
+          barra("ritmo", "Ritmo", 0, 1.2, 0.05, v => v.toFixed(2), "Cuánto varía la duración de cada sonido: más es más irregular. Por defecto, la de la voz"),
+          barra("pausa", "Pausa (frases)", 0, 2, 0.05, v => `${v.toFixed(2)} s`, "El silencio entre una oración y la que sigue"),
+          barra("inicio", "Silencio inicial", 0, 3, 0.1, v => `${v.toFixed(1)} s`, "Un poco de silencio antes: la música tarda un instante en bajar"),
+          barra("final", "Silencio final", 0, 3, 0.1, v => `${v.toFixed(1)} s`, "Un poco de silencio después"),
+          el("div", { class: "botones" }, el("button", { type: "button", onclick: () => { const { voz } = ajustes; ajustes = { voz }; pintarTodo(); cambio(); } }, "valores de fábrica"))),
+        el("div", { class: "ajuste uno" }, el("label", {}, "Nombre"), refs.nombre),
+        refs.estado, refs.reproductor,
+        el("div", { class: "botones" }, el("button", { type: "button", onclick: () => dlgTts.close() }, "cerrar"), refs.generar, refs.guardar)));
+    }
+    function pintarVoz() { refs.filaHablante.hidden = !AJ.VOCES.find(v => v.id === refs.voz.value)?.hablantes; }
+    function pintarTodo() {
+      refs.voz.value = AJ.VOCES.some(v => v.id === ajustes.voz) ? ajustes.voz : AJ.AJUSTES.voz;
+      refs.hablante.value = ajustes.hablante ?? 0;
+      refs.normalizar.checked = ajustes.normalizar ?? AJ.AJUSTES.normalizar;
+      for (const k of ["velocidad", "volumen", "variacion", "ritmo", "pausa", "inicio", "final"]) refs[k].pintar();
+      pintarVoz();
+    }
+    const completos = () => ({ ...AJ.AJUSTES, ...ajustes, voz: refs.voz.value });
+
+    function ocupar(si) {
+      ocupado = si;
+      for (const e of forma.querySelectorAll("input, select, textarea, button")) if (e !== refs.guardar && e.textContent !== "cerrar") e.disabled = si;
+      refs.guardar.disabled = si || !wav;
+    }
+    async function generar() {
+      if (ocupado) return;
+      const texto = refs.texto.value;
+      if (!texto.trim()) { aviso("Escribí algo para decir.", true); refs.texto.focus(); return; }
+      suelta(); ocupar(true); aviso("Preparando…");
+      try {
+        wav = await AJ.hablar(texto, completos(), t => aviso(t));
+        urlWav = URL.createObjectURL(wav); refs.oir.src = urlWav; refs.reproductor.hidden = false;
+        aviso("Listo: escuchalo y, si te gusta, guardalo (o cambiá algo y generalo de nuevo).");
+        refs.oir.play().catch(() => {});
+      } catch (err) { aviso("⚠ " + (err.message || err), true); console.error("texto a voz:", err); }
+      ocupar(false);
+    }
+    async function guardar() {
+      if (!wav || ocupado) return;
+      const nombre = refs.nombre.value.trim() || refs.texto.value.trim().replace(/\s+/g, " ").slice(0, 60);
+      ocupar(true); aviso("Guardando…");
+      await subir(wav, nombre);
+      ocupar(false);
+      dlgTts.close(); pintar(true);
+    }
+
+    dlgTts.addEventListener("close", () => { refs.oir?.pause(); });
+    let abajo = null;   // tocar afuera cierra (si se apretó y se soltó afuera)
+    dlgTts.addEventListener("pointerdown", e => { abajo = e.target; });
+    dlgTts.addEventListener("click", e => { if (e.target === dlgTts && abajo === dlgTts && !ocupado) dlgTts.close(); });
+    dlgTts.addEventListener("cancel", e => { if (ocupado) e.preventDefault(); });   // (Esc no corta una generación)
+
+    async function abrir() {
+      if (!dlgTts.showModal || dlgTts.open || dlg.open) return;
+      try { AJ = modulo ||= await import("/piper/voz.js"); } catch (err) { toast("No pude cargar el texto a voz: " + (err.message || err), true); return; }
+      ajustes = cargar();
+      if (!armado) armar();
+      suelta(); aviso(""); pintarTodo();
+      dlgTts.showModal();
+      refs.texto.focus();
+      AJ.estaBajada(refs.voz.value).then(si => { if (!si && dlgTts.open && !wav) aviso(`La primera vez baja la voz (${AJ.VOCES.find(v => v.id === refs.voz.value).mb} MB) y queda guardada en el navegador.`); });
+    }
+    return { abrir };
+  })();
+
   function numero(a, clave, etiqueta, tope) {
     return el("label", { class: "dim" }, etiqueta, " ", el("input", { type: "number", min: 0, max: tope, value: a[clave], style: "width:6ch",
       onchange: ev => llamar("/api/voz-anuncio-editar", { id: a.id, [clave]: ev.target.value }) }));
@@ -3541,7 +3709,7 @@ const vozVista = (() => {
     const https = infoRockola.https, aqui = location.protocol === "https:";
     const f = JSON.stringify([datos, admin, sirve(), https, micOn, !!grabando]);
     if (!forzar && f === firma) return;
-    if (document.activeElement?.closest?.("#voz") && document.activeElement.tagName === "INPUT" && !forzar) return;
+    if (document.activeElement?.closest?.("#voz") && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") && !forzar) return;
     firma = f;
     $("#vozTtl").textContent = "VOZ" + (datos.mic ? " · 🎙️ micrófono abierto" : datos.suena ? " · 🔊 suena un anuncio" : "");
     if (!admin || !sirve()) {
@@ -3578,8 +3746,9 @@ const vozVista = (() => {
         if (nombre != null) await subir(f, nombre);
       }
       pintar(true); } });
-    // Los botones, uno al lado del otro: abrir el micrófono, grabar y subir audios (los dos primeros, sólo por https).
+    // Los botones, uno al lado del otro: abrir el micrófono, grabar, generar una voz con texto y subir audios (los dos primeros, sólo por https).
     const subir_ = el("button", { type: "button", onclick: () => subirArchivo.click() }, "＋ subir audios (mp3, m4a, ogg, wav…)");
+    const tts_ = el("button", { type: "button", title: "Escribir un texto y que una voz lo diga (se genera en este navegador)", onclick: () => ttsModal.abrir() }, "🗣️ generar tts");
     cuerpo.replaceChildren(...[
       !seguro() && el("div", { class: "hint" }, aqui ? "⚠ Este navegador no da acceso al micrófono."
             : https ? ["Para hablar o grabar, abrí la rockola por https (el navegador va a avisar que el certificado es propio: es normal, aceptalo una vez). ",
@@ -3589,7 +3758,7 @@ const vozVista = (() => {
         seguro() && el("button", { type: "button", class: micOn || datos.mic ? "primario" : "", "aria-pressed": String(micOn),
                                    onclick: () => hablar(!micOn) }, micOn ? "🎙️ micrófono abierto: tocá para cerrar" : "🎙️ abrir el micrófono"),
         seguro() && el("button", { type: "button", class: grabando ? "primario" : "", onclick: grabar }, grabando ? "⏹ terminar de grabar" : "⏺ grabar un anuncio"),
-        subir_, subirArchivo),
+        tts_, subir_, subirArchivo),
       lista.length ? el("div", {}, lista) : el("div", { class: "vacio" }, "Todavía no hay anuncios. Grabá uno o subí un audio: suena encima de la música, que baja un rato."),
     ].filter(Boolean));
   }

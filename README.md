@@ -20,6 +20,9 @@ sala, el nombre y cuatro botones: 📻 radio, 📊 recap, ⬇ descargas y 🔒 c
 | ![Recap](docs/img/recap1.png) | ![Recap, más abajo](docs/img/recap2.png) |
 | **📊 Recap:** cuánto sonó y el top de canciones, artistas y géneros | Quién pide más, a qué hora y qué día suena |
 
+<p align="center"><img src="docs/img/tts.png" alt="Generar tts" width="420"><br>
+<b>🗣️ Generar tts:</b> una voz dice el texto que escribas, con sus ajustes, y queda como anuncio</p>
+
 ![Las estadísticas, en la pantalla](docs/img/tui_recap.png)
 
 **En la pantalla de la Raspberry**, cada 15 segundos el reproductor le deja el lugar a lo más
@@ -164,7 +167,7 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   toque, y también si se cortó internet.
 - **Guardar sin pedir:** en los resultados de YouTube, **⬇ guardar** la baja para que quede entre
   las guardadas, sin ponerla en la cola (en modo mpv). Se bajan de a una, después de la que tiene
-  que sonar; hasta 40 esperando a la vez, con las mismas reglas que para pedir (nada en vivo ni
+  que sonar; hasta 100 esperando a la vez (el lote de **📚 biblioteca** no cuenta), con las mismas reglas que para pedir (nada en vivo ni
   más largo que `duracion_maxima`). Lo que espera se ve en **⬇ descargas** (abajo).
 - **⬇ Descargas:** arriba (en el celular, en el menú de abajo), **⬇** cambia la cola por la lista de lo que espera para
   bajarse, en la misma página, como el recap (el botón lleva la cuenta en la esquina; tocándolo
@@ -321,6 +324,17 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   ofrece **abrir por https** (el navegador avisa una vez que el certificado es propio: se acepta)
   y recién ahí aparecen el micrófono y grabar. Subir un audio ya hecho y manejar los anuncios
   andan por http.
+  **🗣️ Generar tts:** el botón de al lado de grabar y subir abre un modal para escribir un texto y que
+  una voz lo diga; se escucha antes de guardarlo, y queda como un anuncio más. Se puede elegir la
+  **voz** (Daniela, argentina; y otras en español de México y España; Sharvard trae dos hablantes), la
+  **velocidad**, el **volumen** (con «normalizar», que sube el audio al máximo antes: la voz sale baja) y,
+  en «más ajustes», la variación y el ritmo de la voz, la pausa entre frases y el silencio al principio
+  y al final. Los ajustes se recuerdan en el navegador. La voz ([Piper](https://github.com/rhasspy/piper))
+  se genera **en el navegador de quien lo usa**, no en la Raspberry: ésta sólo recibe el audio ya
+  hecho. La primera vez con cada voz el navegador la baja (28 a 114 MB, de HuggingFace) y el motor (de
+  jsdelivr y cdnjs) y los guarda; hace falta internet esa vez. El texto se dice tal cual se escribe (no
+  se corrige nada solo). El código está en `static/piper/` (`voz.js`, y `fonemas.js`, de
+  `@diffusionstudio/piper-wasm`, MIT).
   **Dónde se escucha:** en la sala del parlante, en el parlante (con la música más baja). En todas
   las salas, además, por **📻 radio**: quien la tiene prendida oye el anuncio entrando a la par
   (un segundo de diferencia) y su música baja mientras tanto. El micrófono por radio llega con
@@ -479,6 +493,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
 ├── static/               páginas web: pedidos, 📊 recap y ⬇ descargas (/), las salas de tv (/tv), /pantalla y /player
+│   ├── piper/            🗣️ texto a voz (Piper, en el navegador): voz.js y fonemas.js
 │   └── fuentes/          la letra de las páginas (JetBrains Mono, con su licencia OFL): la sirve la rockola
 ├── iniciar.sh, tui.sh    arrancar el servidor y la pantalla
 ├── rockola.ejemplo.toml  configuración de ejemplo

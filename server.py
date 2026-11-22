@@ -86,6 +86,7 @@ DATOS_TEMA = ("videoId", "title", "artist", "duration", "thumb", "album")   # lo
 MAX_SUELTOS = 20          # temas sueltos que se suman de una vez a una ♫ playlist
 ID_ANUNCIO = re.compile(r"[0-9a-f]{10}")
 RANGO = re.compile(r"bytes=(\d*)-(\d*)")   # el pedazo de un archivo que pide el navegador
+PIPER = re.compile(r"/piper/(fonemas|voz)\.js")   # el texto a voz del navegador (static/piper)
 FUENTE = re.compile(r"/fuentes/([a-z0-9-]+\.woff2)")   # la letra de las páginas (static/fuentes)
 UN_ANIO = 365 * 24 * 3600
 TIPOS_AUDIO = {".webm": "audio/webm", ".weba": "audio/webm", ".opus": "audio/ogg", ".ogg": "audio/ogg",
@@ -3787,6 +3788,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not ruta.is_file():
                     raise ApiError(404, "No existe")
                 return self.send_bytes(ruta.read_bytes(), "font/woff2", cache=UN_ANIO)
+            piper = PIPER.fullmatch(u.path)
+            if piper:   # el texto a voz (Piper) que corre en el navegador de quien lo usa
+                return self.send_bytes((STATIC / "piper" / f"{piper[1]}.js").read_bytes(), "text/javascript; charset=utf-8", cache=True)
             if u.path.startswith("/tapas/"):   # la copia de una tapa (la dirección dice cuál es: no cambia nunca)
                 copia = tapas and tapas.archivo(u.path.removeprefix("/tapas/"))
                 if not copia:
