@@ -455,7 +455,7 @@ class Rockola(App):
         t.append(now["title"] + "\n", style="bold")
         t.append(now["artist"] + "\n\n", style="")
         if now.get("azar"):
-            t.append("🔀 al azar, de las guardadas\n", style="bold")
+            t.append("🌐 al azar, de YouTube\n" if now.get("online") else "🔀 al azar, de las guardadas\n", style="bold")
         else:
             t.append("pedida por ", style="dim")
             t.append(now["by"] + "\n", style="bold")
@@ -546,7 +546,7 @@ class Rockola(App):
             t.append("  " + "━" * lleno, style=f"bold {self.acento}")
             t.append("─" * (largo - lleno), style="dim")
             t.append(f"  {fmt(tt)} / {fmt(dur)}")
-            t.append("  🔀 al azar" if now.get("azar") else f"  pedida por {now['by']}", style="dim")
+            t.append(("  🌐 de YouTube" if now.get("online") else "  🔀 al azar") if now.get("azar") else f"  pedida por {now['by']}", style="dim")
         self.poner(self.query_one("#info", Static), t)
 
     def pintar_recap(self):

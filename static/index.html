@@ -274,6 +274,7 @@
   .biblio { flex: 1; min-width: 0; font-size: .87em; }
   .modos { display: flex; gap: .6ch; flex: none; margin-left: auto; }
   .modos button { padding: .05em .7ch; font-size: .87em; }
+  .modos button.cae { opacity: .5; }   /* sin internet: la fuente elegida espera, suenan las guardadas */
   #borrarSalaBtn { margin-left: auto; }   /* (sala sin parlante: no hay volumen; va contra el borde) */
   form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
   form.pin input { width: 11ch; letter-spacing: .2em; }
@@ -430,7 +431,14 @@
   #descargasBiblio .barra { display: flex; flex-wrap: wrap; align-items: center; gap: .6ch; padding-bottom: .5em; border-bottom: 1px solid var(--line); }
   #descargasBiblio .barra input[type=search] { flex: 1 1 16ch; min-width: 0; }
   #descargasBiblio .cuantos { flex-basis: 100%; color: var(--dim); font-size: .87em; }
-  #descargasBiblio .fila.bib { cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 3.6em; }
+  #descargasBiblio .estado { width: 17ch; }   /* el desplegable de «cuáles ver»: de ancho fijo */
+  /* (.barra también es la barra de progreso del reproductor, con overflow: hidden y white-space: pre: acá no,
+     o el desplegable queda cortado en el borde de la barra) */
+  #descargasBiblio .barra { position: relative; z-index: 5; overflow: visible; white-space: normal; margin-top: 0; }
+  #descargasBiblio .hojas { display: flex; align-items: center; gap: .6ch; margin-left: auto; }
+  #descargasBiblio .hojas .n { min-width: 7ch; text-align: center; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #descargasBiblio .completo { color: var(--ok); }
+  #descargasBiblio .fila.bib { cursor: pointer; }
   #descargasBiblio .fila.bib:hover .t { color: var(--acc); }
   #descargasBiblio .fila.bib.elegido .t { color: var(--acc); font-weight: 700; }
   #descargasBiblio input[type=checkbox] { flex: none; width: 1.3em; height: 1.3em; margin: 0; accent-color: var(--acc); cursor: pointer; }
@@ -612,6 +620,7 @@
         <div class="modos">
           <button id="shufBtn" type="button" aria-pressed="false" aria-label="Al azar"
                   title="Al azar: cuando la cola se vacía, suenan canciones guardadas al azar">🔀</button>
+          <button id="fuenteBtn" type="button" aria-label="De dónde elige el aleatorio" hidden></button>
           <button id="fundirBtn" type="button" aria-pressed="false" aria-label="Crossfade" hidden
                   title="Crossfade: cuando a una canción le quedan unos segundos, la que sigue va entrando mientras esa se va, sin silencio entre las dos">🎚️</button>
         </div>
@@ -1010,6 +1019,15 @@ $("#shufBtn").onclick = async () => {
     toast(`Prendido. Todavía no hay canciones guardadas${(last.rooms || []).length > 1 ? " en esta sala" : ""}: se van guardando a medida que suenan.`);
 };
 
+// 📁 offline (las guardadas) → 🌓 mixto → 🌐 online (relacionadas de YouTube Music): cada toque pasa a la que sigue.
+const FUENTES = [["offline", "📁", "Offline: el aleatorio elige entre las canciones guardadas"],
+                 ["mixto", "🌓", "Mixto: el aleatorio elige la mitad entre las guardadas y la mitad entre las que YouTube Music da como relacionadas con la que suena"],
+                 ["online", "🌐", "Online: el aleatorio elige entre las que YouTube Music da como relacionadas con la que suena (se bajan y quedan guardadas)"]];
+$("#fuenteBtn").onclick = () => {
+  const i = FUENTES.findIndex(f => f[0] === (last?.source || "offline"));
+  control("/api/source", { fuente: FUENTES[(i + 1) % FUENTES.length][0] });
+};
+
 $("#fundirBtn").onclick = async () => {
   const on = !last?.crossfade;
   await control("/api/crossfade", { on });
@@ -1018,7 +1036,7 @@ $("#fundirBtn").onclick = async () => {
 
 const gb = b => (b / 1024 ** 3).toLocaleString("es", { maximumFractionDigits: b < 10 * 1024 ** 3 ? 1 : 0 });
 const tamano = b => b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${gb(b)} GB`;
-const quien = it => it.azar ? el("span", { class: "quien" }, "🔀 al azar")
+const quien = it => it.azar ? el("span", { class: "quien" }, it.online ? "🌐 de YouTube" : "🔀 al azar")
                             : ["pedida por ", el("span", { class: "quien" }, it.by)];
 
 // Volumen: mientras arrastrás manda cambios cada tanto; al soltar, el valor final.
@@ -1396,12 +1414,22 @@ function render(s) {
   $("#playBtn").textContent = suena ? "⏸" : "▶";
   $("#playBtn").title = suena ? "Pausa" : "Seguir";
   $("#playBtn").setAttribute("aria-label", $("#playBtn").title);
-  const alAzar = s.shuffle && s.library?.songs > 0;   // ▶ sin nada sonando arranca una al azar
+  const alAzar = s.shuffle && (s.library?.songs > 0 || s.sourceNow === "online");   // ▶ sin nada sonando arranca una al azar
   $("#playBtn").disabled = !s.now && !alAzar;
   $("#skipBtn").disabled = !s.now;
   $("#shufBtn").hidden = !conMpv;
   $("#shufBtn").classList.toggle("on", !!s.shuffle);
   $("#shufBtn").setAttribute("aria-pressed", String(!!s.shuffle));
+  {
+    const [, icono, texto] = FUENTES.find(f => f[0] === s.source) || FUENTES[0];
+    const cae = s.source && s.sourceNow !== s.source;   // sin internet: suenan las guardadas, y vuelve sola
+    const b = $("#fuenteBtn");
+    b.hidden = !conMpv;
+    b.textContent = icono;
+    b.classList.toggle("cae", !!cae);
+    b.title = texto + (cae ? ". Sin internet: ahora suenan las guardadas; cuando vuelva, vuelve sola" : "") + " (tocá para cambiar)";
+    b.setAttribute("aria-label", b.title);
+  }
   // El crossfade es del parlante: en las salas sin parlante (y en modo navegador) no hay (null).
   $("#fundirBtn").hidden = !conMpv || s.crossfade == null;
   $("#fundirBtn").classList.toggle("on", !!s.crossfade);
@@ -3164,6 +3192,12 @@ const descargasVista = (() => {
   let discos = null, discosJson = null, discosError = null, discosPedido = 0, discosTimer = null, versionBiblio = null;
   const elegidos = new Set(), filas = new Map();   // key -> { fila, casilla } de los que se ven
   let filtro = "", visibles = [], ultimoElegido = null, firmaDiscos = null, armada = null;
+  // Cuáles ver (todos, incompletos…), en qué página y cuántos álbumes faltan revisar (el servidor los va revisando de a uno).
+  const POR_PAGINA = 50;
+  const ESTADOS = [["todos", "todos"], ["incompletos", "incompletos"], ["completos", "completos"], ["sindatos", "sin datos"]];
+  let estado = ESTADOS.some(e => e[0] === store.get("descargasEstado")) ? store.get("descargasEstado") : "todos";
+  let pagina = 0, enPagina = [], sinRevisar = 0, scanTimer = null;
+  const pasa = a => estado === "todos" || (estado === "incompletos" ? a.faltan > 0 : estado === "completos" ? a.faltan === 0 : a.faltan == null);
   const sinTildes = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
   const link = (paraSala = sala, aca = abierta) =>
@@ -3349,7 +3383,7 @@ const descargasVista = (() => {
       const nueva = JSON.stringify(r.albums);
       if (nueva !== discosJson || discosError) firmaDiscos = null;   // (si no cambió nada, no se arma de nuevo: no se pierde el foco)
       discosJson = nueva;
-      discos = r.albums; discosError = null;
+      discos = r.albums; discosError = null; sinRevisar = r.sin_revisar || 0;
       const hay = new Set(discos.map(a => a.key));
       for (const k of [...elegidos]) if (!hay.has(k)) elegidos.delete(k);   // (ya no está: no se pide)
     } catch (err) {
@@ -3357,10 +3391,13 @@ const descargasVista = (() => {
       discosError = err.message; firmaDiscos = null;
     }
     if (abierta && tab === "biblioteca") pintar();
+    // Mientras el servidor revisa los álbumes (cuáles están completos), se vuelve a pedir cada tanto.
+    clearTimeout(scanTimer);
+    if (sinRevisar > 0 && !discosError) scanTimer = setTimeout(() => { if (abierta && tab === "biblioteca") traerDiscos(); }, 20000);
   }
 
   const elegir = (a, on, rango) => {
-    const aca = visibles.map(x => x.key), desde = aca.indexOf(ultimoElegido), hasta = aca.indexOf(a.key);
+    const aca = enPagina.map(x => x.key), desde = aca.indexOf(ultimoElegido), hasta = aca.indexOf(a.key);
     const cuales = rango && desde >= 0 && hasta >= 0 ? aca.slice(Math.min(desde, hasta), Math.max(desde, hasta) + 1) : [a.key];
     for (const k of cuales) {
       if (on) elegidos.add(k); else elegidos.delete(k);
@@ -3374,14 +3411,18 @@ const descargasVista = (() => {
   function pintarBarra() {
     if (!armada) return;
     const n = elegidos.size, temas = (discos || []).filter(a => elegidos.has(a.key)).reduce((t, a) => t + a.count, 0);
-    const b = armada, todos = (discos || []).length;
+    const b = armada, todos = (discos || []).length, inc = (discos || []).filter(a => a.faltan > 0).length;
     b.cuantos.textContent = `${visibles.length === todos ? todos : `${visibles.length} de ${todos}`} álbumes · `
+      + (todos ? `${inc} incompletos${sinRevisar ? ` (revisando: faltan ${sinRevisar})` : ""} · ` : "")
       + (n ? `${n} ${n === 1 ? "elegido" : "elegidos"} (${contarTemas(temas)} guardados)` : "ninguno elegido");
     b.completar.disabled = !admin || !n;
     b.completar.textContent = n ? `⬇ completar ${n}` : "⬇ completar";
     b.completar.title = admin ? "Bajar lo que les falta a los álbumes elegidos, sin el tope de la fila"
                               : "Hace falta el PIN (🔒 arriba) para completar álbumes";
     b.todos.disabled = !visibles.length;
+    const sueltan = visibles.length > 0 && visibles.every(a => elegidos.has(a.key));
+    b.todos.textContent = sueltan ? "☐ todos" : "☑ todos";
+    b.todos.title = sueltan ? "Soltar todos los que se ven con este filtro (de todas las páginas)" : "Elegir todos los que se ven con este filtro (de todas las páginas)";
     b.ninguno.disabled = !n;
   }
 
@@ -3408,9 +3449,21 @@ const descargasVista = (() => {
   // La barra (filtro y acciones) se arma una sola vez: así no se pierde el foco al escribir.
   function armarBiblio() {
     const buscar = el("input", { type: "search", placeholder: "filtrar por álbum o artista…", "aria-label": "Filtrar los álbumes", autocomplete: "off",
-      oninput: ev => { filtro = sinTildes(ev.target.value).trim(); firmaDiscos = null; pintarBiblio(); } });
-    const todos = el("button", { type: "button", title: "Elegir todos los que se ven (los del filtro)", onclick: () => {
-      for (const a of visibles) { elegidos.add(a.key); const f = filas.get(a.key); if (f) { f.casilla.checked = true; f.fila.classList.add("elegido"); } }
+      oninput: ev => { filtro = sinTildes(ev.target.value).trim(); pagina = 0; firmaDiscos = null; pintarBiblio(); } });
+    // Cuáles ver: un desplegable de ancho fijo (como el de las salas), no una fila de botones.
+    const estadoActual = el("span", { class: "nombre" }, "…");
+    const estadoBtn = el("button", { type: "button", class: "estado", "aria-haspopup": "listbox", "aria-expanded": "false",
+      title: "Cuáles álbumes ver: los completos, los que les faltan temas (según YouTube Music) o los que todavía no se pudo revisar" },
+      estadoActual, el("span", { class: "flechita", "aria-hidden": "true" }, "▾"));
+    const estadoMenu = el("ul", { class: "menu", role: "listbox", "aria-label": "Cuáles álbumes ver", hidden: true });
+    const menu = desplegable(estadoBtn, estadoMenu, v => { estado = v; store.set("descargasEstado", v); pagina = 0; firmaDiscos = null; pintarBiblio(); });
+    const anterior = el("button", { type: "button", "aria-label": "Página anterior", title: "Página anterior", onclick: () => { pagina--; firmaDiscos = null; pintarBiblio(); } }, "‹");
+    const siguiente = el("button", { type: "button", "aria-label": "Página siguiente", title: "Página siguiente", onclick: () => { pagina++; firmaDiscos = null; pintarBiblio(); } }, "›");
+    const nPagina = el("span", { class: "n", role: "status" }, "1/1");
+    // Alterna: si ya están todos los del filtro elegidos, los suelta (y deja los de otros filtros).
+    const todos = el("button", { type: "button", onclick: () => {
+      const on = !visibles.every(a => elegidos.has(a.key));
+      for (const a of visibles) { if (on) elegidos.add(a.key); else elegidos.delete(a.key); const f = filas.get(a.key); if (f) { f.casilla.checked = on; f.fila.classList.toggle("elegido", on); } }
       pintarBarra(); } }, "☑ todos");
     const ninguno = el("button", { type: "button", title: "No elegir ninguno", onclick: () => {
       elegidos.clear(); ultimoElegido = null;
@@ -3420,30 +3473,34 @@ const descargasVista = (() => {
     const cuantos = el("div", { class: "cuantos", role: "status" });
     const lista = el("div", { class: "filas" });
     const caja = $("#descargasBiblio");
-    caja.replaceChildren(el("div", { class: "barra" }, buscar, todos, ninguno, completarBtn, cuantos), lista);
-    armada = { buscar, todos, ninguno, completar: completarBtn, cuantos, lista };
+    caja.replaceChildren(el("div", { class: "barra" }, buscar, el("div", { class: "selector" }, estadoBtn, estadoMenu),
+      el("div", { class: "hojas" }, anterior, nPagina, siguiente), todos, ninguno, completarBtn, cuantos), lista);
+    armada = { buscar, todos, ninguno, completar: completarBtn, cuantos, lista, estadoActual, estadoMenu, menu, anterior, siguiente, nPagina };
   }
 
   function pintarBiblio(s = last) {
     if (!armada) armarBiblio();
     const hay = hayBiblio();
-    const f = JSON.stringify([discos?.length, discos?.[0]?.key, discosError, hay, filtro, !!s]);
+    const f = JSON.stringify([discos?.length, discos?.[0]?.key, discosError, hay, filtro, !!s, estado, pagina]);
     if (f === firmaDiscos) { pintarBarra(); return; }
     firmaDiscos = f;
     const lista = armada.lista;
     filas.clear();
     const aviso = t => lista.replaceChildren(el("div", { class: "vacio" }, t));
-    visibles = [];
+    visibles = []; enPagina = [];
     if (!s) aviso("conectando…");
     else if (!hay) aviso("En esta rockola no se guardan canciones (modo navegador, o guardar_gb = 0): no hay biblioteca.");
     else if (discosError) aviso("⚠ " + discosError);
     else if (!discos) aviso("cargando…");
     else if (!discos.length) aviso("Todavía no hay álbumes guardados. Quedan guardadas las que suenan acá y las que bajás con ⬇.");
     else {
-      visibles = filtro ? discos.filter(a => sinTildes(`${a.album} ${a.artist}`).includes(filtro)) : discos;
-      if (!visibles.length) aviso("Ningún álbum coincide con el filtro.");
+      visibles = discos.filter(a => pasa(a) && (!filtro || sinTildes(`${a.album} ${a.artist}`).includes(filtro)));
+      pagina = Math.max(0, Math.min(pagina, Math.ceil(visibles.length / POR_PAGINA) - 1));
+      enPagina = visibles.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA);
+      if (!visibles.length) aviso(estado === "sindatos" ? "No hay álbumes sin datos." : estado === "incompletos" ? "No hay álbumes incompletos (o todavía se están revisando)."
+                                  : estado === "completos" ? "Todavía no se confirmó ningún álbum completo." : "Ningún álbum coincide con el filtro.");
       else {
-        lista.replaceChildren(...visibles.map(a => {
+        lista.replaceChildren(...enPagina.map(a => {
           const casilla = el("input", { type: "checkbox", "aria-label": `Elegir ${a.album}` });
           casilla.checked = elegidos.has(a.key);
           const fila = el("div", { class: "fila bib" + (casilla.checked ? " elegido" : ""),
@@ -3452,13 +3509,28 @@ const descargasVista = (() => {
             el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
             el("div", { class: "info" },
               el("div", { class: "t", title: a.album }, a.album),
-              el("div", { class: "sub" }, [a.artist, contarTemas(a.count) + " guardados", fmt(a.duration)].filter(Boolean).join(" · "))));
+              el("div", { class: "sub" }, [a.artist, contarTemas(a.count) + " guardados", fmt(a.duration)].filter(Boolean).join(" · "),
+                a.faltan > 0 && [" · ", el("span", { class: "mal" }, `faltan ${a.faltan}`)],
+                a.faltan === 0 && [" · ", el("span", { class: "completo" }, "✓ completo")])));
           filas.set(a.key, { fila, casilla });
           return fila;
         }));
       }
     }
+    pintarPaginas();
     pintarBarra();
+  }
+
+  // El desplegable (con cuántos hay de cada uno) y los botones de las páginas: siempre están, apagados si no hacen falta.
+  function pintarPaginas() {
+    const a = armada, todos = discos || [];
+    const cuenta = v => v === "todos" ? todos.length : todos.filter(x => x.faltan > 0 ? v === "incompletos" : x.faltan === 0 ? v === "completos" : v === "sindatos").length;
+    a.estadoActual.textContent = ESTADOS.find(e => e[0] === estado)[1];
+    a.estadoMenu.replaceChildren(...ESTADOS.map(([v, nombre]) => a.menu.opcion(v, nombre, String(cuenta(v)), v === estado)));
+    const paginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
+    a.nPagina.textContent = `${pagina + 1}/${paginas}`;
+    a.anterior.disabled = pagina <= 0;
+    a.siguiente.disabled = pagina >= paginas - 1;
   }
 
   // Con cada estado de la sala: la cuenta del botón y, si se está mirando, la lista. Si cambió lo

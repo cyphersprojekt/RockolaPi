@@ -137,6 +137,12 @@ class Sala:
         self.loading = False               # bajando la que tiene que sonar
         self.notice = None                 # {"id", "text"}: último aviso (p. ej. una canción salteada)
         self.shuffle = False               # con la cola vacía, suenan guardadas al azar (modo mpv)
+        self.fuente = "offline"            # de dónde elige el aleatorio: offline (las guardadas), online (las relacionadas
+                                           # de YouTube Music) o mixto (de las dos). Ver fuente_efectiva
+        self.radio = []                    # online: candidatas ya pedidas a YouTube (relacionadas con lo que suena)
+        self.radio_vistas = []             # las últimas que se eligieron de ahí (no vuelven enseguida)
+        self.radio_semillas = []           # de cuáles ya se pidieron las relacionadas
+        self.radio_intento = 0.0           # cuándo (monotonic) se pidieron por última vez
         self.owners = {}                   # item id -> client id (quién la pidió, para poder quitarla)
         self.votos = {}                    # item id -> [client ids]: los 👍 de cada una de la cola
         self.fijas = set()                 # ids de las que puso en su lugar alguien con el PIN (⤒, o arrastrándola):
@@ -278,13 +284,14 @@ def leer_salas():
             continue
         if s.id != PRINCIPAL and s.id not in salas and len(salas) < MAX_SALAS:
             s.shuffle = bool(d.get("aleatorio"))
+            s.fuente = d.get("fuente") if d.get("fuente") in FUENTES else "offline"
             salas[s.id] = s
 
 
 def guardar_salas():
     """Con el lock tomado: escribe salas.json."""
     ruta = carpeta() / "salas.json"
-    datos = [{"id": s.id, "nombre": s.nombre, "pin": s.pin, "sal": s.sal, "aleatorio": s.shuffle}
+    datos = [{"id": s.id, "nombre": s.nombre, "pin": s.pin, "sal": s.sal, "aleatorio": s.shuffle, "fuente": s.fuente}
              for s in salas.values() if not s.principal]
     try:
         ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -1187,6 +1194,7 @@ def _canciones(temas, tapa=""):
 
 
 DE_AUDIO = "MUSIC_VIDEO_TYPE_ATV"   # en YouTube Music: un tema de audio (lo demás son videos)
+DE_VIDEO = "MUSIC_VIDEO_TYPE_OMV"   # el video oficial de un tema
 
 
 def _temas_de_audio(a):
@@ -1277,6 +1285,88 @@ def _id_playlist(q):
 
 def _se_puede(song):
     return bool(song["duration"]) and not (MAX_DURATION and song["duration"] > MAX_DURATION)
+
+
+# ------------------------------------------------------------------ álbumes completos
+# Para saber si un álbum guardado está completo hay que saber qué temas tiene en YouTube Music. Eso
+# se le pregunta una sola vez a cada álbum (bucle_completos, de a uno y sin apuro; o cuando se lo
+# completa) y queda en albumes.json: los ids de sus temas que se pueden bajar. Lo que le falta se
+# calcula siempre contra lo que hay guardado, así que se va actualizando solo a medida que se baja.
+REVISAR_DE_NUEVO = 60 * 86400   # los que YouTube Music no encontró se vuelven a probar al cabo de dos meses
+album_temas = {}                # clave del álbum (la de Descargas._clave_album) -> {"ids": [...] o None, "at": cuándo}
+album_temas_lock = threading.Lock()
+
+
+def leer_album_temas():
+    try:
+        datos = json.loads((carpeta() / "albumes.json").read_text())
+    except (OSError, ValueError):
+        return
+    if isinstance(datos, dict):
+        with album_temas_lock:
+            album_temas.update({k: v for k, v in datos.items() if isinstance(v, dict)})
+
+
+def anotar_album_temas(clave, canciones):
+    """Queda anotado qué temas (los que se pueden bajar) tiene el álbum `clave`; `canciones`: None si no se encontró."""
+    ids = None if canciones is None else [c["videoId"] for c in canciones if _se_puede(c)]
+    ruta = carpeta() / "albumes.json"
+    with album_temas_lock:
+        album_temas[clave] = {"ids": ids, "at": int(time.time())}
+        try:
+            tmp = ruta.with_suffix(".tmp")
+            tmp.write_text(json.dumps(album_temas))
+            os.replace(tmp, ruta)
+        except OSError as e:
+            print(f"  ⚠ no pude guardar {ruta}: {e}", flush=True)
+
+
+def clave_de_album(album, artista):
+    from reproductor import Descargas
+    return Descargas._clave_album({"album": album, "artist": artista})[0]
+
+
+def discos_con_faltantes(sala_id, q=""):
+    """Los álbumes guardados (ver Descargas.discos), cada uno con `faltan`: cuántos temas de los que
+    tiene YouTube Music no están guardados (None: todavía no se revisó), y cuántos faltan revisar."""
+    r = director.descargas.discos(q, sala=sala_id)
+    tengo = director.descargas.ids(sala_id)
+    with album_temas_lock:
+        for a in r["albums"]:
+            t = album_temas.get(a["key"])
+            a["faltan"] = len(set(t["ids"]) - tengo) if t and t["ids"] is not None else None
+            a["revisado"] = t is not None
+        r["sin_revisar"] = sum(1 for a in r["albums"] if a["key"] not in album_temas)
+    return r
+
+
+def bucle_completos(espera=90, pausa=4, vuelta=600):
+    """Les pregunta a YouTube Music, de a uno y sin apuro, qué temas tiene cada álbum guardado que
+    todavía no se revisó (el primer barrido, con cientos de álbumes, tarda un rato). Después, cada
+    tanto, mira si hay álbumes nuevos."""
+    time.sleep(espera)
+    while True:
+        faltan = []
+        if director and director.descargas.limite:
+            ahora = time.time()
+            with album_temas_lock:
+                faltan = [a for a in director.descargas.discos()["albums"]
+                          if a["key"] not in album_temas
+                          or (album_temas[a["key"]]["ids"] is None and ahora - album_temas[a["key"]]["at"] > REVISAR_DE_NUEVO)]
+        for a in faltan:
+            if state["online"] is False:
+                break   # (cuando vuelva internet, se sigue)
+            try:
+                canciones = get_album(album_llamado(a["album"], a["artist"]))["songs"]
+            except ApiError:
+                canciones = None   # no lo encontró (o no se abre): se anota, para no insistir
+            except Exception as e:   # sin internet, YouTube no contesta…
+                print(f"  ⚠ no pude revisar los álbumes (pruebo más tarde): {e!r}", flush=True)
+                break
+            anotar_album_temas(a["key"], canciones)
+            time.sleep(pausa)
+        with changed:
+            changed.wait(timeout=vuelta if not faltan else 60)
 
 
 def playlist_info(q):
@@ -1595,6 +1685,8 @@ def public_state(sala, client=None, since=None, radio=False):
             "crossfade": state["crossfade"] if director and sala.principal and CROSSFADE else None,
             "notice": sala.notice,
             "shuffle": sala.shuffle,
+            # De dónde elige el aleatorio (offline / mixto / online) y de dónde elige ahora: sin internet, de las guardadas.
+            "source": sala.fuente if director else None, "sourceNow": fuente_efectiva(sala) if director else None,
             # Sin parlante: la pausaron (con el PIN), o está en espera porque nadie la escucha.
             "paused": None if sala.principal else sala.pausada,
             "waiting": not sala.principal and sala.now is not None and sala.lista and not sala.pausada
@@ -1741,10 +1833,15 @@ def bucle_internet(cada=15, cortado=5):
                 state["online"] = hay
                 bump()
         if hay != antes:
+            with lock:   # (el aleatorio cambia de fuente solo: sin internet, de las guardadas; ver fuente_efectiva)
+                for sala in salas.values():
+                    if sala.fuente != "offline":
+                        rellenar_previstas(sala)
+                        bump(sala)
             if teles:
                 teles.avisar()   # (las salas de tv esperan en otro lado: que también se enteren)
             if not hay:
-                print("  ⚠ sin internet: sigue sonando lo guardado", flush=True)
+                print("  ⚠ sin internet: sigue sonando lo guardado (el aleatorio, de las guardadas)", flush=True)
             elif antes is False:
                 print("  ✓ volvió internet", flush=True)
         time.sleep(cada if hay else cortado)
@@ -2397,15 +2494,19 @@ def rellenar_previstas(sala, evitar=()):
     if not (sala.shuffle and director):
         sala.previstas = []
         return
+    if fuente_efectiva(sala) == "offline":
+        # (sin internet, o en modo offline: las de YouTube que todavía no se bajaron no van a poder sonar)
+        sala.previstas = [p for p in sala.previstas if not p.get("online") or director.descargas.lista(p["videoId"])]
+        sala.radio = []
     ocupadas = {i["videoId"] for i in sala.queue} | {p["videoId"] for p in sala.previstas} | set(evitar)
     if sala.now:
         ocupadas.add(sala.now["videoId"])
     while len(sala.previstas) < PREVISTAS:
-        c = director.descargas.al_azar(ocupadas, sala.id)
+        c = elegir_al_azar(sala, ocupadas)
         if not c:
             break
         ocupadas.add(c["videoId"])
-        sala.previstas.append(dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True))
+        sala.previstas.append(c)
 
 
 def recargar_previstas(sala):
@@ -2427,6 +2528,107 @@ def previstas_visibles(sala):
     return [p for p in sala.previstas[len(sala.queue):] if p["videoId"] not in vids]
 
 
+# ------------------------------------------------------------------ aleatorio: guardadas, YouTube o las dos
+# Con 🔀, lo que suena cuando nadie pidió nada sale de las guardadas (offline), de las canciones
+# que YouTube Music da como relacionadas con la que suena (online) o de las dos (mixto, la mitad
+# de cada una). Si se corta internet, o YouTube no da nada, sigue con las guardadas: nunca se corta.
+FUENTES = ("offline", "mixto", "online")
+MIXTO_ONLINE = 0.5      # en mixto, qué parte de las elegidas sale de YouTube
+RADIO_POZO = 30         # cuántas candidatas de YouTube guarda cada sala
+RADIO_CABEZA = 8        # se elige entre las primeras (las más parecidas) de las candidatas
+RADIO_RECIENTES = 200   # cuántas de las elegidas no vuelven (por sala)
+MALAS = re.compile(r"\b(live|en vivo|karaoke|cover|tribute|instrumental|reaction|lyrics?|letra)\b", re.I)
+
+
+def fuente_efectiva(sala):
+    """De dónde elige ahora el aleatorio de `sala`: lo que se eligió, pero sin internet (el led de la
+    barra de arriba) sólo las guardadas. Cuando vuelve, vuelve solo a lo elegido."""
+    return "offline" if state["online"] is False else sala.fuente
+
+
+def relacionadas(video_id):
+    """Las canciones que YouTube Music da como relacionadas con `video_id` (su «radio»), como las de
+    search(): sólo música, que se pueda pasar y que dure lo que se admite. Pide por la red."""
+    w = yt().get_watch_playlist(videoId=video_id, radio=True, limit=50)
+    buenas = []
+    for t in w.get("tracks") or []:
+        if (t.get("videoType") not in (DE_AUDIO, DE_VIDEO) or t.get("videoId") == video_id
+                or not t.get("artists") or MALAS.search(t.get("title") or "")):
+            continue
+        d = _segundos(t.get("length"))
+        if d and (not MAX_DURATION or d <= MAX_DURATION):
+            buenas.append(dict(t, duration_seconds=d, thumbnails=t.get("thumbnail")))
+    return _canciones(buenas)[0]
+
+
+def _de_la_radio(sala, ocupadas):
+    """Una de las candidatas de YouTube (que no esté en `ocupadas` ni haya salido hace poco), o None.
+    Se elige entre las primeras: son las más parecidas a lo que suena. Con el lock tomado."""
+    vistas = set(sala.radio_vistas)
+    sala.radio = [c for c in sala.radio if c["videoId"] not in ocupadas and c["videoId"] not in vistas]
+    if not sala.radio:
+        return None
+    c = sala.radio.pop(random.randrange(min(RADIO_CABEZA, len(sala.radio))))
+    sala.radio_vistas = (sala.radio_vistas + [c["videoId"]])[-RADIO_RECIENTES:]
+    return dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True, online=True)
+
+
+def elegir_al_azar(sala, ocupadas):
+    """La próxima del aleatorio, según la fuente (ver fuente_efectiva); si de ahí no sale nada, de la
+    otra. Con el lock tomado: no pide nada por la red (las de YouTube las junta bucle_radio)."""
+    fuente = fuente_efectiva(sala)
+    online = fuente == "online" or (fuente == "mixto" and random.random() < MIXTO_ONLINE)
+    c = _de_la_radio(sala, ocupadas) if online else None
+    if c:
+        return c
+    c = director.descargas.al_azar(ocupadas, sala.id)
+    if not c and fuente == "mixto" and not online:
+        return _de_la_radio(sala, ocupadas)
+    return c and dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True)
+
+
+def bucle_radio(pausa=3, reintento=30):
+    """Online y mixto: le pide a YouTube Music las relacionadas con lo que suena en cada sala y las
+    deja listas (sala.radio) para que el aleatorio elija sin esperar la red. Cuando la que suena
+    cambia, vuelve a pedir; si las candidatas se acaban, pide las de una de las que vienen."""
+    visto = -1
+    while True:
+        with changed:
+            if state["version"] == visto:
+                changed.wait(timeout=5)
+            visto = state["version"]
+            tareas = []
+            for s in salas.values():
+                if not (director and s.shuffle and fuente_efectiva(s) != "offline"):
+                    continue
+                if time.monotonic() - s.radio_intento < (reintento if len(s.radio) else pausa):
+                    continue
+                for c in [s.now, *s.previstas, *s.history[::-1][:3]]:
+                    if c and c["videoId"] not in s.radio_semillas:
+                        if c is s.now or len(s.radio) < 6:   # (la que suena siempre; las otras, si faltan candidatas)
+                            tareas.append((s, c["videoId"]))
+                        break
+        for s, semilla in tareas:
+            s.radio_intento = time.monotonic()
+            try:
+                nuevas = relacionadas(semilla)
+            except Exception as e:   # sin internet, YouTube no contesta o cambió la respuesta: sigue con las guardadas
+                if state["online"] is not False:
+                    print(f"  ⚠ radio de YouTube: {e!r}", flush=True)
+                continue
+            with lock:
+                s.radio_semillas = (s.radio_semillas + [semilla])[-RADIO_RECIENTES:]
+                hay = {c["videoId"] for c in s.radio}
+                s.radio = ([c for c in nuevas if c["videoId"] not in hay] + s.radio)[:RADIO_POZO]
+                if salas.get(s.id) is s and s.shuffle:
+                    if fuente_efectiva(s) == "online" and nuevas:
+                        # (las guardadas que se eligieron mientras no había candidatas: de las que vienen, que cedan el lugar)
+                        hasta = max(1, len(s.queue)) + 1
+                        s.previstas = s.previstas[:hasta] + [p for p in s.previstas[hasta:] if p.get("online")]
+                    rellenar_previstas(s)
+                    bump(s)
+
+
 def cancion_al_azar(sala):
     """Con el aleatorio prendido, una de las canciones guardadas de la sala. Llamar con el lock tomado."""
     if not (sala.shuffle and director):
@@ -2434,8 +2636,7 @@ def cancion_al_azar(sala):
     ocupadas = {i["videoId"] for i in sala.queue}
     if sala.now:
         ocupadas.add(sala.now["videoId"])   # la que acaba de terminar
-    c = director.descargas.al_azar(ocupadas, sala.id)
-    return c and dict(c, id=uuid.uuid4().hex[:10], by="al azar", azar=True)
+    return elegir_al_azar(sala, ocupadas)
 
 
 def arrancar_al_azar(sala):
@@ -2460,6 +2661,27 @@ def set_shuffle(sala, body):
         guardar_ajustes(aleatorio=on)
     if on:
         arrancar_al_azar(sala)
+
+
+def set_fuente(sala, body):
+    """De dónde elige el aleatorio (con el PIN): offline (las guardadas), online (las relacionadas
+    de YouTube Music) o mixto. Si no hay internet, suena lo guardado igual (ver fuente_efectiva)."""
+    if not director:
+        raise ApiError(409, "El modo aleatorio usa las canciones guardadas: sólo anda en modo mpv")
+    fuente = str(body.get("fuente", ""))
+    if fuente not in FUENTES:
+        raise ApiError(400, "La fuente es offline, mixto u online")
+    with lock:
+        sala.fuente = fuente
+        sala.radio, sala.radio_semillas, sala.radio_intento = [], [], 0.0   # (las de antes eran de otra fuente)
+        if fuente == "offline":   # (las de YouTube que no se bajaron, no suenan)
+            sala.previstas = [p for p in sala.previstas if not p.get("online") or director.descargas.lista(p["videoId"])]
+        rellenar_previstas(sala)
+        bump(sala)
+        if not sala.principal:
+            guardar_salas()
+    if sala.principal:
+        guardar_ajustes(fuente=fuente)
 
 
 def set_crossfade(sala, body):
@@ -2952,7 +3174,8 @@ class Director:
                     changed.wait()
                 visto = state["version"]
                 now = self.principal.now
-                colas = [[(it["videoId"], datos_de(it, s.id)) for it in s.queue[:PREDESCARGAR or None]]
+                # (con el aleatorio, las próximas que muestra: si vienen de YouTube, hay que bajarlas antes de que les toque)
+                colas = [[(it["videoId"], datos_de(it, s.id)) for it in [*s.queue[:PREDESCARGAR or None], *s.previstas]]
                          for s in salas.values()]
             despues = [c for ronda in itertools.zip_longest(*colas) for c in ronda if c]
             try:
@@ -3103,7 +3326,9 @@ class Director:
                 if sala is None:
                     raise ApiError(404, "esa sala ya no existe")
                 bid = album_llamado(pedido["album"], pedido["artist"])
-                temas = _guardar_coleccion(sala, pedido["client"], bid, get_album(bid), lote=True)["added"]
+                al = get_album(bid)
+                anotar_album_temas(clave_de_album(pedido["album"], pedido["artist"]), al["songs"])   # (ya se sabe qué le falta)
+                temas = _guardar_coleccion(sala, pedido["client"], bid, al, lote=True)["added"]
             except ApiError as e:
                 if e.code != 409:   # (409: no había nada para bajar: ya está entero, o ya se estaba bajando)
                     fallo = e.msg
@@ -3896,7 +4121,7 @@ class Handler(BaseHTTPRequestHandler):
                 if vista == "artista":   # lo de uno: sus temas y sus álbumes
                     return self.send_json(artista_guardado(sid, qs.get("artista", [""])[0][:200]))
                 if vista == "discos":   # todos los álbumes, sin sus temas: la biblioteca (⬇ descargas)
-                    return self.send_json(director.descargas.discos(qs.get("q", [""])[0][:100], sala=sid))
+                    return self.send_json(discos_con_faltantes(sid, qs.get("q", [""])[0][:100]))
                 ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
                 return self.send_json(ver(qs.get("q", [""])[0][:100], desde, n, sala=sid))
             if u.path == "/api/stats":   # el recap
@@ -4016,6 +4241,8 @@ class Handler(BaseHTTPRequestHandler):
                 remove_playlist(sala, body)
             elif path == "/api/shuffle":
                 set_shuffle(sala, body)
+            elif path == "/api/source":
+                set_fuente(sala, body)
             elif path == "/api/shuffle-queue":
                 mezclar_cola(sala)
             elif path == "/api/reroll":
@@ -4158,6 +4385,8 @@ def main():
     state["mode"] = modo
     salas[PRINCIPAL].shuffle = modo == "mpv" and bool(leer_ajustes().get("aleatorio"))
     state["crossfade"] = modo == "mpv" and CROSSFADE > 0 and bool(leer_ajustes().get("crossfade"))
+    if leer_ajustes().get("fuente") in FUENTES:
+        salas[PRINCIPAL].fuente = leer_ajustes()["fuente"]
 
     from estadisticas import Estadisticas
     try:
@@ -4216,6 +4445,10 @@ def main():
         retomar_colas()   # (lo retoma el reproductor web, que arranca donde dice el progreso)
     threading.Thread(target=bucle_colas, daemon=True, name="colas").start()
     threading.Thread(target=bucle_internet, daemon=True, name="internet").start()
+    if modo == "mpv":
+        threading.Thread(target=bucle_radio, daemon=True, name="radio-youtube").start()
+        leer_album_temas()
+        threading.Thread(target=bucle_completos, daemon=True, name="albumes-completos").start()
     if CLIMA is not False:
         threading.Thread(target=bucle_clima, daemon=True, name="clima").start()
         threading.Thread(target=bucle_temperatura, daemon=True, name="temperatura").start()

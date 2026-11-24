@@ -182,7 +182,13 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   salas; cada sala ve y ordena las suyas.
 - **📚 Biblioteca y lotes (para dejar muchos álbumes bajando, p. ej. un fin de semana):** en **⬇ descargas**,
   la pestaña **📚 biblioteca** lista todos los álbumes guardados, con un filtro y una casilla en cada
-  uno (con **shift** se elige un tramo; **☑ todos** elige los que se ven). Con el PIN, **⬇ completar N**
+  uno (con **shift** se elige un tramo; **☑ todos** elige los que se ven con el filtro, de todas las
+  páginas). La lista va de a 50 álbumes (‹ ›), y un desplegable elige cuáles ver: **todos**,
+  **incompletos** (les faltan temas), **completos** o **sin datos**. Para saberlo, la rockola le
+  pregunta a YouTube Music, de a un álbum y sin apuro, qué temas tiene cada uno (el primer barrido de
+  cientos de álbumes tarda un rato, y se ve «revisando: faltan N»); queda anotado en `albumes.json` y
+  después «faltan» se calcula contra lo guardado, así que baja solo a medida que se completan. Un tema
+  que YouTube no deja bajar sigue contando como faltante. Con el PIN, **⬇ completar N**
   les busca en YouTube Music lo que les falta y lo baja **sin el tope de la fila** (los pedidos de los
   demás pasan adelante). Va de a poco: no pone más de 150 temas del lote en la fila a la vez, y a
   medida que se bajan sigue con el próximo álbum. Sigue solo si la rockola se reinicia (el reinicio de las
@@ -349,6 +355,13 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   pedida deja [pedida, azar2, azar3]; otra, [pedida1, pedida2, azar3]; con tres pedidas ya no se
   muestra ninguno al azar. Cuando suena una pedida, el elegido que había desplazado se va y entra
   uno nuevo al final. Los elegidos no se votan, mueven ni quitan.
+  **De dónde elige el 🔀:** el botón de al lado (también chiquito) pasa entre **📁 offline** (las
+  guardadas, como siempre), **🌓 mixto** (la mitad de las elegidas) y **🌐 online** (las que YouTube
+  Music da como relacionadas con la que suena, su «radio»; las pedidas siguen yendo primero). Las de
+  YouTube se bajan por adelantado, igual que la cola, y **quedan guardadas**; en PRÓXIMAS dicen «🌐 de
+  YouTube». **Sin internet** (el led de arriba) elige solo entre las guardadas, y el botón se apaga un
+  poco; cuando vuelve internet, vuelve a lo que estaba elegido. Si YouTube no da nada, también sigue con
+  las guardadas: nunca se corta. Se recuerda por sala (`ajustes.json` / `salas.json`).
   Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
   recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
   en 10 segundos nadie pidió nada, se prende solo y arranca a sonar** (con un parlante Bluetooth,

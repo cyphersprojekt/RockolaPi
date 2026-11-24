@@ -541,10 +541,10 @@ class Descargas:
             _, vid = random.choice(elegibles)
             return dict(self.guardadas[vid]["datos"], videoId=vid)
 
-    def ids(self):
-        """Los videoId de las guardadas."""
+    def ids(self, sala=None):
+        """Los videoId de las guardadas (con `sala`, las de esa sala)."""
         with self.lock:
-            return set(self.guardadas)
+            return {vid for vid, _ in self._de(sala)}
 
     def tapas(self):
         """Las direcciones de las tapas de las guardadas (cada una, una vez)."""

@@ -227,7 +227,7 @@ function render() {
     $("#title").textContent = s.now.title;
     $("#artist").textContent = s.now.artist;
     $("#byLbl").textContent = s.now.azar ? "" : "pedida por";
-    $("#by").textContent = s.now.azar ? "🔀 al azar" : s.now.by;
+    $("#by").textContent = s.now.azar ? (s.now.online ? "🌐 de YouTube" : "🔀 al azar") : s.now.by;
     if (artFor !== s.now.thumb) { artFor = s.now.thumb; drawArt(s.now.thumb); }
     pintarReacciones(s);
     if (s.volume != null) {
