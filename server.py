@@ -378,6 +378,8 @@ def voz_accion(sala, path, body):
         pass
     elif path == "/api/voz-mic":
         voz.mic_abrir(sala.id) if body.get("on") else voz.mic_cerrar(sala.id)
+    elif path == "/api/voz-pausa":
+        voz.pausar(sala.id, bool(body.get("on")))
     elif path == "/api/voz-anuncio-editar":
         voz.anuncio_editar(sala.id, aid, body)
     elif path == "/api/voz-anuncio-borrar":
@@ -2904,7 +2906,7 @@ class Director:
                     medir(pr, progreso_ahora(p)["t"])   # al pausar, que quede donde iba de verdad
                     pr["playing"] = sonando
                     bump(p)
-            elif nombre == "volume" and valor is not None and not self.fundiendo() and not getattr(self, "bajada", False):
+            elif nombre == "volume" and valor is not None and not self.fundiendo() and not getattr(self, "bajada", False) and not getattr(self, "sube", False):
                 # (durante un crossfade los dos mpv van subiendo y bajando: el volumen es el del estado)
                 v = round(valor)
                 if state["volume"] != v:
@@ -3159,7 +3161,7 @@ class Director:
         while True:
             time.sleep(1)
             v = state["volume"]
-            if v is not None and v != guardado and not getattr(self, "bajada", False):
+            if v is not None and v != guardado and not getattr(self, "bajada", False) and not getattr(self, "sube", False):
                 guardado = v   # (se mira acá, de a uno por segundo: arrastrar la barra no escribe mil veces)
                 guardar_ajustes(volumen=v)
             mpv = self.mpv   # (uno solo en toda la vuelta: un crossfade los cambia de lugar)
@@ -3203,8 +3205,10 @@ class Director:
         """Mientras suena una voz (un anuncio, el micrófono) la música baja, y después vuelve. El
         volumen del estado no cambia: es el que se restaura."""
         self.bajada = bool(on)
+        self.sube = not on   # (la rampa de subida: sus valores a medias no son "el volumen" ni se anotan en el estado)
         v = state["volume"] or 0
-        if self.fundiendo():   # (en pleno crossfade el volumen lo va poniendo fundir(): sin rampa propia)
+        if self.fundiendo():
+            self.sube = False   # (en pleno crossfade el volumen lo va poniendo fundir(): sin rampa propia)
             return self.mpv.fijar_volumen(v * self.BAJA_MUSICA if on else v)
         # Con rampa: baja rápido (así la voz se entiende enseguida) y sube despacio (sin golpe).
         self._rampa_vol = n = getattr(self, "_rampa_vol", 0) + 1
@@ -3218,12 +3222,17 @@ class Director:
                         return   # otro cambio de volumen (o de mpv) tomó el mando
                     mpv.fijar_volumen(desde + (hasta - desde) * i / pasos)
                     time.sleep(seg / pasos)
+                time.sleep(0.3)   # (que lleguen los avisos de mpv del último paso, todavía sin anotarse)
             except Exception as e:
                 print(f"  ⚠ rampa de volumen: {e!r}", flush=True)
+            finally:
+                if self._rampa_vol == n:
+                    self.sube = False
         threading.Thread(target=correr, daemon=True, name="rampa-volumen").start()
 
     def _cortar_rampa(self):
         self._rampa_vol = getattr(self, "_rampa_vol", 0) + 1
+        self.sube = False
 
     def fijar_volumen(self, valor):
         self._cortar_rampa()   # (si estaba subiendo o bajando por una voz, que el cambio manual mande)
@@ -4053,7 +4062,8 @@ class Handler(BaseHTTPRequestHandler):
                 voz.mic_pedazo(sala.id, data)
             else:
                 voz.anuncio_nuevo(sala.id, data, qs.get("nombre", [""])[0], qs.get("cada_min", ["0"])[0],
-                                  qs.get("cada_canciones", ["0"])[0], qs.get("by", [""])[0])
+                                  qs.get("cada_canciones", ["0"])[0], qs.get("by", [""])[0],
+                                  una_vez=qs.get("una_vez", [""])[0] == "1")
         except ErrorVoz as e:
             raise ApiError(e.code, e.msg)
         return self.send_json(voz_estado(sala))
@@ -4180,7 +4190,7 @@ def main():
         from reproductor import _lanzar
         from voz import Voz
         voz = Voz(carpeta() / "anuncios", director.bajar_musica, _lanzar, MPV_ARGS, al_cambiar=_bump_sala,
-                  mpv="mpv", principal=PRINCIPAL)
+                  mpv="mpv", principal=PRINCIPAL, volumen=lambda: state["volume"])
         averiguar_generos()   # (los de las guardadas que falten: se le pregunta a iTunes de a uno, sin apuro)
         if director.descargas.limite:   # (si se guardan canciones)
             from tapas import Tapas

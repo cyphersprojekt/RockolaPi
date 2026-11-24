@@ -754,6 +754,7 @@
     <input id="dlgInput" autocomplete="off" hidden aria-labelledby="dlgTexto">
     <div class="dlgBotones">
       <button type="button" id="dlgNo">cancelar</button>
+      <button value="extra" id="dlgExtra" hidden></button>
       <button value="si" id="dlgSi" class="primario">sí</button>
     </div>
   </form>
@@ -829,7 +830,7 @@ function toast(msg, err = false) {
 // afuera cancelan; Enter acepta. `peligro`: algo que no se deshace (en rojo, y arranca en cancelar).
 const dlg = $("#dialogo");
 let alCerrarDialogo = null;
-function preguntar({ titulo = "CONFIRMAR", texto, si = "sí", no = "cancelar", peligro = false, valor, max = 100 }) {
+function preguntar({ titulo = "CONFIRMAR", texto, si = "sí", no = "cancelar", peligro = false, valor, max = 100, extra }) {
   const conTexto = valor !== undefined;
   if (!dlg.showModal) return Promise.resolve(conTexto ? prompt(texto, valor) : confirm(texto));   // (navegador muy viejo)
   if (dlg.open) return Promise.resolve(conTexto ? null : false);   // (ya hay una: no se pisan)
@@ -839,13 +840,15 @@ function preguntar({ titulo = "CONFIRMAR", texto, si = "sí", no = "cancelar", p
   input.hidden = !conTexto; input.value = valor ?? ""; input.maxLength = max;
   $("#dlgSi").textContent = si; $("#dlgSi").classList.toggle("peligro", peligro);
   $("#dlgNo").textContent = no;
+  $("#dlgExtra").hidden = !extra; $("#dlgExtra").textContent = extra || "";
   dlg.classList.toggle("peligro", peligro);
   dlg.returnValue = "";
   dlg.showModal();
   if (conTexto) { input.focus(); input.select(); } else (peligro ? $("#dlgNo") : $("#dlgSi")).focus();
   return new Promise(listo => {
     alCerrarDialogo = () => {
-      const acepto = dlg.returnValue === "si";
+      const acepto = dlg.returnValue === "si" || dlg.returnValue === "extra";
+      preguntar.extra = dlg.returnValue === "extra";   // (se apretó el botón de más: ver preguntarAnuncio)
       listo(conTexto ? (acepto ? input.value.trim() : null) : acepto);
     };
   });
@@ -857,7 +860,7 @@ let dlgAbajo = null;
 dlg.addEventListener("pointerdown", e => { dlgAbajo = e.target; });
 dlg.addEventListener("click", e => { if (e.target === dlg && dlgAbajo === dlg) dlg.close("no"); });
 $("#dlgForm").addEventListener("submit", e => {   // sin texto no acepta (en lugar del cartelito del navegador)
-  if (!$("#dlgInput").hidden && !$("#dlgInput").value.trim()) { e.preventDefault(); $("#dlgInput").focus(); }
+  if (e.submitter?.value !== "no" && !$("#dlgInput").hidden && !$("#dlgInput").value.trim()) { e.preventDefault(); $("#dlgInput").focus(); }
 });
 
 // ---------- tapa del disco pixelada (como en /pantalla) ----------
@@ -3555,16 +3558,25 @@ const vozVista = (() => {
       rec.ondataavailable = e => trozos.push(e.data);
       rec.onstop = async () => {
         stream.getTracks().forEach(x => x.stop()); grabando = null;
-        const nombre = await preguntar({ titulo: "NUEVO ANUNCIO", texto: "¿Cómo se llama este anuncio?", valor: "Anuncio", si: "guardar", max: 60 });
-        if (nombre != null) await subir(new Blob(trozos, { type: rec.mimeType }), nombre);
+        const r = await nombrarAnuncio("¿Cómo se llama este anuncio?", "Anuncio", "guardar");
+        if (r) await subir(new Blob(trozos, { type: rec.mimeType }), r.nombre, r.unaVez);
         pintar();
       };
       rec.start(); pintar();
     } catch (err) { toast(err.name === "NotAllowedError" ? "No dejaste usar el micrófono" : err.message, true); }
   }
-  async function subir(blob, nombre) {
-    try { datos = (await crudo(conSala(`/api/voz-anuncio?nombre=${encodeURIComponent(nombre)}&by=${encodeURIComponent(nameInput.value.trim())}`), blob)).voz; toast("Anuncio guardado: ahora elegí cada cuánto suena"); }
-    catch (err) { toast(err.message, true); }
+  // El nombre de un anuncio nuevo: «guardar» (queda en la lista) o «sonar una vez» (suena ya y no se guarda).
+  // → { nombre, unaVez } o null si cancelan.
+  async function nombrarAnuncio(texto, valor, si) {
+    const nombre = await preguntar({ titulo: "NUEVO ANUNCIO", texto, valor, si, max: 60, extra: "▶ sonar una vez" });
+    return nombre == null ? null : { nombre, unaVez: preguntar.extra };
+  }
+  async function subir(blob, nombre, unaVez = false) {
+    try {
+      datos = (await crudo(conSala(`/api/voz-anuncio?nombre=${encodeURIComponent(nombre)}&by=${encodeURIComponent(nameInput.value.trim())}${unaVez ? "&una_vez=1" : ""}`), blob)).voz;
+      toast(unaVez ? "Suena ahora (una sola vez)" : "Anuncio guardado: ahora elegí cada cuánto suena");
+    } catch (err) { toast(err.message, true); return false; }
+    return true;
   }
 
   // 🗣️ generar tts: un modal para escribir un texto y que una voz de Piper lo diga (static/piper/voz.js). Se
@@ -3577,7 +3589,7 @@ const vozVista = (() => {
     const guardarAjustes = () => store.set("tts", JSON.stringify(ajustes));
     const refs = {};
 
-    const suelta = () => { wav = null; refs.guardar.disabled = true; refs.reproductor.hidden = true; refs.oir.pause(); refs.oir.removeAttribute("src"); ponerTiempo(); if (urlWav) URL.revokeObjectURL(urlWav); urlWav = null; };
+    const suelta = () => { wav = null; refs.guardar.disabled = refs.una.disabled = true; refs.reproductor.hidden = true; refs.oir.pause(); refs.oir.removeAttribute("src"); ponerTiempo(); if (urlWav) URL.revokeObjectURL(urlWav); urlWav = null; };
     const mmss = x => { x = Number.isFinite(x) ? Math.max(0, x) : 0; return `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`; };
     function ponerTiempo() {
       const o = refs.oir; if (!o || !refs.tiempo) return;
@@ -3621,7 +3633,8 @@ const vozVista = (() => {
       for (const e of ["timeupdate", "loadedmetadata", "durationchange", "ended", "emptied"]) refs.oir.addEventListener(e, ponerTiempo);
       for (const e of ["play", "pause", "ended", "emptied"]) refs.oir.addEventListener(e, ponerTiempo);
       refs.generar = el("button", { type: "button", class: "primario", onclick: generar }, "▶ generar y escuchar");
-      refs.guardar = el("button", { type: "button", disabled: true, onclick: guardar }, "＋ guardar como anuncio");
+      refs.guardar = el("button", { type: "button", disabled: true, onclick: () => guardar() }, "＋ guardar como anuncio");
+      refs.una = el("button", { type: "button", disabled: true, title: "Suena ya, una sola vez, y no queda guardado", onclick: () => guardar(true) }, "▶ sonar una vez");
       const s = x => x.toFixed(1).replace(/\.0$/, "");
       forma.replaceChildren(
         el("span", { class: "ttl", id: "ttsTitulo" }, "🗣️ GENERAR TTS"),
@@ -3643,7 +3656,7 @@ const vozVista = (() => {
           el("div", { class: "botones" }, el("button", { type: "button", onclick: () => { const { voz } = ajustes; ajustes = { voz }; pintarTodo(); cambio(); } }, "valores de fábrica"))),
         el("div", { class: "ajuste uno" }, el("label", {}, "Nombre"), refs.nombre),
         refs.estado, refs.reproductor,
-        el("div", { class: "botones" }, el("button", { type: "button", onclick: () => dlgTts.close() }, "cerrar"), refs.generar, refs.guardar)));
+        el("div", { class: "botones" }, el("button", { type: "button", onclick: () => dlgTts.close() }, "cerrar"), refs.generar, refs.una, refs.guardar)));
     }
     function pintarVoz() { refs.filaHablante.hidden = !AJ.VOCES.find(v => v.id === refs.voz.value)?.hablantes; }
     function pintarTodo() {
@@ -3657,8 +3670,8 @@ const vozVista = (() => {
 
     function ocupar(si) {
       ocupado = si;
-      for (const e of forma.querySelectorAll("input, select, textarea, button")) if (e !== refs.guardar && e.textContent !== "cerrar") e.disabled = si;
-      refs.guardar.disabled = si || !wav;
+      for (const e of forma.querySelectorAll("input, select, textarea, button")) if (e !== refs.guardar && e !== refs.una && e.textContent !== "cerrar") e.disabled = si;
+      refs.guardar.disabled = refs.una.disabled = si || !wav;
     }
     async function generar() {
       if (ocupado) return;
@@ -3673,12 +3686,13 @@ const vozVista = (() => {
       } catch (err) { aviso("⚠ " + (err.message || err), true); console.error("texto a voz:", err); }
       ocupar(false);
     }
-    async function guardar() {
+    async function guardar(unaVez = false) {
       if (!wav || ocupado) return;
       const nombre = refs.nombre.value.trim() || refs.texto.value.trim().replace(/\s+/g, " ").slice(0, 60);
-      ocupar(true); aviso("Guardando…");
-      await subir(wav, nombre);
+      ocupar(true); aviso(unaVez ? "Enviando…" : "Guardando…");
+      const ok = await subir(wav, nombre, unaVez);
       ocupar(false);
+      if (!ok) { aviso("⚠ No se pudo (¿ya suena algo?). Probá de nuevo."); return; }
       dlgTts.close(); pintar(true);
     }
 
@@ -3745,8 +3759,8 @@ const vozVista = (() => {
       const fs = [...ev.target.files]; ev.target.value = "";
       for (const f of fs) {
         if (f.size > 30 * 1024 * 1024) { toast(`«${f.name}» pesa más de 30 MB`, true); continue; }
-        const nombre = await preguntar({ titulo: "NUEVO ANUNCIO", texto: `¿Cómo se llama «${f.name}»?`, valor: f.name.replace(/\.[^.]+$/, "").slice(0, 60), si: "subir", max: 60 });
-        if (nombre != null) await subir(f, nombre);
+        const r = await nombrarAnuncio(`¿Cómo se llama «${f.name}»?`, f.name.replace(/\.[^.]+$/, "").slice(0, 60), "subir");
+        if (r) await subir(f, r.nombre, r.unaVez);
       }
       pintar(true); } });
     // Los botones, uno al lado del otro: abrir el micrófono, grabar, generar una voz con texto y subir audios (los dos primeros, sólo por https).
@@ -3757,11 +3771,16 @@ const vozVista = (() => {
             : https ? ["Para hablar o grabar, abrí la rockola por https (el navegador va a avisar que el certificado es propio: es normal, aceptalo una vez). ",
                el("a", { class: "boton", href: `https://${location.hostname}:${https}/voz${location.search}` }, "abrir por https")]
             : "El micrófono necesita https y esta rockola no lo tiene (https_puerto = 0, o falta openssl)."),
+      datos.silencio && el("div", { class: "hint" }, "🔇 La música está en volumen 0: los anuncios tampoco suenan hasta que la subas."),
+      datos.pausa && el("div", { class: "hint" }, "⏸ Los anuncios de esta sala están pausados (el micrófono sigue andando)."),
       el("div", { class: "botonera" },
         seguro() && el("button", { type: "button", class: micOn || datos.mic ? "primario" : "", "aria-pressed": String(micOn),
                                    onclick: () => hablar(!micOn) }, micOn ? "🎙️ micrófono abierto: tocá para cerrar" : "🎙️ abrir el micrófono"),
         seguro() && el("button", { type: "button", class: grabando ? "primario" : "", onclick: grabar }, grabando ? "⏹ terminar de grabar" : "⏺ grabar un anuncio"),
-        tts_, subir_, subirArchivo),
+        tts_, subir_, subirArchivo,
+        el("button", { type: "button", class: datos.pausa ? "primario" : "", "aria-pressed": String(!!datos.pausa),
+                       title: "Pausar o reanudar todos los anuncios de esta sala (no se borra nada)",
+                       onclick: () => llamar("/api/voz-pausa", { on: !datos.pausa }) }, datos.pausa ? "▶ reanudar anuncios" : "⏸ pausar anuncios")),
       lista.length ? el("div", {}, lista) : el("div", { class: "vacio" }, "Todavía no hay anuncios. Grabá uno o subí un audio: suena encima de la música, que baja un rato."),
     ].filter(Boolean));
   }

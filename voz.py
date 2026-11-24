@@ -215,11 +215,13 @@ class Voz:
     audio de la rockola. `lanzar`: cómo crear un proceso (ver reproductor._lanzar). `al_cambiar(sala)`:
     avisa a las páginas de esa sala. `principal`: el id de la sala del parlante."""
 
-    def __init__(self, carpeta, bajar, lanzar, args_mpv=(), al_cambiar=lambda sala: None, mpv="mpv", principal="principal"):
+    def __init__(self, carpeta, bajar, lanzar, args_mpv=(), al_cambiar=lambda sala: None, mpv="mpv", principal="principal", volumen=lambda: 100):
         self.carpeta = Path(carpeta)
         self.carpeta.mkdir(parents=True, exist_ok=True)
         self.bajar, self.lanzar, self.args_mpv, self.al_cambiar, self.mpv = bajar, lanzar, list(args_mpv), al_cambiar, mpv
         self.principal = principal
+        self.volumen = volumen     # el volumen de la música del parlante (0-130): los anuncios suenan a ése, y con 0 no suenan
+        self.pausadas = set()      # salas con los anuncios pausados (a mano; se pierde al reiniciar)
         self.lock = threading.RLock()
         self.anuncios = {}
         self.hablando = 0          # cuántas voces suenan en el parlante (para bajar la música una sola vez)
@@ -245,9 +247,27 @@ class Voz:
     def estado(self, sala):
         with self.lock:
             s = self.suena.get(sala)
-            return {"mic": sala in self.mic, "suena": s["id"] if s else None,
-                    "anuncios": sorted((dict(a, archivo=None) for a in self.anuncios.values() if a["sala"] == sala),
+            return {"mic": sala in self.mic, "suena": s["id"] if s else None, "pausa": sala in self.pausadas,
+                    "silencio": self._en_silencio(sala),
+                    "anuncios": sorted((dict(a, archivo=None) for a in self.anuncios.values()
+                                       if a["sala"] == sala and not a.get("temporal")),
                                        key=lambda a: a["creado"])}
+
+    def _en_silencio(self, sala):
+        """¿La música del parlante está en 0? Entonces los anuncios del parlante tampoco suenan."""
+        try:
+            return sala == self.principal and not (self.volumen() or 0)
+        except Exception:
+            return False
+
+    def pausar(self, sala, on):
+        """Pausa (o reanuda) todos los anuncios de la sala; el micrófono y los que se tocan a mano no cambian."""
+        with self.lock:
+            (self.pausadas.add if on else self.pausadas.discard)(sala)
+            for a in self.anuncios.values():   # (al volver, que los "cada X" cuenten desde ahora: no suenan todos juntos)
+                if a["sala"] == sala:
+                    a["ultimo"], a["desde"] = time.time(), self.canciones.get(sala, 0)
+        self.al_cambiar(sala)
 
     def en_el_aire(self, sala):
         """Lo que suena ahora en la sala, para las páginas y la pantalla (sin PIN):
@@ -304,11 +324,19 @@ class Voz:
         except (TypeError, ValueError):
             return 0
 
-    def anuncio_nuevo(self, sala, data, nombre, cada_min, cada_canciones, por=""):
+    def anuncio_nuevo(self, sala, data, nombre, cada_min, cada_canciones, por="", una_vez=False):
+        """Guarda un anuncio. Con `una_vez` no se guarda: suena ya, una sola vez, y después se borra el audio."""
         if not data or len(data) > MAX_ANUNCIO:
             raise ErrorVoz(413, f"El audio tiene que pesar entre 1 byte y {MAX_ANUNCIO // 2**20} MB")
         with self.lock:
-            if sum(a["sala"] == sala for a in self.anuncios.values()) >= MAX_ANUNCIOS:
+            if una_vez:
+                if self._en_silencio(sala):
+                    raise ErrorVoz(409, "La música está en silencio (volumen 0): los anuncios tampoco suenan")
+                if sala in self.suena:
+                    raise ErrorVoz(409, "Ya está sonando un anuncio")
+                if sala in self.mic:
+                    raise ErrorVoz(409, "El micrófono está abierto")
+            elif sum(a["sala"] == sala and not a.get("temporal") for a in self.anuncios.values()) >= MAX_ANUNCIOS:
                 raise ErrorVoz(429, f"Ya hay {MAX_ANUNCIOS} anuncios en esta sala: borrá alguno")
             aid = uuid.uuid4().hex[:10]
             archivo = f"{aid}.audio"
@@ -317,8 +345,14 @@ class Voz:
                  "cada_min": self._num(cada_min, 24 * 60), "cada_canciones": self._num(cada_canciones, 200),
                  "activo": True, "azar": False, "programado": False, "horario": [], "creado": time.time(), "ultimo": time.time(),
                  "desde": self.canciones.get(sala, 0), "por": str(por)[:30]}
-            self.anuncios[aid] = a
-            self._escribir(a)
+            if una_vez:   # (sin .json: no sobrevive a un reinicio, no aparece en la lista y nunca suena solo)
+                a.update(temporal=True, activo=False, cada_min=0, cada_canciones=0)
+                self.anuncios[aid] = a
+                self.suena[sala] = {"id": aid, "desde": time.monotonic(), "dur": None}
+                threading.Thread(target=self._sonar, args=(sala, a), daemon=True, name="anuncio").start()
+            else:
+                self.anuncios[aid] = a
+                self._escribir(a)
         self.al_cambiar(sala)
         return a
 
@@ -380,6 +414,8 @@ class Voz:
         """Lo hace sonar ya (para probarlo)."""
         with self.lock:
             a = self._de(sala, aid)
+            if self._en_silencio(sala):
+                raise ErrorVoz(409, "La música está en silencio (volumen 0): los anuncios tampoco suenan")
             if sala in self.suena:
                 raise ErrorVoz(409, "Ya está sonando un anuncio")
             if sala in self.mic:
@@ -420,6 +456,10 @@ class Voz:
                 print(f"  ⚠ el mpv fijo de los anuncios no anduvo ({e!r}): lo paso con uno nuevo", flush=True)
                 self.fijo.cerrar()
                 return self._tocar_lanzando(sala, a)
+            try:
+                self.fijo._enviar("set_property", "volume", float(self.volumen() or 0))   # (suena a lo que está la música)
+            except Exception:
+                pass
             self._subir(+1)   # (cargado: ahora sí baja la música)
             try:
                 with self.lock:
@@ -440,7 +480,7 @@ class Voz:
         Si no se puede por IPC, se hace como antes: bajar la música y que mpv suene solo. Al terminar
         vuelve a subir la música."""
         ruta = str(self.carpeta / a["archivo"])
-        base = [self.mpv, "--no-config", "--no-video", "--really-quiet", *self.args_mpv]
+        base = [self.mpv, "--no-config", "--no-video", "--really-quiet", *self.args_mpv, f"--volume={float(self.volumen() or 0)}"]
         directorio = tempfile.mkdtemp(prefix="rockola-voz-")
         p = None
         try:
@@ -542,6 +582,9 @@ class Voz:
         finally:
             with self.lock:
                 a["ultimo"], a["desde"] = time.time(), self.canciones.get(sala, 0)
+                if a.get("temporal"):   # (de una sola vez: ya sonó, se va)
+                    self.anuncios.pop(a["id"], None)
+                    (self.carpeta / a["archivo"]).unlink(missing_ok=True)
                 try:
                     if a["id"] in self.anuncios:
                         self._escribir(a)
@@ -643,6 +686,12 @@ class Voz:
                 for sala in {a["sala"] for a in self.anuncios.values()}:
                     if sala in self.suena or sala in self.mic:
                         continue   # (de a uno por sala)
+                    if sala in self.pausadas or self._en_silencio(sala):
+                        # (pausada, o sin volumen: no suena y no se acumula; los "cada X" cuentan desde que se calla)
+                        for a in self.anuncios.values():
+                            if a["sala"] == sala:
+                                a["ultimo"], a["desde"] = time.time(), self.canciones.get(sala, 0)
+                        continue
                     a = next((a for a in sorted(self.anuncios.values(), key=lambda a: a["ultimo"]) if a["sala"] == sala and self._toca(a)), None)
                     if a:
                         toca.append(a)
