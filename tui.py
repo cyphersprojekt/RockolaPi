@@ -383,6 +383,14 @@ class Rockola(App):
             t.append("   (modo navegador: pausa y volumen desde /player)", style="dim")
         elif self.estado and self.estado.get("shuffle"):
             t.append("   🔀 al azar", style=f"bold {self.acento}")
+            # De dónde elige: 📁 offline (guardadas), 🌓 mixto o 🌐 online (relacionadas de YouTube Music);
+            # sin internet suenan las guardadas aunque esté elegido otro.
+            fuente, ahora = self.estado.get("source"), self.estado.get("sourceNow")
+            if fuente:
+                icono, nombre = {"offline": ("📁", "offline"), "mixto": ("🌓", "mixto"), "online": ("🌐", "online")}.get(fuente, ("", fuente))
+                t.append(f" · {icono} {nombre}", style=f"bold {self.acento}")
+                if ahora and ahora != fuente:
+                    t.append(" (sin internet: guardadas)", style="bold red")
         # A la derecha, el clima (lo trae la rockola): «☁ 18° nublado», y la temperatura del procesador
         # («CPU 52°», en rojo desde los 70), o lo que entre.
         w = (self.estado or {}).get("weather") if self.conectado else None

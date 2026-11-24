@@ -362,6 +362,8 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   YouTube». **Sin internet** (el led de arriba) elige solo entre las guardadas, y el botón se apaga un
   poco; cuando vuelve internet, vuelve a lo que estaba elegido. Si YouTube no da nada, también sigue con
   las guardadas: nunca se corta. Se recuerda por sala (`ajustes.json` / `salas.json`).
+  La pantalla de la Raspberry (la página `/pantalla` y la TUI) muestra arriba «🔀 📁 offline», «🔀 🌓 mixto»
+  o «🔀 🌐 online», y en rojo «(sin internet: guardadas)» cuando se cayó solo.
   Cuando la cola se vacía, suenan canciones que ya sonaron alguna vez (sin repetir las de
   recién); lo que pidan va primero, cuando termina la que está sonando. **Al prender la Raspberry, o al reiniciar la rockola (p. ej. al actualizarla), si
   en 10 segundos nadie pidió nada, se prende solo y arranca a sonar** (con un parlante Bluetooth,

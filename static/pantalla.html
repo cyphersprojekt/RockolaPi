@@ -53,6 +53,8 @@
   @media (prefers-reduced-motion: reduce) { .led.no { animation: none; } }
   .bar-top .url { font-weight: 700; text-decoration: underline; }
   /* a la derecha, el clima y la hora (lo que mida el clima no mueve lo de la izquierda) */
+  .bar-top .modo { color: var(--acc); font-weight: 700; }   /* el 🔀 y de dónde elige: sin nada si el aleatorio está apagado */
+  .bar-top .modo.cae { color: var(--red); }
   .bar-top .clima { margin-left: auto; color: var(--dim); }
   .bar-top .clock { color: var(--dim); }
   .dim { color: var(--dim); }
@@ -121,6 +123,7 @@
   <div class="bar-top">
     <span class="marca"><span class="logo">♫ ROCKOLA</span><span class="led" id="led" role="img" aria-label="Conectando…"></span></span>
     <span><span class="dim">pedí tu tema en</span> <span class="url" id="url">…</span></span>
+    <span class="modo" id="modo"></span>
     <span class="clima" id="clima"></span>
     <span class="clock" id="clock"></span>
   </div>
@@ -281,6 +284,16 @@ function pintarLed(online) {
   $("#sinRed").hidden = online !== false;
 }
 
+// El aleatorio y de dónde elige: 📁 offline (las guardadas), 🌓 mixto o 🌐 online (relacionadas de YouTube
+// Music). Sin internet suenan las guardadas aunque esté elegido otro (se avisa).
+function pintarModo(s) {
+  const m = $("#modo"), f = s.shuffle && s.source;
+  const [icono, nombre] = { offline: ["📁", "offline"], mixto: ["🌓", "mixto"], online: ["🌐", "online"] }[f] || [];
+  const cae = !!f && s.sourceNow !== s.source;
+  m.textContent = f && nombre ? `🔀 ${icono} ${nombre}${cae ? " (sin internet: guardadas)" : ""}` : "";
+  m.classList.toggle("cae", cae);
+}
+
 function tick() {
   const s = state; if (!s || !s.now) return;
   const p = s.progress, d = p.d || s.now.duration || 0;
@@ -311,12 +324,13 @@ fetch("/api/info").then(r => r.json()).then(i => { $("#url").textContent = i.url
       state = await r.json(); receivedAt = performance.now(); version = state.version;
       $("#conn").hidden = true;
       pintarLed(state.online ?? null);
+      pintarModo(state);
       // El clima, al lado de la hora (acá no hay cartelitos al pasar el mouse: va con palabras).
       $("#clima").textContent = state.weather ? `${state.weather.icon} ${state.weather.temp}° ${state.weather.text}` : "";
       render();
     } catch {
       $("#conn").hidden = false; version = null;
-      pintarLed();
+      pintarLed(); pintarModo({});
       await new Promise(r => setTimeout(r, 3000));
     }
   }
