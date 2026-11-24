@@ -1598,6 +1598,9 @@ function cargarAudio() {
 }
 
 audio.addEventListener("loadedmetadata", () => { radio.listo = true; radio.errores = 0; sintonizar(); });
+// Recién acá el sonido es audible de verdad (loadedmetadata/el seek anterior pasan antes, en silencio);
+// si no se corrige aquí, queda esperando hasta 1 s al próximo tick y el salto se nota.
+audio.addEventListener("playing", sintonizar);
 audio.addEventListener("seeked", () => {
   if (radio.saltoEn) radio.adelanto = Math.min(1, (performance.now() - radio.saltoEn) / 1000);
   radio.saltoEn = 0;
