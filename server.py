@@ -1326,6 +1326,35 @@ def clave_de_album(album, artista):
     return Descargas._clave_album({"album": album, "artist": artista})[0]
 
 
+album_bids = {}   # (álbum, artista) -> (cuándo, browseId): buscar el álbum en YouTube Music es lo lento
+
+
+def faltantes_de_album(sala_id, album, artista):
+    """Los temas de un álbum guardado que todavía no están guardados (de `sala_id`), según YouTube Music:
+    {"known": si se pudo saber, "songs": [...]}. Pide por la red (sin internet, o si no lo encuentra:
+    known False). De paso deja anotado qué temas tiene (ver albumes.json)."""
+    album, artista = str(album or "").strip()[:200], str(artista or "").strip()[:200]
+    if not album or state["online"] is False:
+        return {"known": False, "songs": []}
+    clave = (album, artista)
+    hit = album_bids.get(clave)
+    try:
+        if not hit or time.time() - hit[0] > 3600:
+            hit = album_bids[clave] = (time.time(), album_llamado(album, artista))
+        canciones = get_album(hit[1])["songs"]
+    except ApiError:
+        return {"known": False, "songs": []}
+    except Exception as e:   # sin internet, YouTube no contesta…
+        print(f"  ⚠ no pude ver lo que le falta a «{album}»: {e!r}", flush=True)
+        return {"known": False, "songs": []}
+    if len(album_bids) > 500:
+        album_bids.clear()
+    anotar_album_temas(clave_de_album(album, artista), canciones)
+    tengo = director.descargas.ids(sala_id)
+    return {"known": True, "songs": [{k: c.get(k) for k in ("videoId", "title", "artist", "duration", "thumb", "album")}
+                                     for c in canciones if _se_puede(c) and c["videoId"] not in tengo]}
+
+
 def discos_con_faltantes(sala_id, q=""):
     """Los álbumes guardados (ver Descargas.discos), cada uno con `faltan`: cuántos temas de los que
     tiene YouTube Music no están guardados (None: todavía no se revisó), y cuántos faltan revisar."""
@@ -2298,6 +2327,35 @@ def quitar_guardada(sala, body):
     if r["pendiente"]:
         return f"Borré «{titulo}» de las guardadas (el archivo se borra cuando deje de sonar o salga de la cola)"
     return f"Borré «{titulo}»"
+
+
+def quitar_guardadas(sala, body):
+    """🗑 varias a mano (con el PIN), desde la biblioteca: álbumes enteros (`albums`: sus claves) y/o
+    canciones sueltas (`videoIds`). Lo mismo que quitar_guardada con cada una. Devuelve el texto."""
+    _se_guarda()
+    lista = lambda k: body.get(k) if isinstance(body.get(k), list) else []
+    claves = [k[:300] for k in lista("albums") if isinstance(k, str)][:1000]
+    vids = [v for v in lista("videoIds") if isinstance(v, str) and VIDEO_ID.match(v)][:5000]
+    if claves:
+        vids += director.descargas.ids_de_albumes(claves, sala.id)
+    if not vids:
+        raise ApiError(400, "No elegiste nada para borrar")
+    with lock:
+        vivas = list(salas)
+    usadas = en_uso()
+    borradas = pendientes = 0
+    for vid in dict.fromkeys(vids):
+        r = director.descargas.borrar_de_sala(vid, sala.id, usadas, vivas)
+        if r is not None:
+            borradas += 1
+            pendientes += bool(r["pendiente"])
+    if not borradas:
+        raise ApiError(404, "Esas canciones no están entre las guardadas de esta sala")
+    with lock:
+        bump()   # (todas: cambió la lista de guardadas)
+    print(f"  🗑 Borradas a mano: {borradas} canciones ({len(claves)} álbumes enteros) de la sala {sala.nombre}", flush=True)
+    texto = f"Borré {borradas} {'canción' if borradas == 1 else 'canciones'} de las guardadas de esta sala"
+    return texto + (f" ({pendientes} se borran cuando dejen de sonar o salgan de la cola)" if pendientes else "")
 
 
 def remove_song(sala, body, is_local):
@@ -4120,6 +4178,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(director.descargas.artistas(desde, n, sala=sid))
                 if vista == "artista":   # lo de uno: sus temas y sus álbumes
                     return self.send_json(artista_guardado(sid, qs.get("artista", [""])[0][:200]))
+                if vista == "faltan":   # los temas de un álbum que no están guardados (se le pregunta a YouTube Music)
+                    return self.send_json(faltantes_de_album(sid, qs.get("album", [""])[0], qs.get("artist", [""])[0]))
+                if vista == "disco":    # los temas de un álbum de la biblioteca (por su clave)
+                    return self.send_json({"songs": director.descargas.temas_de_album(qs.get("key", [""])[0][:300], sid)})
                 if vista == "discos":   # todos los álbumes, sin sus temas: la biblioteca (⬇ descargas)
                     return self.send_json(discos_con_faltantes(sid, qs.get("q", [""])[0][:100]))
                 ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
@@ -4210,6 +4272,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/room-delete":
                 borrar_sala(sala)
                 return self.send_json({"ok": True})
+            if path == "/api/library-remove-many":   # 🗑 álbumes enteros o varias canciones (la biblioteca)
+                texto = quitar_guardadas(sala, body)
+                return self.send_json({"text": texto, "state": public_state(sala, client)})
             if path == "/api/library-remove":   # 🗑 una guardada, a mano
                 texto = quitar_guardada(sala, body)
                 return self.send_json({"text": texto, "state": public_state(sala, client)})

@@ -301,6 +301,7 @@
      el mouse o con el dedo (touch-action: que el dedo no desplace la página). Mientras, las
      otras filas se corren para mostrar dónde va a quedar (ver empezarArrastre). */
   .agarre { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .fila.falta { opacity: .65; }   /* un tema del álbum que todavía no está guardado */
   .fila.azar { opacity: .7; }   /* las que eligió el azar para después: más apagadas que las pedidas */
   .filas.ordenando .fila { transition: transform .15s ease; }
   .filas.ordenando .fila.movida { transition: none; position: relative; z-index: 1; background: var(--bg1);
@@ -438,6 +439,16 @@
   #descargasBiblio .hojas { display: flex; align-items: center; gap: .6ch; margin-left: auto; }
   #descargasBiblio .hojas .n { min-width: 7ch; text-align: center; color: var(--dim); font-variant-numeric: tabular-nums; }
   #descargasBiblio .completo { color: var(--ok); }
+  /* un álbum con sus temas desplegados (▾), cada uno con su 🗑 */
+  #descargasBiblio .fila.bib .mas { flex: none; padding: .2em .8ch; }
+  #descargasBiblio .detalle { margin: 0 0 .3em 2.5ch; padding: .3em 0 .3em 2ch; border-left: 2px solid var(--acc); }
+  #descargasBiblio .detalle + .fila.bib { border-top: 1px dashed var(--line); }
+  #descargasBiblio .detalle .cab { display: flex; align-items: center; gap: 1ch; padding: .2em 0 .4em; color: var(--dim); }
+  #descargasBiblio .detalle .cab span { flex: 1; min-width: 0; }
+  #descargasBiblio .detalle .tema { display: flex; align-items: center; gap: 1ch; padding: .15em 0; }
+  #descargasBiblio .detalle .tema .t { flex: 1; min-width: 0; }
+  #descargasBiblio .detalle .tema .d { flex: none; color: var(--dim); }
+  #descargasBiblio .detalle .tema.falta { opacity: .65; }
   #descargasBiblio .fila.bib { cursor: pointer; }
   #descargasBiblio .fila.bib:hover .t { color: var(--acc); }
   #descargasBiblio .fila.bib.elegido .t { color: var(--acc); font-weight: 700; }
@@ -2638,6 +2649,34 @@ const nombreAlbum = a => a.album || "Sin álbum";
 const datosAlbum = a => [a.album ? a.artist : "videos y temas sueltos",
                          `${a.songs.length} ${a.songs.length === 1 ? "tema" : "temas"}`, fmt(a.duration)].filter(Boolean).join(" · ");
 
+// Lo que le falta a un álbum guardado (según YouTube Music): se pide cuando se abre, y otra vez cuando cambian
+// las guardadas. Hasta que llega (o si no se puede saber: sin internet, no lo encuentra) no hay nada. `alLlegar`
+// vuelve a pintar. Devuelve los temas que faltan, o [].
+const faltantes = new Map();   // "álbum\0artista" -> { v, songs, pidiendo }
+function faltantesDe(a, alLlegar) {
+  if (!a?.album || !hayBiblio()) return [];
+  const k = `${a.album}\0${a.artist || ""}`, v = last?.library?.v ?? null;
+  let f = faltantes.get(k);
+  if (!f || (f.v !== v && !f.pidiendo)) {
+    f = { v, songs: f?.songs || null, pidiendo: true };
+    faltantes.set(k, f);
+    const nuevo = f;
+    api(`/api/library?vista=faltan&album=${encodeURIComponent(a.album)}&artist=${encodeURIComponent(a.artist || "")}`)
+      .then(r => { nuevo.songs = r.known ? r.songs : null; })
+      .catch(() => {})
+      .finally(() => { nuevo.pidiendo = false; alLlegar(); });
+  }
+  return f.songs || [];
+}
+// Una que falta: apagada, con los mismos botones que un resultado del buscador que no está guardado: ⬇ guardar,
+// ♫+ a una playlist, ▶ ahora y + agregar a la cola (suena bajándose, como cualquier tema de YouTube).
+const filaFalta = song => {
+  const f = fila(song, { action: el("div", { class: "acts" }, botonGuardar(song), botonLista(song), botonAhora(song), botonAgregar(song)),
+                         marca: el("span", { class: "mal" }, "falta") });
+  f.classList.add("falta");
+  return f;
+};
+
 // Un álbum en la lista: tapa, nombre, artista y cuántos temas. Al tocarlo, se ven sus temas.
 function filaAlbum(a) {
   const abrir = () => {
@@ -2657,17 +2696,20 @@ function filaAlbum(a) {
 // Los temas de un álbum, con "‹ álbumes" para volver a la lista (en la misma página que estaba).
 function pintarAlbum(a) {
   const volver = () => { albumAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  // (al final, apagados, los que le faltan: las guardadas van primero, así no se corren cuando llegan)
+  const faltan = faltantesDe(a, () => { if (albumAbierto?.key === a.key) pintarGuardadas(); });
   const cabeza = el("div", { class: "fila cabeza" },
     el("button", { type: "button", title: "Volver a la lista de álbumes", onclick: volver }, "‹ álbumes"),
     el("img", { src: a.thumb || null, alt: "", loading: "lazy" }),
     el("div", { class: "info" },
       el("div", { class: "t", title: nombreAlbum(a) }, nombreAlbum(a)),
-      el("div", { class: "sub" }, datosAlbum(a))),
+      el("div", { class: "sub" }, datosAlbum(a), faltan.length > 0 && " · ", faltan.length > 0 && el("span", { class: "mal" }, `faltan ${faltan.length}`))),
     // El disco entero (los sueltos, no): ▶ reproducir y + a la cola (con el PIN), ♫+ todos, ⬇ completar.
     // Entero es como está en YouTube Music, en orden: también los temas que no están guardados.
     a.album && el("div", { class: "botonera" },
       botonesCargar(fuenteGuardadas(a), "el disco entero (también los temas que no están guardados)"), botonSumarTodos(fuenteGuardadas(a)), botonGuardarAlbum(a)));
-  pintarLista($("#guardadas"), a.songs, song => fila(song, { action: accionesGuardada(song) }),
+  pintarLista($("#guardadas"), [...a.songs, ...faltan.map(t => ({ ...t, falta: true }))],
+              song => song.falta ? filaFalta(song) : fila(song, { action: accionesGuardada(song) }),
               { arriba: [cabeza], pag: pagAlbum, porPagina: TEMAS_POR_PAGINA,
                 nombre: `Páginas de los temas de ${nombreAlbum(a)}`, alCambiar: pintarGuardadas });
 }
@@ -3197,6 +3239,7 @@ const descargasVista = (() => {
   const ESTADOS = [["todos", "todos"], ["incompletos", "incompletos"], ["completos", "completos"], ["sindatos", "sin datos"]];
   let estado = ESTADOS.some(e => e[0] === store.get("descargasEstado")) ? store.get("descargasEstado") : "todos";
   let pagina = 0, enPagina = [], sinRevisar = 0, scanTimer = null;
+  let abierto = null, temasAbierto = null;   // el álbum con los temas a la vista (▾) y sus temas (null: todavía se piden)
   const pasa = a => estado === "todos" || (estado === "incompletos" ? a.faltan > 0 : estado === "completos" ? a.faltan === 0 : a.faltan == null);
   const sinTildes = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
@@ -3415,6 +3458,9 @@ const descargasVista = (() => {
     b.cuantos.textContent = `${visibles.length === todos ? todos : `${visibles.length} de ${todos}`} álbumes · `
       + (todos ? `${inc} incompletos${sinRevisar ? ` (revisando: faltan ${sinRevisar})` : ""} · ` : "")
       + (n ? `${n} ${n === 1 ? "elegido" : "elegidos"} (${contarTemas(temas)} guardados)` : "ninguno elegido");
+    b.borrar.disabled = !admin || !n;
+    b.borrar.textContent = n ? `🗑 borrar ${n}` : "🗑 borrar";
+    b.borrar.title = admin ? "Borrar de las guardadas los álbumes elegidos, con todos sus temas" : "Hace falta el PIN (🔒 arriba) para borrar";
     b.completar.disabled = !admin || !n;
     b.completar.textContent = n ? `⬇ completar ${n}` : "⬇ completar";
     b.completar.title = admin ? "Bajar lo que les falta a los álbumes elegidos, sin el tope de la fila"
@@ -3425,6 +3471,60 @@ const descargasVista = (() => {
     b.todos.title = sueltan ? "Soltar todos los que se ven con este filtro (de todas las páginas)" : "Elegir todos los que se ven con este filtro (de todas las páginas)";
     b.ninguno.disabled = !n;
   }
+
+  // 🗑 (con el PIN): álbumes enteros (`albums`: sus claves) o temas sueltos (`videoIds`), de las guardadas de esta sala.
+  async function borrar(que, texto) {
+    if (!await preguntar({ titulo: "BORRAR DE LAS GUARDADAS", peligro: true, si: "🗑 borrar", texto })) return;
+    try {
+      const r = await api("/api/library-remove-many", { albums: que.albums || [], videoIds: que.videoIds || [], client });
+      toast(r.text);
+      for (const k of que.albums || []) elegidos.delete(k);
+      if ((que.albums || []).includes(abierto)) { abierto = null; temasAbierto = null; }
+      render(r.state);
+      firmaDiscos = null;
+      await traerDiscos();
+      if (abierto) await cargarTemas();
+    } catch (err) { toast(err.message, true); }
+  }
+
+  const borrarElegidos = () => {
+    const lista = (discos || []).filter(a => elegidos.has(a.key));
+    if (!lista.length) return;
+    const temas = lista.reduce((t, a) => t + a.count, 0);
+    borrar({ albums: lista.map(a => a.key) },
+      `¿Borrar ${lista.length === 1 ? `el álbum «${lista[0].album}»` : `${lista.length} álbumes`} (${contarTemas(temas)}) de las guardadas de esta sala? `
+      + "Se borran los archivos (si ninguna otra sala los tiene). Si vuelven a sonar se guardan de nuevo, y ⬇ completar los vuelve a bajar.");
+  };
+
+  // ▾: los temas de un álbum, para borrar alguno suelto (o el álbum entero).
+  async function verTemas(a) {
+    if (abierto === a.key) { abierto = null; temasAbierto = null; firmaDiscos = null; pintarBiblio(); return; }
+    abierto = a.key; temasAbierto = null; firmaDiscos = null; pintarBiblio();
+    await cargarTemas();
+  }
+  async function cargarTemas() {
+    const key = abierto;
+    if (!key) return;
+    let temas;
+    try { temas = (await api(`/api/library?vista=disco&key=${encodeURIComponent(key)}`)).songs; }
+    catch (err) { toast(err.message, true); temas = []; }
+    if (abierto !== key) return;
+    temasAbierto = temas; firmaDiscos = null; pintarBiblio();
+  }
+  function pintarDetalle(a) {
+    const cab = el("div", { class: "cab" }, el("span", {}, temasAbierto ? contarTemas(temasAbierto.length) + " guardados" : "cargando…",
+        temasAbierto && faltanDe(a).length > 0 && " · ", temasAbierto && faltanDe(a).length > 0 && el("span", { class: "mal" }, `faltan ${faltanDe(a).length}`)),
+      admin && temasAbierto?.length > 0 && el("button", { type: "button", class: "mal", title: "Borrar el álbum entero de las guardadas de esta sala",
+        onclick: () => borrar({ albums: [a.key] }, `¿Borrar el álbum «${a.album}» entero (${contarTemas(temasAbierto.length)}) de las guardadas de esta sala? Si vuelven a sonar se guardan de nuevo.`) }, "🗑 el álbum entero"));
+    return el("div", { class: "detalle" }, cab, ...(temasAbierto || []).map(t => el("div", { class: "tema" },
+      el("div", { class: "t", title: t.title }, t.title), el("span", { class: "d" }, fmt(t.duration)),
+      admin && el("button", { type: "button", title: "Borrarla de las guardadas de esta sala", "aria-label": `Borrar ${t.title}`,
+        onclick: () => borrar({ videoIds: [t.videoId] }, `¿Borrar «${t.title}» de las guardadas de esta sala? Si vuelve a sonar, se vuelve a guardar.`) }, "🗑"))),
+      // Los que le faltan (según YouTube Music), después de los guardados, apagados y con su ⬇.
+      ...faltanDe(a).map(t => el("div", { class: "tema falta" },
+        el("div", { class: "t", title: t.title }, t.title), el("span", { class: "mal" }, "falta"), el("span", { class: "d" }, fmt(t.duration)), botonGuardar(t), botonAgregar(t))));
+  }
+  const faltanDe = a => temasAbierto ? faltantesDe(a, () => { if (abierto === a.key && abierta && tab === "biblioteca") { firmaDiscos = null; pintarBiblio(); } }) : [];
 
   async function completar() {
     const lista = (discos || []).filter(a => elegidos.has(a.key));
@@ -3470,18 +3570,19 @@ const descargasVista = (() => {
       for (const f of filas.values()) { f.casilla.checked = false; f.fila.classList.remove("elegido"); }
       pintarBarra(); } }, "☐ ninguno");
     const completarBtn = el("button", { type: "button", class: "primario", onclick: completar }, "⬇ completar");
+    const borrarBtn = el("button", { type: "button", class: "mal", onclick: borrarElegidos }, "🗑 borrar");
     const cuantos = el("div", { class: "cuantos", role: "status" });
     const lista = el("div", { class: "filas" });
     const caja = $("#descargasBiblio");
     caja.replaceChildren(el("div", { class: "barra" }, buscar, el("div", { class: "selector" }, estadoBtn, estadoMenu),
-      el("div", { class: "hojas" }, anterior, nPagina, siguiente), todos, ninguno, completarBtn, cuantos), lista);
-    armada = { buscar, todos, ninguno, completar: completarBtn, cuantos, lista, estadoActual, estadoMenu, menu, anterior, siguiente, nPagina };
+      el("div", { class: "hojas" }, anterior, nPagina, siguiente), todos, ninguno, borrarBtn, completarBtn, cuantos), lista);
+    armada = { buscar, todos, ninguno, borrar: borrarBtn, completar: completarBtn, cuantos, lista, estadoActual, estadoMenu, menu, anterior, siguiente, nPagina };
   }
 
   function pintarBiblio(s = last) {
     if (!armada) armarBiblio();
     const hay = hayBiblio();
-    const f = JSON.stringify([discos?.length, discos?.[0]?.key, discosError, hay, filtro, !!s, estado, pagina]);
+    const f = JSON.stringify([discos?.length, discos?.[0]?.key, discosError, hay, filtro, !!s, estado, pagina, abierto, temasAbierto?.map(t => t.videoId), admin]);
     if (f === firmaDiscos) { pintarBarra(); return; }
     firmaDiscos = f;
     const lista = armada.lista;
@@ -3500,7 +3601,7 @@ const descargasVista = (() => {
       if (!visibles.length) aviso(estado === "sindatos" ? "No hay álbumes sin datos." : estado === "incompletos" ? "No hay álbumes incompletos (o todavía se están revisando)."
                                   : estado === "completos" ? "Todavía no se confirmó ningún álbum completo." : "Ningún álbum coincide con el filtro.");
       else {
-        lista.replaceChildren(...enPagina.map(a => {
+        lista.replaceChildren(...enPagina.flatMap(a => {
           const casilla = el("input", { type: "checkbox", "aria-label": `Elegir ${a.album}` });
           casilla.checked = elegidos.has(a.key);
           const fila = el("div", { class: "fila bib" + (casilla.checked ? " elegido" : ""),
@@ -3511,9 +3612,11 @@ const descargasVista = (() => {
               el("div", { class: "t", title: a.album }, a.album),
               el("div", { class: "sub" }, [a.artist, contarTemas(a.count) + " guardados", fmt(a.duration)].filter(Boolean).join(" · "),
                 a.faltan > 0 && [" · ", el("span", { class: "mal" }, `faltan ${a.faltan}`)],
-                a.faltan === 0 && [" · ", el("span", { class: "completo" }, "✓ completo")])));
+                a.faltan === 0 && [" · ", el("span", { class: "completo" }, "✓ completo")])),
+            el("button", { type: "button", class: "mas", "aria-expanded": String(abierto === a.key), title: "Ver sus temas (y borrarlos)",
+              "aria-label": `Ver los temas de ${a.album}`, onclick: ev => { ev.stopPropagation(); verTemas(a); } }, abierto === a.key ? "▴" : "▾"));
           filas.set(a.key, { fila, casilla });
-          return fila;
+          return abierto === a.key ? [fila, pintarDetalle(a)] : [fila];
         }));
       }
     }

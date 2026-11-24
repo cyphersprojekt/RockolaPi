@@ -634,6 +634,18 @@ class Descargas:
             a["songs"].sort(key=lambda s: _para_buscar(s.get("title")))
         return orden
 
+    def temas_de_album(self, clave, sala=None):
+        """Los temas guardados (de `sala`) del álbum de esa clave, en orden alfabético."""
+        with self.lock:
+            temas = [dict(g["datos"], videoId=vid) for vid, g in self._de(sala) if self._clave_album(g["datos"])[0] == clave]
+        return sorted(temas, key=lambda s: _para_buscar(s.get("title")))
+
+    def ids_de_albumes(self, claves, sala=None):
+        """Los videoId de las guardadas (de `sala`) de esos álbumes (sus claves: las de `discos`)."""
+        claves = set(claves)
+        with self.lock:
+            return [vid for vid, g in self._de(sala) if self._clave_album(g["datos"])[0] in claves]
+
     def del_album(self, album, artista, sala=None):
         """Cuántas guardadas (de `sala`) son de ese álbum: el mismo nombre y primer artista,
         como en `albumes`."""

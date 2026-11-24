@@ -94,7 +94,9 @@
   .idle .big { font-size: 1.9em; font-weight: 700; margin-top: .5em; }
   .idle .url { font-size: 1.4em; font-weight: 700; color: var(--acc); text-decoration: underline; margin: .4em 0; }
 
-  .queue { overflow: hidden; display: flex; flex-direction: column; margin-bottom: .6em; }
+  /* (el recorte va en .filas-q y no en el panel: el título está montado sobre el borde de arriba y se cortaría) */
+  .queue { display: flex; flex-direction: column; min-height: 0; margin-bottom: .6em; }
+  .queue .filas-q { overflow: hidden; min-height: 0; flex: 1; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   th { text-align: left; color: var(--bg); background: var(--dim); font-weight: 700; padding: 0 1ch; }
   td { padding: 0 1ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -156,11 +158,13 @@
 
   <div class="panel queue">
     <span class="ttl" id="queueTitle">PRÓXIMAS</span>
+    <div class="filas-q">
     <table>
       <thead><tr><th class="n">#</th><th>Canción</th><th>Artista</th><th class="d">Dur.</th><th class="by">Pidió</th><th class="v">Votos</th></tr></thead>
       <tbody id="queue"></tbody>
     </table>
     <div class="empty-q" id="emptyQ">La cola está vacía.</div>
+    </div>
   </div>
 
   <div class="bar-bottom">

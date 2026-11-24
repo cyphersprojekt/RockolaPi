@@ -188,7 +188,11 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   pregunta a YouTube Music, de a un álbum y sin apuro, qué temas tiene cada uno (el primer barrido de
   cientos de álbumes tarda un rato, y se ve «revisando: faltan N»); queda anotado en `albumes.json` y
   después «faltan» se calcula contra lo guardado, así que baja solo a medida que se completan. Un tema
-  que YouTube no deja bajar sigue contando como faltante. Con el PIN, **⬇ completar N**
+  que YouTube no deja bajar sigue contando como faltante. **Qué le falta:** al abrir un álbum (en GUARDADAS o
+  con ▾ en la biblioteca), después de sus temas guardados aparecen, apagados y con «falta» y su ⬇, los que YouTube
+  Music tiene y todavía no están guardados (hace falta internet; sin ella no aparece nada). **Borrar:** con el PIN, **🗑 borrar N** saca de las
+  guardadas de la sala los álbumes elegidos con todos sus temas, y **▾** en cada álbum despliega sus temas, cada
+  uno con su 🗑 (y «🗑 el álbum entero»); pregunta antes, y el archivo se borra si ninguna otra sala lo tiene. Con el PIN, **⬇ completar N**
   les busca en YouTube Music lo que les falta y lo baja **sin el tope de la fila** (los pedidos de los
   demás pasan adelante). Va de a poco: no pone más de 150 temas del lote en la fila a la vez, y a
   medida que se bajan sigue con el próximo álbum. Sigue solo si la rockola se reinicia (el reinicio de las
