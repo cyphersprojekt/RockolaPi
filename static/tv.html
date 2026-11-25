@@ -145,9 +145,7 @@
   .controles { display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; margin-top: .9em;
                padding-top: .8em; border-top: 1px dashed var(--line); }
   .controles .pista { flex-basis: 100%; font-size: .87em; }
-  form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
-  form.pin input { width: 11ch; letter-spacing: .2em; }
-  form.pin input.nombre { width: 20ch; letter-spacing: 0; }
+  #elegir .crear { margin-top: .6em; }
 
   /* buscar */
   form.buscar { display: flex; gap: 1ch; }
@@ -186,6 +184,22 @@
   #dialogo .panel > .ttl { color: var(--red); }
   #dlgTexto { margin: 0; overflow-wrap: anywhere; }
   .dlgBotones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1ch; margin-top: 1.2em; }
+  /* los cuadros del 🔒 PIN y de la sala nueva: como las preguntas, pero en amarillo (no borran nada) */
+  .cuadro { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
+            max-width: none; overflow: visible; }
+  .cuadro::backdrop { background: rgba(29, 32, 33, .75); }
+  .cuadro[open] { animation: aparecer .15s ease-out; }
+  @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } }
+  @media (prefers-reduced-motion: reduce) { .cuadro[open] { animation: none; } }
+  .cuadro .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--acc); padding: 1.3em 2ch 1em; }
+  .cuadro .panel > .ttl { color: var(--acc); }
+  .cuadro .texto { margin: 0 0 .8em; }
+  .cuadro .campos { display: grid; gap: .6em; }
+  .cuadro .campos input { width: 100%; }
+  .cuadro input[type=password] { letter-spacing: .2em; }
+  /* por qué no anduvo: el renglón está siempre (vacío, si no hay nada que decir), así el cuadro no cambia de alto */
+  .cuadro .error { color: var(--red); min-height: 1.45em; margin-top: .4em; overflow-wrap: anywhere; }
+  .cuadro .dlgBotones { margin-top: .6em; }
   button.primario.peligro { background: var(--red); border-color: var(--red); }
 
   /* avisos: barra de abajo */
@@ -234,9 +248,11 @@
     </div>
   </div>
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
-  <nav class="iconos" aria-label="Radio, recap, descargas y control">
+  <nav class="iconos" aria-label="Radio, recomendados, recap, descargas, voz y control">
     <button id="radioBtn" type="button" aria-label="Radio" disabled hidden
             title="La radio es de las salas de música. Acá el video se ve (y se escucha) con ▶ mirar acá">📻</button>
+    <button id="recosBtn" type="button" aria-label="Recomendados" disabled
+            title="Los recomendados son de la música: están en las salas de música">🧭</button>
     <button id="recapBtn" type="button" aria-label="Recap" disabled
             title="El recap es de la música: está en las salas de música">📊</button>
     <button id="descargasBtn" type="button" aria-label="Descargas" disabled
@@ -248,30 +264,6 @@
   </nav>
 </div>
 <main>
-  <div id="pinPanel" class="panel" hidden>
-    <span class="ttl">PIN</span>
-    <form id="pinForm" class="pin" novalidate>
-      <span class="dim" id="pinTexto">PIN de la sala (o el de la rockola):</span>
-      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required>
-      <button class="primario">entrar</button>
-      <button type="button" id="pinCancel">cancelar</button>
-    </form>
-  </div>
-
-  <div id="salaPanel" class="panel" hidden>
-    <span class="ttl">NUEVA SALA DE TV</span>
-    <form id="salaForm" class="pin" novalidate>
-      <span class="dim">Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat.
-        El PIN es para quitar videos de otros y para borrarla.</span>
-      <input id="salaNombre" class="nombre" maxlength="30" placeholder="nombre: Almuerzo" autocomplete="off" required
-             aria-label="Nombre de la sala de tv">
-      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN" minlength="4" maxlength="30"
-             required aria-label="PIN de la sala (4 o más)">
-      <button class="primario">crear</button>
-      <button type="button" id="salaCancel">cancelar</button>
-    </form>
-  </div>
-
   <!-- sin sala elegida (/tv a secas): cuáles hay -->
   <section class="panel" id="elegir" hidden>
     <span class="ttl">SALAS DE TV</span>
@@ -337,6 +329,40 @@
     <div class="dlgBotones">
       <button type="button" id="dlgNo">cancelar</button>
       <button value="si" id="dlgSi" class="primario peligro">sí</button>
+    </div>
+  </form>
+</dialog>
+<!-- 🔒 el PIN y ＋ la sala nueva: en un cuadro, encima de la página (ver pedirPin y abrirNuevaSala) -->
+<dialog id="pinDlg" class="cuadro" aria-labelledby="pinTtl" aria-describedby="pinTexto">
+  <form method="dialog" class="panel" id="pinForm" novalidate>
+    <span class="ttl" id="pinTtl">🔒 PIN</span>
+    <p class="texto" id="pinTexto">PIN de la sala (o el de la rockola):</p>
+    <div class="campos">
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required
+             aria-labelledby="pinTexto" aria-describedby="pinError">
+    </div>
+    <div class="error" id="pinError" role="alert"></div>
+    <div class="dlgBotones">
+      <button type="button" id="pinCancel">cancelar</button>
+      <button id="pinOk" class="primario">🔓 entrar</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="salaDlg" class="cuadro" aria-labelledby="salaTtl" aria-describedby="salaTexto">
+  <form method="dialog" class="panel" id="salaForm" novalidate>
+    <span class="ttl" id="salaTtl">NUEVA SALA DE TV</span>
+    <p class="texto dim" id="salaTexto">Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y
+      su chat. El PIN es para quitar videos de otros y para borrarla.</p>
+    <div class="campos">
+      <input id="salaNombre" maxlength="30" placeholder="nombre: Almuerzo" autocomplete="off" required
+             aria-label="Nombre de la sala de tv" aria-describedby="salaError">
+      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN (4 o más)" minlength="4" maxlength="30"
+             required aria-label="PIN de la sala (4 o más)" aria-describedby="salaError">
+    </div>
+    <div class="error" id="salaError" role="alert"></div>
+    <div class="dlgBotones">
+      <button type="button" id="salaCancel">cancelar</button>
+      <button id="salaOk" class="primario">crear</button>
     </div>
   </form>
 </dialog>
@@ -465,35 +491,63 @@ function pintarControl() {
   if (last) pintarCola(last);
 }
 
-// `solo`: al abrir la página, con el que estaba recordado (si no anda, no se avisa).
-async function entrarAControl(p, solo = false) {
+// `solo`: al abrir la página, con el que estaba recordado (si no anda, no se avisa). `callado`: si no
+// anda, sin aviso abajo (lo dice el cuadro del PIN). Devuelve por qué no anduvo, o null si anduvo.
+async function entrarAControl(p, solo = false, callado = false) {
   pin = p;
+  let error = null;
   try {
     await api("/api/tv/admin", {});
     admin = true; recordarPin(p);
-    $("#pinPanel").hidden = true; $("#pinInput").value = "";
     if (!solo) toast("Listo: ya podés quitar videos de otros y borrar la sala");
   } catch (err) {
     admin = false; pin = ""; recordarPin("");
-    if (p && !solo) toast(err.message.includes("PIN") ? "PIN incorrecto" : err.message, true);
+    // (si se equivocaron muchas veces, la rockola dice cuánto esperar: eso va tal cual)
+    error = err.status !== 429 && err.message.includes("PIN") ? "PIN incorrecto" : err.message;
+    if (p && !solo && !callado) toast(error, true);
   }
   pintarControl();
+  return error;
 }
 function salirDeControl() {
   admin = false; pin = ""; recordarPin("");
   pintarControl();
 }
-$("#lockBtn").onclick = () => {
-  if (admin) return salirDeControl();
-  $("#pinPanel").hidden = !$("#pinPanel").hidden;
-  if (!$("#pinPanel").hidden) { $("#pinPanel").scrollIntoView({ block: "nearest" }); $("#pinInput").focus(); }
-};
-$("#pinCancel").onclick = () => { $("#pinPanel").hidden = true; };
-$("#pinForm").addEventListener("submit", e => {
-  e.preventDefault();
+// Los cuadros (el PIN, la sala nueva): tocar afuera cancela (si se apretó y se soltó afuera: no al
+// arrastrar para elegir texto). Esc también (eso lo hace el navegador).
+function cerrarAlTocarAfuera(d) {
+  let abajo = null;
+  d.addEventListener("pointerdown", e => { abajo = e.target; });
+  d.addEventListener("click", e => { if (e.target === d && abajo === d) d.close(); });
+}
+
+// El PIN, en un cuadro encima de la página. Si no anda, lo dice el cuadro y se puede probar de nuevo.
+const pinDlg = $("#pinDlg");
+function pedirPin() {
+  if (!pinDlg.showModal) {   // (navegador muy viejo)
+    const p = prompt($("#pinTexto").textContent);
+    if (p?.trim()) entrarAControl(p.trim());
+    return;
+  }
+  if (pinDlg.open) return;
+  $("#pinInput").value = ""; $("#pinError").textContent = ""; $("#pinOk").disabled = false;
+  pinDlg.showModal();
+  $("#pinInput").focus();
+}
+$("#lockBtn").onclick = () => admin ? salirDeControl() : pedirPin();
+$("#pinCancel").onclick = () => pinDlg.close();
+cerrarAlTocarAfuera(pinDlg);
+$("#pinForm").addEventListener("submit", async e => {
+  e.preventDefault();   // (se cierra sólo si anduvo)
   const p = $("#pinInput").value.trim();
-  if (!p) { toast("Escribí el PIN", true); $("#pinInput").focus(); return; }
-  entrarAControl(p);
+  if (!p) { $("#pinError").textContent = "⚠ Escribí el PIN"; $("#pinInput").focus(); return; }
+  $("#pinOk").disabled = true; $("#pinError").textContent = "";
+  const error = await entrarAControl(p, false, true);
+  $("#pinOk").disabled = false;
+  if (!error) { pinDlg.close(); return; }
+  if (!pinDlg.open) return toast(error, true);   // (lo cerraron mientras tanto)
+  $("#pinError").textContent = `⚠ ${error}`;
+  $("#pinInput").select(); $("#pinInput").focus();
 });
 
 // ---------- el estado de la sala ----------
@@ -1016,25 +1070,43 @@ salaMenu.addEventListener("keydown", e => {
 // Tocar afuera lo cierra (sin mover el foco: capaz tocaron otra cosa).
 document.addEventListener("pointerdown", e => { if (!e.target.closest?.(".selector")) cerrarMenuSalas(false); });
 
+// La sala nueva, en un cuadro encima de la página: si se cancela, se sigue donde se estaba.
+const salaDlg = $("#salaDlg");
 function abrirNuevaSala() {
-  $("#salaPanel").hidden = false;
-  $("#salaPanel").scrollIntoView({ block: "nearest" });
+  if (!salaDlg.showModal) {   // (navegador muy viejo)
+    const name = prompt("Nombre de la sala de tv")?.trim();
+    const clave = name && prompt("PIN de la sala (4 o más)")?.trim();
+    if (name && clave) crearSala(name, clave).then(error => error && toast(error, true));
+    return;
+  }
+  if (salaDlg.open) return;
+  $("#salaNombre").value = ""; $("#salaPin").value = ""; $("#salaError").textContent = ""; $("#salaOk").disabled = false;
+  salaDlg.showModal();
   $("#salaNombre").focus();
 }
-$("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; };
+$("#salaCancel").onclick = () => salaDlg.close();
+cerrarAlTocarAfuera(salaDlg);
 $("#salaForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  const boton = e.submitter, name = $("#salaNombre").value.trim(), clave = $("#salaPin").value.trim();
-  if (boton) boton.disabled = true;
+  e.preventDefault();   // (si anda, la página se va a la sala nueva; si no, el cuadro dice por qué)
+  $("#salaOk").disabled = true; $("#salaError").textContent = "";
+  const error = await crearSala($("#salaNombre").value.trim(), $("#salaPin").value.trim());
+  if (!error) return;
+  $("#salaOk").disabled = false;
+  $("#salaError").textContent = `⚠ ${error}`;
+  (/PIN/.test(error) ? $("#salaPin") : $("#salaNombre")).focus();
+});
+
+// Crea la sala y va a ella. Si no se pudo, devuelve por qué.
+async function crearSala(name, clave) {
   try {
     const { room } = await api("/api/tv/rooms", { name, pin: clave });
     recordarPin(clave, room.id);   // quien la crea, la controla
     ir(linkTv(room.id), [`Listo: creé la sala de tv ${room.name}. Pasales el link (o que la elijan arriba).`, false]);
   } catch (err) {
-    if (boton) boton.disabled = false;
-    toast(err.message, true);
+    return err.message;
   }
-});
+  return null;
+}
 
 let borrando = false;   // (que loop(), al enterarse de que la sala ya no está, no avise otra cosa)
 $("#borrarSalaBtn").onclick = async () => {
@@ -1218,7 +1290,8 @@ async function elegir() {
           class: "fila sala", role: "link", tabindex: 0, onclick: () => ir(linkTv(t.id)),
           onkeydown: e => { if (e.key === "Enter") ir(linkTv(t.id)); } },
           el("div", { class: "info" }, el("div", { class: "t" }, `📺 ${t.name}`)), el("span", { class: "dim" }, "entrar ›")))
-        : [el("div", { class: "vacio" }, "Todavía no hay ninguna. Creá la primera: es para mirar videos de YouTube entre varios, cada uno en su navegador.")]));
+        : [el("div", { class: "vacio" }, "Todavía no hay ninguna. Creá la primera: es para mirar videos de YouTube entre varios, cada uno en su navegador."),
+           el("div", { class: "crear" }, el("button", { type: "button", class: "primario", onclick: abrirNuevaSala }, "＋ crear una sala de tv"))]));
       if (primera && !r.tvs.length) abrirNuevaSala();
     } catch {
       $("#elegirLista").replaceChildren(el("div", { class: "vacio" }, "⚠ sin conexión con la rockola… reintentando"));

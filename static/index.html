@@ -140,7 +140,7 @@
   .cpu.caliente { color: var(--red); }
   .name, .salas { display: flex; align-items: center; gap: .6ch; color: var(--dim); }
   .name input { width: 13ch; }
-  /* Los cuatro botones de la barra (📻 radio, 📊 recap, ⬇ descargas, 🔒 controlar): sólo el ícono,
+  /* Los botones de la barra (📻 radio, 🧭 recomendados, 📊 recap, ⬇ descargas, 🎙️ voz, 🔒 controlar): sólo el ícono,
      todos del mismo ancho. El que está prendido (la radio sonando, la vista abierta, el PIN
      puesto) lleva el recuadro resaltado, y más grueso: a un emoji el color no le llega. Lo mismo
      los modos del reproductor (🔀 🎚️). En el celular este grupo es el menú de abajo (ver al final). */
@@ -276,12 +276,12 @@
   .modos button { padding: .05em .7ch; font-size: .87em; }
   .modos button.cae { opacity: .5; }   /* sin internet: la fuente elegida espera, suenan las guardadas */
   #borrarSalaBtn { margin-left: auto; }   /* (sala sin parlante: no hay volumen; va contra el borde) */
-  form.pin { display: flex; gap: 1ch; flex-wrap: wrap; align-items: center; }
-  form.pin input { width: 11ch; letter-spacing: .2em; }
 
   /* buscar */
   form.buscar { display: flex; gap: 1ch; }
   form.buscar input { flex: 1; }
+  form.buscar .limpiar { flex: none; padding: .2em 1ch; }
+  form.buscar .limpiar:disabled { opacity: .35; }
   .prompt { color: var(--acc); font-weight: 700; align-self: center; }
 
   /* listas */
@@ -457,15 +457,23 @@
   #descargas .mal { color: var(--red); }
   #descargas .fila.fallo .pos { color: var(--red); }
 
-  /* preguntas (en lugar de las del navegador): un panel en el medio, con la página a media luz */
-  #dialogo { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
-             max-width: none; overflow: visible; }
-  #dialogo::backdrop { background: rgba(29, 32, 33, .75); }
-  #dialogo[open] { animation: aparecer .15s ease-out; }
+  /* preguntas (en lugar de las del navegador): un panel en el medio, con la página a media luz. Los
+     cuadros del 🔒 PIN y de la sala nueva son iguales: salen encima de la vista que sea, sin irse de ahí. */
+  #dialogo, .cuadro { padding: 0; border: 0; background: transparent; color: var(--fg); width: min(52ch, calc(100vw - 32px));
+                      max-width: none; overflow: visible; }
+  #dialogo::backdrop, .cuadro::backdrop { background: rgba(29, 32, 33, .75); }
+  #dialogo[open], .cuadro[open] { animation: aparecer .15s ease-out; }
   @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } }
-  @media (prefers-reduced-motion: reduce) { #dialogo[open] { animation: none; } }
-  #dialogo .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--acc); padding: 1.3em 2ch 1em; }
-  #dialogo .panel > .ttl { color: var(--acc); }
+  @media (prefers-reduced-motion: reduce) { #dialogo[open], .cuadro[open] { animation: none; } }
+  #dialogo .panel, .cuadro .panel { margin: .8em 0 0; background: var(--bg); border-color: var(--acc); padding: 1.3em 2ch 1em; }
+  #dialogo .panel > .ttl, .cuadro .panel > .ttl { color: var(--acc); }
+  .cuadro .texto { margin: 0 0 .8em; }
+  .cuadro .campos { display: grid; gap: .6em; }
+  .cuadro .campos input { width: 100%; }
+  .cuadro input[type=password] { letter-spacing: .2em; }
+  /* por qué no anduvo: el renglón está siempre (vacío, si no hay nada que decir), así el cuadro no cambia de alto */
+  .cuadro .error { color: var(--red); min-height: 1.45em; margin-top: .4em; overflow-wrap: anywhere; }
+  .cuadro .dlgBotones { margin-top: .6em; }
   #dialogo.peligro .panel { border-color: var(--red); }
   #dialogo.peligro .panel > .ttl { color: var(--red); }
   #dlgTexto { margin: 0; overflow-wrap: anywhere; }
@@ -510,6 +518,44 @@
   #toast.show { transform: none; }
   #toast.err { border-top-color: var(--red); color: var(--red); }
 
+  /* ---------- 🧭 recomendados: otra vista, como el recap (ver recosVista). Tres columnas
+     (artistas, álbumes, canciones; en el celular, una abajo de la otra). ---------- */
+  #recos .contenido { max-width: var(--ancho); margin: 0 auto; padding: 0 var(--margen) 4em; }
+  @media (min-width: 1000px) and (min-height: 600px) { #recos { flex: 1; min-height: 0; overflow-y: auto; } }
+  /* de dónde salen y de cuándo son: un renglón siempre (si no entra, "…"), así no corre las columnas */
+  #recos .base { margin-top: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #recos .base .error { color: var(--red); }
+  #recos .grilla { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 3ch; align-items: start; }
+  @media (min-width: 1000px) { #recos .grilla { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  #recos .panel { scroll-margin-top: 4em; }   /* (al abrir un artista desde abajo: que su título no quede detrás de la barra) */
+  #recos .fila.artista img { border-radius: 50%; }
+  #recos .largo { display: none; }   /* sólo los íconos (⬇ ▶): en una columna angosta no entra más */
+  #recos .apartado { color: var(--dim); font-size: .87em; margin-top: .8em; padding-bottom: .2em;
+                     border-bottom: 1px dashed var(--line); }
+  /* ---------- el mini reproductor: abajo de todo en cada vista que no es la de la cola (🧭 📊 ⬇ 🎙️),
+     siempre (ver miniRepro). Lo que suena y por dónde va; tocándolo se vuelve a la cola; con el
+     PIN, ⏮ ⏸ ⏭. Va por encima de los avisos: el escondido queda detrás, como con el menú del
+     celular. Cada vista termina más arriba, para que no le tape lo último. ---------- */
+  :root { --mini: 3.9em; }
+  #recap .contenido, #voz .contenido, #descargas .contenido, #recos .contenido { padding-bottom: calc(var(--mini) + 4em); }
+  .mini { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; height: var(--mini);
+          display: flex; align-items: center; gap: 1.5ch;
+          padding: 0 max(var(--margen), calc((100% - var(--ancho)) / 2 + var(--margen)));
+          background: var(--bg2); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0, 0, 0, .35); }
+  .mini .avance { position: absolute; left: 0; top: -1px; height: 2px; width: calc(var(--p, 0) * 100%); background: var(--acc); }
+  .mini .abrir { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 1.2ch;
+                 cursor: pointer; padding: .2em 0; }
+  .mini .abrir:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
+  .mini .abrir:hover .t { color: var(--acc); }
+  .mini img { width: 2.8em; height: 2.8em; object-fit: cover; flex: none; background: var(--bg1); border: 1px solid var(--line); }
+  .mini .info { flex: 1; min-width: 0; }
+  .mini .info > span { display: block; }
+  .mini .t { font-weight: 700; }
+  .mini .tiempo { color: var(--dim); font-size: .87em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .mini .ctl { display: flex; gap: .6ch; flex: none; }
+  .mini .ctl button { padding: .2em 1ch; }
+  body.con-mini #toast { bottom: var(--mini); }   /* los avisos, arriba del mini reproductor */
+
   /* ---------- en el celular: el menú de abajo ----------
      Los cuatro botones de la barra bajan a un menú fijo al pie, al alcance del pulgar. Arriba
      queda lo demás, en dos renglones: el logo, el led, el clima y la sala (que ocupa lo que
@@ -531,8 +577,12 @@
     /* la cuenta de las descargas, pegada al ícono (el botón acá es ancho) */
     #descargasBtn .cuenta { top: 2px; right: auto; left: calc(50% + .8ch); font-size: .6em; }
     main { padding-bottom: calc(var(--menu) + 5em); }
-    #recap .contenido, #voz .contenido, #descargas .contenido { padding-bottom: calc(var(--menu) + 4em); }
     #toast { bottom: var(--menu); }
+    /* el mini reproductor, justo arriba del menú (y los avisos, arriba de los dos) */
+    #recap .contenido, #voz .contenido, #descargas .contenido, #recos .contenido { padding-bottom: calc(var(--menu) + var(--mini) + 4em); }
+    .mini { bottom: var(--menu); gap: 1.2ch; }
+    .mini .tiempo { display: none; }
+    body.con-mini #toast { bottom: calc(var(--menu) + var(--mini)); }
   }
 </style>
 </head>
@@ -552,9 +602,11 @@
   <label class="name">nombre: <input id="name" maxlength="30" placeholder="Juli" autocomplete="off"></label>
   <!-- Sólo el ícono (qué es cada uno lo dice al pasar el mouse); prendido, con el recuadro
        resaltado. En el celular, este grupo es el menú de abajo. -->
-  <nav class="iconos" aria-label="Radio, recap, descargas y control">
+  <nav class="iconos" aria-label="Radio, recomendados, recap, descargas, voz y control">
     <button id="radioBtn" type="button" aria-pressed="false" aria-label="Radio" hidden
             title="Radio: escuchar acá lo que suena en la sala (con auriculares, cada uno con su volumen)">📻</button>
+    <button id="recosBtn" type="button" aria-pressed="false" aria-label="Recomendados"
+            title="Recomendados: artistas, álbumes y canciones que podrían gustarles, según lo que más suena y lo guardado">🧭</button>
     <a class="boton" id="recapLink" href="/recap" aria-label="Recap"
        title="Recap: lo más escuchado, artistas, géneros y quién pide más">📊</a>
     <button id="descargasBtn" type="button" aria-pressed="false" aria-label="Descargas"
@@ -567,28 +619,6 @@
   </nav>
 </div>
 <main>
-  <div id="pinPanel" class="panel" hidden>
-    <span class="ttl">PIN</span>
-    <form id="pinForm" class="pin" novalidate>
-      <span class="dim" id="pinTexto">Para controlar la música (está en rockola.toml):</span>
-      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required>
-      <button class="primario">entrar</button>
-      <button type="button" id="pinCancel">cancelar</button>
-    </form>
-  </div>
-
-  <div id="salaPanel" class="panel" hidden>
-    <span class="ttl" id="salaTtl">NUEVA SALA</span>
-    <form id="salaForm" class="pin" novalidate>
-      <span class="dim" id="salaTexto"></span>
-      <input id="salaNombre" maxlength="30" placeholder="nombre: Ventas" autocomplete="off" required aria-label="Nombre de la sala">
-      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN" minlength="4" maxlength="30"
-             required aria-label="PIN de la sala (4 o más)">
-      <button class="primario">crear</button>
-      <button type="button" id="salaCancel">cancelar</button>
-    </form>
-  </div>
-
   <div class="columnas">
   <div class="col col-letra">
   <section class="panel" id="panelLetra">
@@ -657,6 +687,8 @@
       <span class="prompt">&gt;</span>
       <input id="q" placeholder="canción, artista o link de YouTube" autocomplete="off" enterkeyhint="search"
              aria-label="Buscar en las guardadas y en YouTube">
+      <!-- (siempre está, apagado si no hay nada escrito: así el campo no cambia de ancho) -->
+      <button type="button" id="qLimpiar" class="limpiar" aria-label="Borrar lo escrito" title="Borrar lo escrito (Esc)" disabled>✕</button>
     </form>
     <div id="armando" class="armando" hidden></div>
     <div id="results"></div>
@@ -735,6 +767,21 @@
 </section>
 <div id="recapTip" role="tooltip" hidden></div>
 
+<!-- 🧭 recomendados: artistas, álbumes y canciones que podrían gustar (ver recosVista) -->
+<section id="recos" hidden aria-labelledby="recosTtl">
+  <div class="contenido">
+    <div class="base dim" id="recosBase" role="status">conectando…</div>
+    <div class="grilla">
+      <section class="panel"><span class="ttl" id="recosTtl">ARTISTAS RECOMENDADOS</span><div id="recosArtistas"></div></section>
+      <section class="panel"><span class="ttl">ÁLBUMES RECOMENDADOS</span><div id="recosAlbumes"></div></section>
+      <section class="panel"><span class="ttl">CANCIONES RECOMENDADAS</span><div id="recosCanciones"></div></section>
+    </div>
+    <div class="hint">Salen de lo que más suena en esta sala (lo pedido cuenta más que lo que eligió 🔀, y también
+      cuentan 🔥 ❤️ 😴) y de lo que más tiene guardado: artistas parecidos, discos que no tiene y temas de sus radios.
+      Lo que ya está guardado o ya sonó no aparece. Tocando un artista o un álbum se ve lo suyo. Se renuevan solos
+      cada 2 horas.</div>
+  </div>
+</section>
 <!-- ⬇ descargas: las que esperan para bajarse (ver descargasVista) -->
 <section id="descargas" hidden aria-labelledby="descargasTtl">
   <div class="contenido">
@@ -767,6 +814,20 @@
       (sala principal) y, en todas las salas, por 📻 radio. Hace falta el PIN (🔒) de la sala.</div>
   </div>
 </section>
+<!-- el mini reproductor: en todas las vistas menos la de la cola (ver miniRepro) -->
+<div class="mini" id="mini" role="region" aria-label="Lo que suena" hidden>
+  <div class="avance" id="miniAvance"></div>
+  <button type="button" class="abrir" id="miniAbrir" title="Volver al reproductor: la cola, la letra y el chat">
+    <img id="miniTapa" alt="">
+    <span class="info"><span class="t" id="miniTitulo">conectando…</span><span class="sub" id="miniSub"></span></span>
+  </button>
+  <span class="tiempo" id="miniTiempo"></span>
+  <span class="ctl" id="miniCtl" hidden>
+    <button type="button" id="miniPrev" aria-label="Anterior">⏮</button>
+    <button type="button" id="miniPlay" class="primario" aria-label="Pausa">⏸</button>
+    <button type="button" id="miniSkip" aria-label="Siguiente">⏭</button>
+  </span>
+</div>
 <dialog id="dialogo" aria-labelledby="dlgTitulo" aria-describedby="dlgTexto">
   <form method="dialog" class="panel" id="dlgForm" novalidate>
     <span class="ttl" id="dlgTitulo">CONFIRMAR</span>
@@ -776,6 +837,40 @@
       <button type="button" id="dlgNo">cancelar</button>
       <button value="extra" id="dlgExtra" hidden></button>
       <button value="si" id="dlgSi" class="primario">sí</button>
+    </div>
+  </form>
+</dialog>
+<!-- 🔒 el PIN, para controlar la música: encima de la vista que sea (ver pedirPin) -->
+<dialog id="pinDlg" class="cuadro" aria-labelledby="pinTtl" aria-describedby="pinTexto">
+  <form method="dialog" class="panel" id="pinForm" novalidate>
+    <span class="ttl" id="pinTtl">🔒 PIN</span>
+    <p class="texto" id="pinTexto">Para controlar la música (está en rockola.toml):</p>
+    <div class="campos">
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="······" required
+             aria-labelledby="pinTexto" aria-describedby="pinError">
+    </div>
+    <div class="error" id="pinError" role="alert"></div>
+    <div class="dlgBotones">
+      <button type="button" id="pinCancel">cancelar</button>
+      <button id="pinOk" class="primario">🔓 entrar</button>
+    </div>
+  </form>
+</dialog>
+<!-- ＋ nueva sala (de música o de tv): encima de la vista que sea (ver elegirSala) -->
+<dialog id="salaDlg" class="cuadro" aria-labelledby="salaTtl" aria-describedby="salaTexto">
+  <form method="dialog" class="panel" id="salaForm" novalidate>
+    <span class="ttl" id="salaTtl">NUEVA SALA</span>
+    <p class="texto dim" id="salaTexto"></p>
+    <div class="campos">
+      <input id="salaNombre" maxlength="30" placeholder="nombre: Ventas" autocomplete="off" required aria-label="Nombre de la sala"
+             aria-describedby="salaError">
+      <input id="salaPin" type="password" autocomplete="new-password" placeholder="PIN (4 o más)" minlength="4" maxlength="30"
+             required aria-label="PIN de la sala (4 o más)" aria-describedby="salaError">
+    </div>
+    <div class="error" id="salaError" role="alert"></div>
+    <div class="dlgBotones">
+      <button type="button" id="salaCancel">cancelar</button>
+      <button id="salaOk" class="primario">crear</button>
     </div>
   </form>
 </dialog>
@@ -811,8 +906,9 @@ function irASala(id, aviso) {
   if (aviso) store.set("aviso", JSON.stringify(aviso));   // para mostrarlo ya en la otra
   store.set("sala", id);
   if (radio.on) avisarRadio(false);
-  // (si está en el 📊 recap o en ⬇ descargas, va a lo mismo de la otra sala)
-  location.href = descargasVista.abierta() ? descargasVista.link(id) : vozVista.abierta() ? vozVista.link(id) : recapVista.link(id);
+  // (si está en el 📊 recap, en ⬇ descargas…, va a lo mismo de la otra sala)
+  location.href = descargasVista.abierta() ? descargasVista.link(id) : vozVista.abierta() ? vozVista.link(id)
+    : recosVista.abierta() ? recosVista.link(id) : recapVista.link(id);
 }
 
 const nameInput = $("#name");
@@ -965,6 +1061,8 @@ function pintarControl() {
   $("#controls").hidden = !admin;
   vozVista.alEstado(last);
   descargasVista.alEstado(last);   // (con el PIN se puede completar álbumes y cancelar el lote)
+  recosVista.alEstado(last);       // (con el PIN: ▶ ahora y cargar un disco entero)
+  miniRepro.alEstado(last);        // (y ⏮ ⏸ ⏭ en el mini reproductor)
   if (armando && !armando.mine && !admin) ponerArmando(null);   // era de otro: la cambiaba con el PIN
   if (biblio.v != null) pintarGuardadas();   // (con el PIN, las guardadas tienen 🗑)
   pintarListas(); pintarArmando();           // (y las playlists se cargan enteras y se cambian)
@@ -972,20 +1070,24 @@ function pintarControl() {
 }
 
 // `solo`: al abrir la página, con el que estaba recordado (si es el de la principal probado en
-// otra sala y no anda, no se avisa).
-async function entrarAControl(p, solo = false) {
+// otra sala y no anda, no se avisa). `callado`: si no anda, sin aviso abajo (lo dice el cuadro del
+// PIN). Devuelve por qué no anduvo, o null si anduvo.
+async function entrarAControl(p, solo = false, callado = false) {
   const propio = pins[sala] === p;
   pin = p;
+  let error = null;
   try {
     await api("/api/admin", {});
     admin = true; recordarPin(p);
-    $("#pinPanel").hidden = true; $("#pinInput").value = "";
     toast("Listo: ya podés controlar la música");
   } catch (err) {
     admin = false; pin = ""; recordarPin("");
-    if (p && (!solo || propio)) toast(err.message.includes("PIN") ? "PIN incorrecto" : err.message, true);
+    // (si se equivocaron muchas veces, la rockola dice cuánto esperar: eso va tal cual)
+    error = err.status !== 429 && err.message.includes("PIN") ? "PIN incorrecto" : err.message;
+    if (p && !callado && (!solo || propio)) toast(error, true);
   }
   pintarControl();
+  return error;
 }
 
 function salirDeControl() {
@@ -993,10 +1095,26 @@ function salirDeControl() {
   pintarControl();
 }
 
+// Los cuadros (el PIN, la sala nueva): tocar afuera cancela (si se apretó y se soltó afuera: no al
+// arrastrar para elegir texto), como en las preguntas. Esc también (eso lo hace el navegador).
+function cerrarAlTocarAfuera(d) {
+  let abajo = null;
+  d.addEventListener("pointerdown", e => { abajo = e.target; });
+  d.addEventListener("click", e => { if (e.target === d && abajo === d) d.close(); });
+}
+
+// El PIN se pide en un cuadro encima de lo que se esté mirando (la cola, 🧭, el recap…): al entrar
+// (o al cancelar) se sigue ahí. Si no anda, lo dice el cuadro y se puede probar de nuevo.
+const pinDlg = $("#pinDlg");
 function pedirPin() {
-  recapVista.cerrar(); descargasVista.cerrar(); vozVista.cerrar();   // (el formulario está en la vista de la cola)
-  $("#pinPanel").hidden = false; reacomodar();
-  $("#pinPanel").scrollIntoView({ block: "nearest" });
+  if (!pinDlg.showModal) {   // (navegador muy viejo)
+    const p = prompt($("#pinTexto").textContent);
+    if (p?.trim()) entrarAControl(p.trim());
+    return;
+  }
+  if (pinDlg.open) return;
+  $("#pinInput").value = ""; $("#pinError").textContent = ""; $("#pinOk").disabled = false;
+  pinDlg.showModal();
   $("#pinInput").focus();
 }
 $("#lockBtn").onclick = async () => {
@@ -1005,14 +1123,21 @@ $("#lockBtn").onclick = async () => {
                           si: "🔒 dejar de controlar" })) salirDeControl();
     return;
   }
-  if ($("#pinPanel").hidden) pedirPin(); else { $("#pinPanel").hidden = true; reacomodar(); }
+  pedirPin();
 };
-$("#pinCancel").onclick = () => { $("#pinPanel").hidden = true; reacomodar(); };
-$("#pinForm").addEventListener("submit", e => {
-  e.preventDefault();
+$("#pinCancel").onclick = () => pinDlg.close();
+cerrarAlTocarAfuera(pinDlg);
+$("#pinForm").addEventListener("submit", async e => {
+  e.preventDefault();   // (se cierra sólo si anduvo)
   const p = $("#pinInput").value.trim();
-  if (!p) { toast("Escribí el PIN", true); $("#pinInput").focus(); return; }
-  entrarAControl(p);
+  if (!p) { $("#pinError").textContent = "⚠ Escribí el PIN"; $("#pinInput").focus(); return; }
+  $("#pinOk").disabled = true; $("#pinError").textContent = "";
+  const error = await entrarAControl(p, false, true);
+  $("#pinOk").disabled = false;
+  if (!error) { pinDlg.close(); return; }
+  if (!pinDlg.open) return toast(error, true);   // (lo cerraron mientras tanto)
+  $("#pinError").textContent = `⚠ ${error}`;
+  $("#pinInput").select(); $("#pinInput").focus();
 });
 
 async function control(path, body = {}) {
@@ -1299,7 +1424,8 @@ async function moverEnCola(id, to) {
 function ponerTitulo(enRecap = recapVista.abierta()) {
   const otra = last?.room && !last.room.main;   // una sala sin parlante
   document.title = (otra ? `Rockola · ${last.room.name}` : "Rockola")
-    + (enRecap ? " · recap" : descargasVista.abierta() ? " · descargas" : vozVista.abierta() ? " · voz" : "");
+    + (enRecap ? " · recap" : descargasVista.abierta() ? " · descargas" : vozVista.abierta() ? " · voz"
+       : recosVista.abierta() ? " · recomendados" : "");
 }
 
 let current = null, progress = null, progressAt = 0, last = null;
@@ -1483,6 +1609,8 @@ function render(s) {
   descargasVista.alEstado(s);
   seguirGuardando(s);
   vozVista.alEstado(s);
+  recosVista.alEstado(s);   // (después de seguirGuardando: sus filas muestran lo que se baja)
+  miniRepro.alEstado(s);    // (después de los controles: los copia)
 }
 
 // Debajo de lo que suena, para todos: las reacciones (una de cada una por persona y por canción,
@@ -1576,6 +1704,7 @@ function listasEnCola(queue) {
 }
 
 function tickProgress() {
+  miniRepro.tick(); recosVista.tick();   // (el mini reproductor, si se ve, y el «hace 5 min» de 🧭)
   const bar = document.getElementById("bar");
   if (!bar || !current || !progress) return;
   const d = progress.d || current.duration || 0;
@@ -1798,16 +1927,33 @@ function elegirSala(v) {
     ? "Para mirar videos de YouTube entre varios, cada uno en su navegador, con su cola y su chat. El PIN es para quitar videos de otros y para borrarla."
     : "Con su propia cola, chat y guardadas. No tiene parlante: se escucha con 📻 radio, cada uno en su compu. El PIN es para controlarla (pausa, ⏭, borrarla).";
   $("#salaNombre").placeholder = salaDeTv ? "nombre: Almuerzo" : "nombre: Ventas";
-  recapVista.cerrar(); descargasVista.cerrar(); vozVista.cerrar();
-  $("#salaPanel").hidden = false; reacomodar();
-  $("#salaPanel").scrollIntoView({ block: "nearest" });
+  // (en un cuadro, encima de la vista que sea: si se cancela, se sigue ahí)
+  if (!salaDlg.showModal) {   // (navegador muy viejo)
+    const nombre = prompt(`${$("#salaTtl").textContent}: nombre`)?.trim();
+    const clave = nombre && prompt("PIN de la sala (4 o más)")?.trim();
+    if (nombre && clave) crearSala(nombre, clave).then(error => error && toast(error, true));
+    return;
+  }
+  if (salaDlg.open) return;
+  $("#salaNombre").value = ""; $("#salaPin").value = ""; $("#salaError").textContent = ""; $("#salaOk").disabled = false;
+  salaDlg.showModal();
   $("#salaNombre").focus();
 }
-$("#salaCancel").onclick = () => { $("#salaPanel").hidden = true; reacomodar(); };
+const salaDlg = $("#salaDlg");
+$("#salaCancel").onclick = () => salaDlg.close();
+cerrarAlTocarAfuera(salaDlg);
 $("#salaForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  const boton = e.submitter, nombre = $("#salaNombre").value.trim(), clave = $("#salaPin").value.trim();
-  if (boton) boton.disabled = true;
+  e.preventDefault();   // (si anda, la página se va a la sala nueva; si no, el cuadro dice por qué)
+  $("#salaOk").disabled = true; $("#salaError").textContent = "";
+  const error = await crearSala($("#salaNombre").value.trim(), $("#salaPin").value.trim());
+  if (!error) return;
+  $("#salaOk").disabled = false;
+  $("#salaError").textContent = `⚠ ${error}`;
+  (/PIN/.test(error) ? $("#salaPin") : $("#salaNombre")).focus();
+});
+
+// Crea la sala y va a ella. Si no se pudo, devuelve por qué.
+async function crearSala(nombre, clave) {
   try {
     if (salaDeTv) {
       const { room } = await api("/api/tv/rooms", { name: nombre, pin: clave });
@@ -1820,10 +1966,10 @@ $("#salaForm").addEventListener("submit", async e => {
     pins[room.id] = clave; store.set("pins", JSON.stringify(pins));   // quien la crea, la controla
     irASala(room.id, [`Listo: creé la sala ${room.name}. Pasales el link (o que la elijan arriba).`, false]);
   } catch (err) {
-    if (boton) boton.disabled = false;
-    toast(err.message, true);
+    return err.message;
   }
-});
+  return null;
+}
 
 $("#borrarSalaBtn").onclick = async () => {
   const nombre = last?.room?.name;
@@ -2073,6 +2219,7 @@ async function sugerir() {
   pintarResultados();
 }
 $("#q").addEventListener("input", () => {
+  $("#qLimpiar").disabled = !$("#q").value;
   const q = textoBuscado();
   clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
   discoAbierto = null;   // buscan otra cosa: de vuelta a los resultados
@@ -2142,7 +2289,7 @@ function filaResultado(song, { pos } = {}) {
 // que faltan, sin ponerlos en la cola. Cada uno que se baja va en state.saving con su álbum
 // (el browseId); el de las guardadas, el servidor lo busca por nombre y artista.
 const idDisco = a => a.browseId || albumDeGuardadas.get(a.key) || `guardadas:${a.key}`;
-const repintarDiscos = () => { pintarResultados(); if (albumAbierto) pintarGuardadas(); };
+const repintarDiscos = () => { pintarResultados(); if (albumAbierto) pintarGuardadas(); recosVista.pintar(); };
 
 // Quedó guardado entero (y no se está bajando nada de él).
 const discoListo = a => albumesListos.has(a.browseId) && ![...guardando.values()].some(g => g.album === a.browseId && !g.error);
@@ -2408,11 +2555,14 @@ async function buscarEnYouTube(q) {
   pintarResultados();
 }
 
+$("#qLimpiar").onclick = () => { limpiarBusqueda(); $("#q").focus({ preventScroll: true }); };
+$("#q").addEventListener("keydown", e => { if (e.key === "Escape" && $("#q").value) { e.preventDefault(); limpiarBusqueda(); } });
+
 // Ya agregada (o cargada la playlist, o borraron el texto): campo y resultados vacíos.
 function limpiarBusqueda() {
   ++busquedaPedido; ++sugeridasPedido;   // si había algo en camino, que no aparezca después
   clearTimeout(sugerirTimer); clearTimeout(youtubeTimer);
-  $("#q").value = "";
+  $("#q").value = ""; $("#qLimpiar").disabled = true;
   busqueda = null; buscandoYT = null; playlistVista = null; discoAbierto = null; sugeridas = { q: "", items: [], total: 0 };
   pintarResultados();
 }
@@ -3265,7 +3415,7 @@ const descargasVista = (() => {
 
   function abrir(apilar = true) {
     if (abierta) return;
-    recapVista.cerrar(false); vozVista.cerrar(false);   // (de a una vista)
+    recapVista.cerrar(false); vozVista.cerrar(false); recosVista.cerrar(false);   // (de a una vista)
     scrollCola = scrollY;
     abierta = true;
     $("main").hidden = true; caja.hidden = false;
@@ -3971,7 +4121,7 @@ const vozVista = (() => {
 
   function abrir(apilar = true) {
     if (abierta) return;
-    recapVista.cerrar(false); descargasVista.cerrar(false);   // (de a una vista)
+    recapVista.cerrar(false); descargasVista.cerrar(false); recosVista.cerrar(false);   // (de a una vista)
     scrollCola = scrollY;
     abierta = true;
     $("main").hidden = true; caja.hidden = false;
@@ -4101,6 +4251,307 @@ const vozRadio = (() => {
 })();
 setInterval(() => vozRadio.alEstado(last), 1000);
 
+// ---------- el mini reproductor ----------
+// En todas las vistas que no son la de la cola (🧭 recomendados, 📊 recap, ⬇ descargas, 🎙️ voz),
+// abajo de todo, como en las apps de música: lo que suena y por dónde va. Tocándolo se vuelve a la
+// cola; con el PIN, ⏮ ⏸ ⏭ son los mismos de la cola (hacen lo mismo y se prenden y apagan igual).
+// Aparece y desaparece solo: cada vista, al abrirse, esconde la de la cola (main), y eso se mira acá.
+const miniRepro = (() => {
+  const caja = $("#mini");
+  const CONTROLES = [["#miniPrev", "#prevBtn"], ["#miniPlay", "#playBtn"], ["#miniSkip", "#skipBtn"]];
+  const visible = () => !caja.hidden;
+
+  function ver() {
+    const on = $("main").hidden;
+    if (on === visible()) return;
+    caja.hidden = !on;
+    document.body.classList.toggle("con-mini", on);   // (los avisos salen arriba del mini)
+    if (on) alEstado(last);
+  }
+
+  function alEstado(s) {
+    if (!visible()) return;
+    const now = s?.now, tapa = $("#miniTapa");
+    if (!now?.thumb) tapa.removeAttribute("src");
+    else if (tapa.getAttribute("src") !== now.thumb) tapa.src = now.thumb;
+    const sinParlante = !!s?.room && !s.room.main;
+    const estado = !now ? "" : s.voice ? "📢 " : s.loading ? "⏳ " : (sinParlante ? !s.paused && !s.waiting : s.progress.playing) ? "▶ " : "⏸ ";
+    $("#miniTitulo").textContent = now ? now.title : s ? "Nada sonando" : "conectando…";
+    $("#miniSub").textContent = now ? estado + (now.artist || "") : s ? "Tocá acá para volver y pedir un tema" : "";
+    $("#miniAbrir").title = now ? `${now.title} · ${now.artist || ""}: tocá para volver a la cola, la letra y el chat`
+                                : "Volver a la cola, la letra y el chat";
+    $("#miniCtl").hidden = !admin;
+    for (const [mini, de] of CONTROLES) {
+      const a = $(mini), b = $(de);
+      a.hidden = b.hidden; a.disabled = b.disabled; a.textContent = b.textContent; a.title = b.title;
+      a.setAttribute("aria-label", b.getAttribute("aria-label") || b.title);
+    }
+    tick();
+  }
+
+  // Cada segundo (con la barra de la cola): por dónde va.
+  function tick() {
+    if (!visible()) return;
+    const d = current ? progress?.d || current.duration || 0 : 0;
+    const t = current && progress ? Math.min(d, posicion()) : 0;
+    $("#miniAvance").style.setProperty("--p", d ? (t / d).toFixed(4) : "0");
+    const texto = current ? `${fmt(t)} / ${fmt(d)}` : "";
+    if ($("#miniTiempo").textContent !== texto) $("#miniTiempo").textContent = texto;
+  }
+
+  // (cierra la que esté abierta: las otras no hacen nada)
+  $("#miniAbrir").onclick = () => { recapVista.cerrar(); descargasVista.cerrar(); vozVista.cerrar(); recosVista.cerrar(); };
+  for (const [mini, de] of CONTROLES) $(mini).onclick = () => $(de).click();
+  new MutationObserver(ver).observe($("main"), { attributes: true, attributeFilter: ["hidden"] });
+  return { alEstado, tick };
+})();
+
+// ---------- 🧭 recomendados ----------
+// Otra vista de esta misma página, como el recap: artistas, álbumes y canciones que podrían gustarle
+// a la sala, según lo que más suena y lo que más tiene guardado. Los arma la rockola cada 2 horas
+// (ver recomendados.py): acá sólo se piden. Tocando un artista o un álbum se ve lo suyo en la misma
+// columna (‹ vuelve). /recomendados abre la página directo acá.
+const recosVista = (() => {
+  const boton = $("#recosBtn"), caja = $("#recos");
+  const cols = { artistas: $("#recosArtistas"), albumes: $("#recosAlbumes"), canciones: $("#recosCanciones") };
+  const RAIZ = { artistas: "artistas", albumes: "álbumes", canciones: "canciones" };
+  let abierta = false, datos = null, crudo = "", error = null, pedido = 0, timer = 0, scrollCola = 0;
+  let version = 0, firma = null, base = "";
+  const pilas = { artistas: [], albumes: [], canciones: [] };   // lo que se abrió en cada columna (se ve el último)
+
+  const link = (paraSala = sala, aca = abierta) =>
+    (aca ? "/recomendados" : "/") + (paraSala !== PRINCIPAL ? `?sala=${encodeURIComponent(paraSala)}` : "");
+  const y = l => l.length > 1 ? `${l.slice(0, -1).join(", ")} y ${l.at(-1)}` : l[0] || "";
+  const corto = (t, n = 16) => t.length > n ? t.slice(0, n - 1) + "…" : t;
+  // De dónde salió cada una (lo dice el servidor: ver _por_que en recomendados.py).
+  function porQue(w) {
+    if (!w?.like?.length) return "";
+    return { como: `como ${y(w.like)}`, tuyo: "de tus artistas", de: `lo más escuchado de ${w.like[0]}`,
+             tema: `por ${y(w.like.map(t => `«${t}»`))}` }[w.kind] || "";
+  }
+  function hace(at) {
+    const m = Math.max(0, Math.round((Date.now() / 1000 - at) / 60));
+    return m < 2 ? "recién" : m < 60 ? `hace ${m} min` : `hace ${Math.floor(m / 60)} h` + (m % 60 ? ` ${m % 60} min` : "");
+  }
+
+  function pintarBoton() {
+    boton.classList.toggle("on", abierta);
+    boton.setAttribute("aria-pressed", String(abierta));
+    boton.title = abierta ? "Recomendados: volver a la cola, la letra y el chat"
+                          : "Recomendados: artistas, álbumes y canciones que podrían gustarles, según lo que más suena y lo guardado";
+    boton.setAttribute("aria-label", boton.title);
+  }
+
+  function abrir(apilar = true) {
+    if (abierta) return;
+    recapVista.cerrar(false); descargasVista.cerrar(false); vozVista.cerrar(false);   // (de a una vista)
+    scrollCola = scrollY;
+    abierta = true;
+    $("main").hidden = true; caja.hidden = false;
+    scrollTo(0, 0);
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    firma = null; pintar();
+    traer();
+  }
+
+  function cerrar(apilar = true) {
+    if (!abierta) return;
+    abierta = false; clearTimeout(timer); ++pedido;
+    caja.hidden = true; $("main").hidden = false;
+    if (apilar) history.pushState(null, "", link());
+    pintarBoton(); ponerTitulo();
+    reacomodar();   // mientras tanto las listas estaban ocultas: volver a contar cuántas filas entran
+    scrollTo(0, scrollCola);
+  }
+
+  async function traer() {
+    clearTimeout(timer);
+    const n = ++pedido;
+    try {
+      const d = await api("/api/recos");
+      if (n !== pedido) return;
+      const j = JSON.stringify(d);
+      if (j !== crudo) { crudo = j; version++; }   // (lo mismo otra vez: no hace falta armar las columnas de nuevo)
+      datos = d; error = null;
+    } catch (err) {
+      if (n !== pedido) return;
+      if (err.message !== error) version++;
+      error = err.message;
+    }
+    pintar();
+    if (!abierta) return;
+    // Mientras se calculan, se pregunta seguido; si no, cuando les toca renovarse (o cada 10 minutos).
+    const vence = datos?.at ? (datos.at + datos.every) * 1000 - Date.now() + 20e3 : 60e3;
+    timer = setTimeout(traer, error ? 30e3 : datos?.computing && datos.online !== false ? 5e3 : Math.min(600e3, Math.max(30e3, vence)));
+  }
+
+  // De dónde salen y de cuándo son (un renglón; el «hace 5 min» se va poniendo al día).
+  function pintarBase() {
+    let texto, mal = false;
+    if (!datos) [texto, mal] = error ? [`⚠ ${error}`, true] : ["cargando…", false];
+    else if (!datos.at) texto = datos.online === false ? "Sin internet: los recomendados se buscan en YouTube Music cuando vuelva."
+                                                       : "Buscando recomendaciones en YouTube Music… la primera vez tarda un minuto.";
+    else if (datos.empty) texto = "Todavía no hay de dónde sacarlas: salen de lo que suena y lo que se guarda en esta sala.";
+    else texto = "Según lo que más suena y lo guardado" + (datos.seeds.artists.length ? `: ${datos.seeds.artists.join(", ")}` : "")
+                 + " · " + (datos.online === false ? `sin internet: son los de ${hace(datos.at)}`
+                            : datos.computing ? "actualizando…" : `actualizados ${hace(datos.at)}`);
+    if (base === texto + mal) return;
+    base = texto + mal;
+    const b = $("#recosBase");
+    b.replaceChildren(mal ? el("span", { class: "error" }, texto) : texto);
+    b.title = texto;
+  }
+
+  // Lo que cambia cómo se ven las filas: los datos y lo abierto (version), el PIN, la cola, lo que se baja…
+  const firmaAhora = () => JSON.stringify([version, admin, hayBiblio(), [...queuedIds], [...guardando.entries()], [...yaGuardadas],
+                                           [...pidiendoAlbum], [...albumesListos], armandoV, current?.videoId ?? null]);
+
+  function pintar() {
+    if (!abierta) return;
+    pintarBase();
+    const f = firmaAhora();
+    if (f === firma) return;
+    firma = f;
+    // (todo se arma de nuevo: el foco vuelve a lo mismo, si sigue estando)
+    const foco = caja.contains(document.activeElement) ? document.activeElement.dataset?.foco : null;
+    for (const [col, c] of Object.entries(cols)) c.replaceChildren(...columna(col));
+    if (foco) [...caja.querySelectorAll("[data-foco]")].find(e => e.dataset.foco === foco)?.focus({ preventScroll: true });
+  }
+
+  function columna(col) {
+    const abierto = pilas[col].at(-1);
+    if (abierto) return abierto.tipo === "artista" ? vistaArtista(col, abierto) : vistaAlbum(col, abierto);
+    const items = (datos && { artistas: datos.artists, albumes: datos.albums, canciones: datos.songs }[col]) || [];
+    if (!items.length) {
+      return [el("div", { class: "vacio" }, !datos ? (error ? "—" : "cargando…") : !datos.at ? (datos.online === false ? "sin internet" : "buscando…")
+                                                     : "Nada por acá, por ahora.")];
+    }
+    return items.map(it => col === "artistas" ? filaArtista(col, it) : col === "albumes" ? filaAlbum(col, it) : filaTema(it));
+  }
+
+  // Una fila: la tapa (redonda, la de un artista) o el número, el nombre y, abajo, de quién es y de
+  // dónde salió. Con `abrir`, se toca para ver lo suyo (›).
+  function filaR({ thumb, pos, t, marca, sub, redonda, acciones, abrir, clave }) {
+    const f = el("div", { class: "fila" + (abrir ? " album" : "") + (redonda ? " artista" : ""), "data-foco": clave },
+      pos != null ? el("span", { class: "pos" }, pos) : el("img", { src: thumb || null, alt: "", loading: "lazy", decoding: "async" }),
+      el("div", { class: "info" },
+        el("div", { class: "t", title: t }, t),
+        el("div", { class: "sub", title: sub || null }, marca, marca && sub && " · ", sub)),
+      acciones,
+      abrir && el("span", { class: "flecha", "aria-hidden": "true" }, "›"));
+    acciones?.querySelectorAll("button").forEach((b, i) => { b.dataset.foco = `${clave}:${i}`; });
+    if (abrir) {
+      f.setAttribute("role", "button"); f.tabIndex = 0; f.title = `Ver lo de ${t.replace(/^💿 /, "")}`;
+      f.addEventListener("click", e => { if (!e.target.closest("button")) abrir(); });
+      f.addEventListener("keydown", e => { if (e.target === f && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); abrir(); } });
+    }
+    return f;
+  }
+
+  const filaArtista = (col, a) => filaR({ thumb: a.thumb, t: a.name, sub: porQue(a.why), redonda: true, clave: `a:${a.browseId}`,
+                                          abrir: () => abrirEn(col, "artista", a) });
+
+  function filaAlbum(col, a) {
+    return filaR({ thumb: a.thumb, t: "💿 " + a.title, marca: marcaDisco(a), clave: `d:${col}:${a.browseId}`,
+                   sub: [a.artist, a.year, porQue(a.why)].filter(Boolean).join(" · "),
+                   acciones: el("div", { class: "acts" }, !discoListo(a) && botonGuardarAlbum(a)),
+                   abrir: () => abrirEn(col, "album", a) });
+  }
+
+  // + a la cola (sin PIN, como en la búsqueda); con el PIN, también ▶ ahora. ⬇ la guarda sin ponerla en la cola.
+  function filaTema(song, pos) {
+    const guardada = song.saved || yaGuardadas.has(song.videoId);
+    return filaR({ thumb: song.thumb, pos, t: song.title, clave: `t:${song.videoId}`,
+                   marca: guardada && el("span", { class: "guardada", title: "Ya está guardada: suena sin esperar la descarga" }, "💾"),
+                   sub: [song.artist, song.duration ? fmt(song.duration) : null, porQue(song.why)].filter(Boolean).join(" · "),
+                   acciones: el("div", { class: "acts" }, !guardada && botonGuardar(song), botonLista(song), botonAhora(song), botonMas(song)) });
+  }
+
+  function botonMas(song) {
+    const ya = queuedIds.has(song.videoId);
+    return el("button", {
+      type: "button", class: ya ? "" : "primario", disabled: ya,
+      title: ya ? "Ya está en la cola" : "Agregarla a la cola", "aria-label": ya ? `${song.title}: ya está en la cola` : `Agregar ${song.title} a la cola`,
+      onclick: async ev => {
+        const by = nameInput.value.trim();
+        if (!by) { toast("Poné tu nombre arriba primero", true); nameInput.focus(); return; }
+        const b = ev.currentTarget;
+        b.disabled = true;
+        try { await api("/api/queue", { videoId: song.videoId, by, client }); toast(`Agregada: ${song.title}`); }
+        catch (err) { b.disabled = false; toast(err.message, true); }
+      },
+    }, ya ? "✓" : "+");
+  }
+
+  // Arriba de lo abierto: ‹ para volver (a la lista, o al artista del que se abrió el álbum) y lo suyo.
+  function cabeza(col, { thumb, t, sub, redonda, extra }) {
+    const antes = pilas[col].at(-2), vuelve = antes ? antes.item.name || antes.item.title : RAIZ[col];
+    return el("div", { class: "fila cabeza" + (redonda ? " artista" : "") },
+      el("button", { type: "button", "data-foco": `volver:${col}`, title: `Volver a ${vuelve}`, onclick: () => volver(col) }, `‹ ${corto(vuelve)}`),
+      el("img", { src: thumb || null, alt: "", loading: "lazy" }),
+      el("div", { class: "info" }, el("div", { class: "t", title: t }, t), el("div", { class: "sub", title: sub || null }, sub)),
+      extra);
+  }
+
+  function vistaArtista(col, e) {
+    const a = e.item, d = e.datos;
+    const partes = [cabeza(col, { thumb: a.thumb, t: a.name, redonda: true,
+                                  sub: [d?.subs && `${d.subs} suscriptores`, porQue(a.why)].filter(Boolean).join(" · ") })];
+    if (!d) return [...partes, el("div", { class: "vacio" }, e.error ? `⚠ ${e.error}` : "cargando…")];
+    if (d.songs.length) partes.push(el("div", { class: "apartado" }, "LO MÁS ESCUCHADO"), ...d.songs.map(s => filaTema(s)));
+    if (d.albums.length) partes.push(el("div", { class: "apartado" }, "ÁLBUMES"), ...d.albums.map(x => filaAlbum(col, x)));
+    if (!d.songs.length && !d.albums.length) partes.push(el("div", { class: "vacio" }, "No tiene nada para pedir en YouTube Music."));
+    return partes;
+  }
+
+  // Sus temas, y arriba lo que se hace con el disco entero: ▶ reproducir y + a la cola (con el PIN), ♫+ todos, ⬇ guardar.
+  function vistaAlbum(col, e) {
+    const a = e.item, d = e.datos, songs = d?.songs || [], fuente = { from: "album", browseId: a.browseId };
+    const total = songs.reduce((t, x) => t + (x.duration || 0), 0);
+    const cab = cabeza(col, { thumb: a.thumb, t: "💿 " + a.title,
+      sub: [a.type, a.artist, a.year, d && contarTemas(songs.length), total && fmt(total)].filter(Boolean).join(" · "),
+      extra: songs.length > 0 && el("div", { class: "botonera" }, botonesCargar(fuente, "el disco entero"), botonSumarTodos(fuente),
+                                    !discoListo(a) && botonGuardarAlbum(a)) });
+    if (!d) return [cab, el("div", { class: "vacio" }, e.error ? `⚠ ${e.error}` : "cargando sus temas…")];
+    return [cab, ...(songs.length ? songs.map((s, i) => filaTema(s, i + 1)) : [el("div", { class: "vacio" }, "No tiene temas que se puedan pedir.")])];
+  }
+
+  async function abrirEn(col, tipo, item) {
+    const e = { tipo, item, datos: null, error: null };
+    pilas[col].push(e); version++; pintar();
+    const panel = cols[col].closest(".panel");
+    if (panel.getBoundingClientRect().top < $(".top").getBoundingClientRect().bottom) panel.scrollIntoView({ block: "start" });
+    cols[col].querySelector("[data-foco^='volver:']")?.focus({ preventScroll: true });
+    try {
+      e.datos = await api(tipo === "artista" ? `/api/artist?browseId=${encodeURIComponent(item.browseId)}`
+                                             : `/api/album?browseId=${encodeURIComponent(item.browseId)}`);
+    } catch (err) {
+      e.error = err.message;
+    }
+    if (pilas[col].includes(e)) { version++; pintar(); }
+  }
+
+  function volver(col) {
+    const e = pilas[col].pop();
+    version++; pintar();
+    // (el foco, a la fila de lo que se cerró, si está; si no, a la columna)
+    [...cols[col].querySelectorAll("[data-foco]")].find(f => f.dataset.foco?.endsWith(e.item.browseId))?.focus({ preventScroll: true });
+  }
+
+  // Cada segundo: el «actualizados hace 5 min» se va poniendo al día.
+  function tick() { if (abierta) pintarBase(); }
+
+  // Con cada estado de la sala (y al cambiar el PIN): si cambió algo que se ve en las filas (la cola,
+  // lo que se baja…), las columnas.
+  function alEstado() { if (abierta) pintar(); }
+
+  boton.onclick = () => abierta ? cerrar() : abrir();
+  addEventListener("popstate", () => location.pathname === "/recomendados" ? abrir(false) : cerrar(false));
+  pintarBoton();
+  return { abrir, cerrar, alEstado, link, tick, pintar, abierta: () => abierta };
+})();
+
 // ---------- 📊 recap ----------
 // Lo más escuchado de la sala (o de todas) en un período. Es otra vista de esta misma página, con
 // la misma barra de arriba: no se recarga nada y la 📻 radio sigue sonando. 📊 la abre y la
@@ -4155,7 +4606,7 @@ const recapVista = (() => {
 
   function abrir(apilar = true) {
     if (!abierta) {
-      descargasVista.cerrar(false); vozVista.cerrar(false);   // (de a una vista)
+      descargasVista.cerrar(false); vozVista.cerrar(false); recosVista.cerrar(false);   // (de a una vista)
       scrollCola = scrollY;
       abierta = true;
       $("main").hidden = true; $("#recap").hidden = false;
@@ -4398,6 +4849,7 @@ const recapVista = (() => {
   return { abrir, cerrar, alEstado, link, abierta: () => abierta };
 })();
 if (location.pathname === "/voz") vozVista.abrir(false);
+if (location.pathname === "/recomendados") recosVista.abrir(false);
 if (location.pathname === "/descargas") descargasVista.abrir(false);   // (acá, con el recap ya definido: se cierran entre sí)
 
 // Recordar el PIN en este dispositivo; después, el aviso que dejó la página antes de cambiar de

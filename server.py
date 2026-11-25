@@ -79,6 +79,7 @@ VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 URL_ID = re.compile(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})")
 PLAYLIST_ID = re.compile(r"[?&]list=([A-Za-z0-9_-]{2,100})")
 ALBUM_ID = re.compile(r"^MPRE[A-Za-z0-9_-]{4,60}$")   # browseId de un álbum de YouTube Music
+ARTISTA_ID = re.compile(r"^UC[A-Za-z0-9_-]{10,40}$")   # browseId de un artista (su canal)
 MAX_PLAYLIST = 200        # temas que se cargan, como mucho, de una playlist
 MAX_ALBUMES = 4           # álbumes que aparecen, como mucho, al buscar
 MAX_VIDEOS = 12           # videos que aparecen, como mucho, al buscar para una sala de tv
@@ -175,6 +176,7 @@ teles = None           # Teles: las salas de tv (📺), para mirar videos de You
 voz = None             # Voz: los anuncios y el micrófono (ver voz.py)
 tapas = None           # Tapas: las copias de las tapas de las canciones guardadas (ver tapas.py)
 letras_guardadas = None   # Letras: las copias de las letras de las canciones guardadas (ver letras.py)
+recos = None           # Recomendados: los 🧭 artistas, álbumes y canciones de cada sala (ver recomendados.py)
 videos = {}            # videoId -> datos de un video (de lo que se buscó para una sala de tv)
 fallos_pin = {}        # ip -> (intentos fallidos, bloqueado hasta)
 
@@ -3042,6 +3044,64 @@ def recap(sid, periodo, persona):
     return dict(r, period=periodo, room=sala.publica() if sala else None, rooms=rooms, mode=state["mode"])
 
 
+# --------------------------------------------------------- 🧭 recomendados
+
+def ids_de_salas():
+    with lock:
+        return list(salas)
+
+
+def _gustos_de(sid):
+    """Lo que el cálculo de los recomendados necesita de una sala: lo que sonó y lo que tiene guardado."""
+    temas = stats.gustos(sid) if stats else []
+    guardadas = director.descargas.todas(sid) if director and director.descargas.limite else []
+    return {"temas": temas, "guardadas": guardadas}
+
+
+def _datos_tema(c):
+    """Que se pueda pedir sin preguntarle a YouTube de nuevo (sólo si se sabe cuánto dura: los temas
+    de la página de un artista no lo traen, y cancion() lo averigua)."""
+    if c.get("duration") and c["videoId"] not in meta_cache:
+        _remember({k: c.get(k) for k in DATOS_TEMA})
+
+
+def recomendados_de(sala):
+    """Los recomendados de la sala, como los dejó el último cálculo (ver Recomendados.de), con lo que ya
+    está guardado marcado (`saved`): lo que se guardó desde que se calcularon sigue, hasta la próxima vuelta."""
+    if not recos:
+        raise ApiError(409, "Los recomendados no andan: mirá los avisos en la consola de la rockola")
+    r = recos.de(sala.id)
+    for c in r["songs"]:
+        _datos_tema(c)
+    if director:
+        r["songs"] = [dict(c, saved=director.descargas.en_sala(c["videoId"], sala.id)) for c in r["songs"]]
+        r["albums"] = [dict(a, saved=director.descargas.del_album(a["title"], a["artist"], sala.id)) for a in r["albums"]]
+    return dict(r, online=state["online"])
+
+
+def artista_de_youtube(bid, sid):
+    """Un artista de YouTube Music (su browseId): sus temas más escuchados y sus álbumes, para verlo
+    desde 🧭 recomendados."""
+    if not recos:
+        raise ApiError(409, "Los recomendados no andan: mirá los avisos en la consola de la rockola")
+    try:
+        a = recos.artista(bid)
+    except Exception as e:
+        print(f"  ⚠ no pude abrir el artista {bid}: {e!r}", flush=True)
+        raise ApiError(502, "No pude abrir ese artista (¿hay internet?)")
+    if not a:
+        raise ApiError(404, "No encontré ese artista en YouTube Music")
+    from recomendados import discos_de
+    # (los parecidos no hacen falta: ya están en la columna; los álbumes, primero los más escuchados)
+    a = dict(a, related=[], albums=discos_de(a), popular=[])
+    for c in a["songs"]:
+        _datos_tema(c)
+    if director:
+        a["songs"] = [dict(c, saved=director.descargas.en_sala(c["videoId"], sid)) for c in a["songs"]]
+        a["albums"] = [dict(x, saved=director.descargas.del_album(x["title"], x["artist"], sid)) for x in a["albums"]]
+    return a
+
+
 # --------------------------------------------------------- director (mpv)
 
 def datos_de(item, sala=None):
@@ -4060,7 +4120,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(u.query)
 
         def route():
-            if u.path in ("/", "/recap", "/descargas", "/voz"):   # (la misma página, abierta en 📊 recap o en ⬇ descargas)
+            if u.path in ("/", "/recap", "/descargas", "/voz", "/recomendados"):   # (la misma página, abierta en 📊 recap, ⬇ descargas…)
                 return self.send_page("index.html")
             if u.path == "/pantalla":
                 return self.send_page("pantalla.html")
@@ -4186,6 +4246,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(discos_con_faltantes(sid, qs.get("q", [""])[0][:100]))
                 ver = director.descargas.albumes if vista == "albumes" else director.descargas.listado
                 return self.send_json(ver(qs.get("q", [""])[0][:100], desde, n, sala=sid))
+            if u.path == "/api/recos":   # 🧭 recomendados
+                return self.send_json(recomendados_de(sala_de(qs.get("sala", [""])[0])))
+            if u.path == "/api/artist":   # un artista de YouTube Music (desde 🧭 recomendados)
+                bid = qs.get("browseId", [""])[0]
+                if not ARTISTA_ID.match(bid):
+                    raise ApiError(400, "Artista inválido")
+                return self.send_json(artista_de_youtube(bid, sala_de(qs.get("sala", [""])[0]).id))
             if u.path == "/api/stats":   # el recap
                 return self.send_json(recap(qs.get("sala", [""])[0], qs.get("periodo", [""])[0][:10],
                                             qs.get("persona", [""])[0]))
@@ -4429,7 +4496,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global director, stats, listas, teles, tapas, letras_guardadas, voz, https_activo, PORT, IP_FIJA
+    global director, stats, listas, teles, tapas, letras_guardadas, voz, recos, https_activo, PORT, IP_FIJA
     ap = argparse.ArgumentParser(description="Rockola de oficina")
     ap.add_argument("--modo", choices=["mpv", "navegador"],
                     help="dónde suena la música (por defecto: mpv si está instalado)")
@@ -4514,6 +4581,10 @@ def main():
         threading.Thread(target=bucle_radio, daemon=True, name="radio-youtube").start()
         leer_album_temas()
         threading.Thread(target=bucle_completos, daemon=True, name="albumes-completos").start()
+    from recomendados import Recomendados
+    recos = Recomendados(carpeta() / "recomendados.json", _gustos_de, yt(), relacionadas, ids_de_salas,
+                         hay_red=lambda: state["online"] is not False, principal=PRINCIPAL)
+    recos.arrancar()   # (los calcula de a una sala, sin apuro: el primero, al minuto de arrancar)
     if CLIMA is not False:
         threading.Thread(target=bucle_clima, daemon=True, name="clima").start()
         threading.Thread(target=bucle_temperatura, daemon=True, name="temperatura").start()

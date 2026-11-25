@@ -347,6 +347,29 @@ class Estadisticas:
 
     # --- leer
 
+    def gustos(self, sala, dias=180, vida=30):
+        """Lo que sonó en `sala` en los últimos `dias`, para 🧭 recomendados: cada tema, con `veces`
+        (las que contaron como escuchada), `total` (las que sonó) y `peso`: cuánto gustó. Cada vez que
+        se escuchó suma 1 si lo pidieron (o vino en una playlist) y 0,35 si lo eligió 🔀; cortado antes
+        de tiempo resta 0,3; 🔥 y ❤️ suman 1 por persona, y 😴 resta 1,5. Todo vale menos cuanto más
+        viejo: lo de hace `vida` días, la mitad."""
+        ahora = time.time()
+        desde, vida = ahora - dias * 86400, vida * 86400.0
+        with self.lock:
+            filas = self.db.execute(f"""
+                SELECT video_id, MAX(titulo), MAX(artista), MAX(album), MAX(tapa), MAX(duracion),
+                       SUM((CASE WHEN {VALE} THEN (CASE origen WHEN 'azar' THEN 0.35 ELSE 1.0 END) ELSE -0.3 END)
+                           / (1 + (? - cuando) / ?)),
+                       SUM({VALE}), COUNT(*)
+                FROM escuchas WHERE sala = ? AND cuando >= ? GROUP BY video_id""", (ahora, vida, sala, desde)).fetchall()
+            reacciones = self.db.execute("""
+                SELECT video_id, SUM(cuantas * (CASE emoji WHEN '😴' THEN -1.5 ELSE 1.0 END) / (1 + (? - cuando) / ?))
+                FROM reacciones WHERE sala = ? AND cuando >= ? GROUP BY video_id""", (ahora, vida, sala, desde)).fetchall()
+        extra = dict(reacciones)
+        return [{"videoId": vid, "title": titulo, "artist": artista, "album": album, "thumb": tapa, "duration": duracion,
+                 "peso": round(peso + extra.get(vid, 0), 4), "veces": veces, "total": total}
+                for vid, titulo, artista, album, tapa, duracion, peso, veces, total in filas]
+
     def recap(self, salas, desde=None, hasta=None, persona=None, top=10):
         """Todo lo del recap de `salas` (sus ids) entre `desde` y `hasta` (segundos unix; None: sin
         límite). Con `persona` (un nombre), sólo lo que pidió esa persona: sus pedidos y las

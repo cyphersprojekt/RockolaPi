@@ -12,7 +12,7 @@ muestra qué está sonando, quién lo pidió y qué viene después.
 
 **La página**, acá con el PIN puesto (por eso los controles): la letra en sincro y el chat, lo que
 suena y la cola, el buscador y las canciones guardadas. Arriba, el led de internet, el clima, la
-sala, el nombre y cuatro botones: 📻 radio, 📊 recap, ⬇ descargas y 🔒 controlar.
+sala, el nombre y los botones: 📻 radio, 🧭 recomendados, 📊 recap, ⬇ descargas, 🎙️ voz y 🔒 controlar.
 
 | ![Descargas](docs/img/descargas.png) | ![Sala de tv](docs/img/salatv.png) |
 |:---:|:---:|
@@ -131,10 +131,12 @@ La consola muestra el link para los compañeros (`http://<tu-ip>:8000/`) y el PI
 
 ## Usarla
 
-Los cinco botones de la barra de arriba (**📻** radio, **📊** recap, **⬇** descargas, **🎙️** voz y **🔒**
-controlar) son sólo el ícono: qué es cada uno lo dice al pasarle el mouse, y el que está prendido
+Los seis botones de la barra de arriba (**📻** radio, **🧭** recomendados, **📊** recap, **⬇** descargas,
+**🎙️** voz y **🔒** controlar) son sólo el ícono: qué es cada uno lo dice al pasarle el mouse, y el que está prendido
 (la radio sonando, la vista abierta, el PIN puesto) lleva el recuadro resaltado. En el celular
-no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
+no están arriba: van en un menú fijo, abajo, al alcance del pulgar. En las vistas que no son la de
+la cola (🧭 📊 ⬇ 🎙️), abajo de todo queda un **mini reproductor**, como en las apps de música: lo que
+suena y por dónde va (con el PIN, ⏮ ⏸ ⏭); tocándolo se vuelve a la cola.
 
 - **Compañeros:** entran al link o escanean el QR, ponen su nombre, buscan y tocan **+ agregar**.
   Hay un solo buscador, sin botón: mientras escribís aparecen las **💾 guardadas** que coinciden
@@ -251,7 +253,8 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   auriculares. Es del modo mpv, y necesita un navegador que reproduzca WebM/Opus (el formato en que
   vienen casi todos los temas), como Chrome, Edge o Firefox.
 - **🚪 Salas:** arriba, **sala:** elige en cuál estás (🔊 la principal, la del parlante; 📻 las
-  otras). Con **＋ nueva sala…** se crea una, con un nombre y un PIN: quien la crea queda
+  otras). Con **＋ nueva sala…** se crea una, con un nombre y un PIN (en un cuadro, encima de lo que
+  se esté mirando: la página va a lo mismo en la sala nueva): quien la crea queda
   controlándola (pausa, ⏭, 🔀, 🗑 borrarla); el PIN de la rockola vale en todas. Una sala sin
   parlante **suena mientras alguien la escucha** con 📻 radio: si nadie la escucha, queda en espera
   donde iba, así lo que piden no se pierde sonando para nadie. Para escucharla en una sala de
@@ -290,6 +293,23 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
     Premium en ese navegador, no hay). Un video que no deja verse fuera de YouTube se saltea solo.
   - Hay hasta 8, y andan en los dos modos. Quedan guardadas entre reinicios, con su cola y por
     dónde iba el video (el chat no).
+- **🧭 Recomendados:** como en las apps de música, **🧭** cambia la cola por tres columnas: **artistas**,
+  **álbumes** y **canciones** que podrían gustarle a la sala (su link es `http://<ip>:8000/recomendados`).
+  Salen de lo que más suena (lo pedido cuenta más que lo que eligió 🔀, lo de hace poco más que lo de
+  hace meses, y 🔥 ❤️ suman y 😴 resta) y de lo que más hay guardado: los artistas que YouTube Music da
+  como parecidos (uno parecido a varios de los de la sala sube), los discos más escuchados de esos
+  artistas y los de la sala que no están, y temas de las radios de lo que más sonó. Lo que ya está
+  guardado o ya sonó no aparece, y de cada artista van dos como mucho. Cada una dice de dónde salió
+  («como Soda Stereo y Cerati», «de tus artistas», «por «De música ligera»»). Tocando un artista se ven
+  sus temas más escuchados y sus álbumes, y tocando un álbum, sus temas, en la misma columna (‹ vuelve):
+  **+** a la cola, **⬇** guardar y, con el PIN, **▶** ahora o el disco entero.
+  - Es caro (unas 30 preguntas a YouTube la primera vez), así que no es en el momento: la rockola los
+    arma sola, sin apuro, y los renueva **cada 2 horas** (la principal siempre; otra sala, mientras
+    alguien los haya mirado en la última semana). Lo que le preguntó a YouTube de un artista vale un
+    día, así que las vueltas de cada 2 horas casi no le piden nada: vuelven a ordenar con lo que sonó y
+    se guardó mientras tanto, y un poco al azar entre los mejores, para que cambien. La primera vez
+    tardan un minuto en aparecer; quedan en `recomendados.json` (en la carpeta), así que después de
+    reiniciar ya están, aunque no haya internet.
 - **📊 Recap:** arriba (en el celular, en el menú de abajo), **📊** cambia la cola por el recap, en la misma página: la 📻 radio sigue
   sonando, y se vuelve tocándolo de nuevo (o con ← del navegador). Su link es
   `http://<ip>:8000/recap`, y se actualiza solo cuando termina un tema. Muestra cuánto sonó, el top de
@@ -301,8 +321,9 @@ no están arriba: van en un menú fijo, abajo, al alcance del pulgar.
   cuentan como pedidas, pero no para los rankings. En «quién pide más» no entran 🔀 ni lo que se
   cargó entero (playlists y álbumes). Entre los datos están **la más festejada** (🔥), **la más
   querida** (❤️) y **la que durmió a todos** (😴): de cada reacción, la canción que más juntó. Las de cada persona se juntan por el nombre, sin fijarse en mayúsculas ni acentos.
-- **Quien maneja la música:** en la misma página, **🔒** y el PIN (mientras se controla queda
-  **🔓**, resaltado: tocándolo se deja de controlar). Aparecen ⏮ ⏸ ⏭ con el
+- **Quien maneja la música:** en la misma página, **🔒** y el PIN, en un cuadro que sale encima de lo
+  que se esté mirando (la cola, 🧭, el recap…: al entrar se sigue ahí). Mientras se controla queda
+  **🔓**, resaltado: tocándolo se deja de controlar. Aparecen ⏮ ⏸ ⏭ con el
   volumen al lado, abajo 🔀 y 🎚️ (lo que se deja prendido o apagado), y en cada canción de las
   próximas **⤒** (que suene a continuación), **↕** y **✕** (quitarla). De **↕** se la agarra
   para **arrastrarla** adonde tiene que ir, con el mouse o con el dedo: mientras, las otras se
@@ -493,7 +514,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 | `ip` | automática | la IP que muestran el link y el QR |
 | `clima` | automático | de dónde es el clima de la barra de arriba: vacío, el de donde está la rockola (por su IP); una ciudad (`"Rosario"`) o un punto (`"-32.95, -60.64"`); `false`, no mostrarlo |
 | `guardar_gb` | `16` | GB para canciones guardadas, entre todas las salas; al pasarlos se borran las que hace más que no suenan (0 = no guardar). Siempre deja 2 GB libres |
-| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas (y las copias de sus tapas y sus letras), las salas (también las de tv), las ♫ playlists y las estadísticas del recap |
+| `carpeta` | `~/.cache/rockola` | dónde quedan las canciones guardadas (y las copias de sus tapas y sus letras), las salas (también las de tv), las ♫ playlists, las estadísticas del recap y los 🧭 recomendados |
 | `azar_al_prender` | `true` | al prender la Raspberry o reiniciar el servicio, si en 10 s nadie pide nada: 🔀 prendido y a sonar (con un parlante Bluetooth, cuando se conecta); si estaba sonando un tema, sigue ése. No en el reinicio de las 6 |
 | `predescargar` | `0` | canciones de la cola que se bajan por adelantado (0 = toda la cola) |
 | `[controles]` | | pines de los botones, paso de volumen y doble toque |
@@ -504,6 +525,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── server.py             servidor: cola, búsqueda, API y el "director" que maneja mpv
 ├── reproductor.py        descargas con yt-dlp y control de mpv por su socket JSON IPC
 ├── estadisticas.py       lo que sonó, en SQLite, para el 📊 recap (y los géneros, de iTunes)
+├── recomendados.py       los 🧭 artistas, álbumes y canciones recomendados de cada sala (recomendados.json)
 ├── listas.py             las ♫ playlists que se arman en la rockola, por sala (listas.json)
 ├── tapas.py              las copias de las tapas de las guardadas (para verlas sin internet)
 ├── letras.py             las copias de las letras de las guardadas (lo mismo)
@@ -511,7 +533,7 @@ Todo está en `rockola.toml`; `iniciar.sh` lo crea a partir de
 ├── tele.py               las 📺 salas de tv: el video que va, su reloj, la cola y el chat (tv.json)
 ├── tui.py                pantalla de terminal (Textual)
 ├── controles.py          botones físicos (gpiozero)
-├── static/               páginas web: pedidos, 📊 recap y ⬇ descargas (/), las salas de tv (/tv), /pantalla y /player
+├── static/               páginas web: pedidos, 🧭 recomendados, 📊 recap y ⬇ descargas (/), las salas de tv (/tv), /pantalla y /player
 │   ├── piper/            🗣️ texto a voz (Piper, en el navegador): voz.js y fonemas.js
 │   └── fuentes/          la letra de las páginas (JetBrains Mono, con su licencia OFL): la sirve la rockola
 ├── iniciar.sh, tui.sh    arrancar el servidor y la pantalla

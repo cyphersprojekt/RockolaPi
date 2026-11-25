@@ -546,6 +546,12 @@ class Descargas:
         with self.lock:
             return {vid for vid, _ in self._de(sala)}
 
+    def todas(self, sala=None):
+        """Los datos de todas las guardadas (de `sala`), cada una con su videoId y `usada` (la última
+        vez que sonó o se bajó): para 🧭 recomendados."""
+        with self.lock:
+            return [dict(g["datos"], videoId=vid, usada=g["usada"]) for vid, g in self._de(sala)]
+
     def tapas(self):
         """Las direcciones de las tapas de las guardadas (cada una, una vez)."""
         with self.lock:
