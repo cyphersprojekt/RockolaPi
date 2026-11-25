@@ -1201,6 +1201,36 @@ function fila(song, { pos, imagen = false, extra, action, marca } = {}) {
     action);
 }
 
+// ---------- transiciones ----------
+// Cortas: al entrar a otra vista, al pasar de página y al abrir un álbum (o volver). Sólo cambian
+// la opacidad y el lugar en unos píxeles (con transform): nada cambia de tamaño ni empuja lo de al
+// lado, así lo que se mide mientras tanto (cuántas filas entran) da lo mismo. Si el sistema pide
+// menos movimiento, o el navegador no sabe animar, no hay.
+const menosMovimiento = matchMedia("(prefers-reduced-motion: reduce)");
+function animar(e, cuadros, ms) {
+  if (e?.animate && !menosMovimiento.matches) e.animate(cuadros, { duration: ms, easing: "cubic-bezier(.2, .7, .3, 1)" });
+}
+// Lo nuevo entra desde un costado. `dir` 1: desde la derecha (la página que sigue, o se abrió algo);
+// -1: desde la izquierda (la anterior, o ‹ volver). Son 12 px: dentro del margen del panel, así
+// no se asoma del borde de la pantalla (ni aparece, un instante, la barra para desplazar de costado).
+const deslizar = (e, dir = 1) =>
+  animar(e, [{ opacity: 0, transform: `translateX(${dir * 12}px)` }, { opacity: 1, transform: "none" }], 170);
+// Una vista que aparece (o el mini reproductor): sube un poco mientras se aclara.
+const aparecer = e => animar(e, [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "none" }], 200);
+
+// Las vistas (la cola, 🧭, 📊, ⬇, 🎙️): la que quedó a la vista, aparece. Se mira acá, cuando terminó
+// el cambio, y no en cada abrir(): al pasar de una vista a otra, la cola se muestra y se vuelve a
+// esconder en el mismo momento (ver los cerrar(false)), y esa no tiene que aparecer.
+(() => {
+  const vistas = ["main", "#recos", "#recap", "#descargas", "#voz"].map(s => $(s));
+  const obs = new MutationObserver(cambios => {
+    const estaba = new Map();   // escondida o no antes de este cambio (lo dice el primer registro de cada una)
+    for (const c of cambios) if (!estaba.has(c.target)) estaba.set(c.target, c.oldValue !== null);
+    for (const [v, escondida] of estaba) if (escondida && !v.hidden) aparecer(v);
+  });
+  for (const v of vistas) obs.observe(v, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+})();
+
 // ---------- listas que entran en la pantalla ----------
 // En la compu la página no se desplaza (ver el CSS): cada lista muestra las filas que le
 // entran y, si hay más, se pagina. En el celular se ven todas (o de a `porPagina`).
@@ -2316,7 +2346,7 @@ function filaDisco(a) {
 
 async function abrirDisco(a) {
   discoAbierto = { a, datos: null, error: null }; pagDisco.pagina = 0;
-  pintarResultados();
+  pintarResultados(); deslizar($("#results"));
   $("#results .cabeza button")?.focus();
   try {
     const datos = await api(`/api/album?browseId=${encodeURIComponent(a.browseId)}`);
@@ -2331,7 +2361,7 @@ async function abrirDisco(a) {
 // disco entero: ▶ reproducir y + a la cola (con el PIN), ♫+ todos, ⬇ guardar.
 function pintarDisco(box) {
   const { a, datos, error } = discoAbierto;
-  const volver = () => { discoAbierto = null; pintarResultados(); $("#q").focus({ preventScroll: true }); };
+  const volver = () => { discoAbierto = null; pintarResultados(); deslizar($("#results"), -1); $("#q").focus({ preventScroll: true }); };
   const songs = datos?.songs || [], fuente = { from: "album", browseId: a.browseId };
   const total = songs.reduce((t, x) => t + (x.duration || 0), 0), marca = marcaDisco(a);
   const cabeza = el("div", { class: "fila cabeza" },
@@ -2640,19 +2670,27 @@ let artistaVer = store.get("artistaVer") === "canciones" ? "canciones" : "albume
 const pagArtista = { pagina: 0 };
 
 // « ‹ 1 2 3 › »: tres números alrededor de la página actual; « y » van a la primera y a la última.
+// Las filas de la página nueva entran de costado (el paginado queda quieto). `ir` puede tardar
+// (las guardadas se piden de a páginas): se anima cuando ya está pintada, en la misma caja.
 function paginador(actual, total, ir, nombre) {
   const desde = Math.max(0, Math.min(actual - 1, total - 3));
   const nums = [desde, desde + 1, desde + 2].filter(p => p < total);
+  const pasar = async p => {
+    const caja = nav.parentElement;
+    await ir(p);
+    deslizar(caja?.querySelector(":scope > .filas"), p < actual ? -1 : 1);
+  };
   const flecha = (texto, p, titulo, apagada) =>
-    el("button", { type: "button", title: titulo, "aria-label": titulo, disabled: apagada, onclick: () => ir(p) }, texto);
-  return el("nav", { class: "paginas", "aria-label": nombre },
+    el("button", { type: "button", title: titulo, "aria-label": titulo, disabled: apagada, onclick: () => pasar(p) }, texto);
+  const nav = el("nav", { class: "paginas", "aria-label": nombre },
     flecha("«", 0, "Primera página", actual === 0),
     flecha("‹", actual - 1, "Página anterior", actual === 0),
     nums.map(p => p === actual
       ? el("span", { class: "actual", "aria-current": "page" }, p + 1)
-      : el("button", { type: "button", "aria-label": `Página ${p + 1}`, onclick: () => ir(p) }, p + 1)),
+      : el("button", { type: "button", "aria-label": `Página ${p + 1}`, onclick: () => pasar(p) }, p + 1)),
     flecha("›", actual + 1, "Página siguiente", actual >= total - 1),
     flecha("»", total - 1, `Última página (la ${total})`, actual >= total - 1));
+  return nav;
 }
 
 // Si cambiaste de página desde abajo, volver arriba de la lista (sin taparla con la barra).
@@ -2831,7 +2869,7 @@ const filaFalta = song => {
 function filaAlbum(a) {
   const abrir = () => {
     albumAbierto = a; pagAlbum.pagina = 0;
-    pintarGuardadas(); subirA($("#biblioPanel"));
+    pintarGuardadas(); deslizar($("#guardadas")); subirA($("#biblioPanel"));
     $("#guardadas .cabeza button")?.focus();
   };
   return el("div", { class: "fila album", role: "button", tabindex: 0, title: "Ver sus temas", onclick: abrir,
@@ -2845,7 +2883,7 @@ function filaAlbum(a) {
 
 // Los temas de un álbum, con "‹ álbumes" para volver a la lista (en la misma página que estaba).
 function pintarAlbum(a) {
-  const volver = () => { albumAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  const volver = () => { albumAbierto = null; pintarGuardadas(); deslizar($("#guardadas"), -1); reajustarGuardadas(); };
   // (al final, apagados, los que le faltan: las guardadas van primero, así no se corren cuando llegan)
   const faltan = faltantesDe(a, () => { if (albumAbierto?.key === a.key) pintarGuardadas(); });
   const cabeza = el("div", { class: "fila cabeza" },
@@ -2877,7 +2915,7 @@ const datosArtista = a => [contarTemas(a.count), a.albumCount ? `${a.albumCount}
 function filaArtista(a) {
   const abrir = () => {
     artistaAbierto = { ...a, songs: null, albums: null }; pagArtista.pagina = 0;
-    pintarGuardadas(); subirA($("#biblioPanel"));
+    pintarGuardadas(); deslizar($("#guardadas")); subirA($("#biblioPanel"));
     $("#guardadas .cabeza button")?.focus();
     traerArtista();
   };
@@ -2912,7 +2950,7 @@ async function traerArtista() {
 // Un artista abierto: "‹ artistas" para volver a la lista, qué ver (💿 álbumes o 🎵 canciones) y,
 // con el PIN, ▶ reproducir y + a la cola: todo lo suyo, mezclado.
 function pintarArtista(a) {
-  const volver = () => { artistaAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  const volver = () => { artistaAbierto = null; pintarGuardadas(); deslizar($("#guardadas"), -1); reajustarGuardadas(); };
   const ver = (cual, texto, titulo) => el("button", {
     type: "button", class: artistaVer === cual ? "on" : "", "aria-pressed": String(artistaVer === cual), title: titulo,
     onclick: () => {
@@ -2957,7 +2995,7 @@ const datosGenero = g => `${contarTemas(g.count)} · ${fmt(g.duration)}`;
 function filaGenero(g) {
   const abrir = () => {
     generoAbierto = { ...g, songs: null }; pagGenero.pagina = 0;
-    pintarGuardadas(); subirA($("#biblioPanel"));
+    pintarGuardadas(); deslizar($("#guardadas")); subirA($("#biblioPanel"));
     $("#guardadas .cabeza button")?.focus();
     traerGenero();
   };
@@ -2993,7 +3031,7 @@ async function traerGenero() {
 // Los temas de un género (por artista), con "‹ géneros" para volver a la lista y, con el PIN,
 // ▶ reproducir y + a la cola: el género entero, mezclado (no tiene un orden).
 function pintarGenero(g) {
-  const volver = () => { generoAbierto = null; pintarGuardadas(); reajustarGuardadas(); };
+  const volver = () => { generoAbierto = null; pintarGuardadas(); deslizar($("#guardadas"), -1); reajustarGuardadas(); };
   const cabeza = el("div", { class: "fila cabeza" },
     el("button", { type: "button", title: "Volver a la lista de géneros", onclick: volver }, "‹ géneros"),
     el("img", { src: g.thumb || null, alt: "", loading: "lazy" }),
@@ -3267,7 +3305,7 @@ async function abrirLista(id, ir = false) {
   const resumen = listasSala.items.find(x => x.id === id) || { name: armando?.id === id ? armando.name : "" };
   listasSala.abierta = { ...resumen, id, songs: resumen.songs || null };   // (los de ahora, cuando lleguen)
   listasSala.creando = false; pagLista.pagina = 0;
-  pintarListas();
+  pintarListas(); deslizar($("#playlists"));
   if (ir) $("#biblioPanel").scrollIntoView({ block: "nearest" });
   else subirA($("#biblioPanel"));
   $("#playlists .cabeza button")?.focus({ preventScroll: true });
@@ -3284,7 +3322,7 @@ async function abrirLista(id, ir = false) {
 // Una playlist abierta: "‹ playlists" para volver; ▶ reproducir y + a la cola (con el PIN); y si es
 // tuya (o con el PIN): ✚ sumar temas, ✎ cambiarle el nombre, 🗑 borrarla, y ↑ ✕ en cada tema.
 function pintarListaAbierta(l) {
-  const volver = () => { listasSala.abierta = null; pintarListas(); };
+  const volver = () => { listasSala.abierta = null; pintarListas(); deslizar($("#playlists"), -1); };
   const mia = puedoCambiar(l), songs = l.songs || [], sumando = armando?.id === l.id;
   const fuente = { from: "list", list: l.id };
   const cabeza = el("div", { class: "fila cabeza" },
@@ -3461,6 +3499,7 @@ const descargasVista = (() => {
     tab = cual; store.set("descargasTab", cual);
     firma = null; firmaDiscos = null;
     pintar();
+    if (cual === "biblioteca") deslizar($("#descargasBiblio")); else deslizar($("#descargasLista"), -1);   // (biblioteca es la de la derecha)
     if (cual === "biblioteca") traerDiscos();
   }
 
@@ -3707,8 +3746,8 @@ const descargasVista = (() => {
       estadoActual, el("span", { class: "flechita", "aria-hidden": "true" }, "▾"));
     const estadoMenu = el("ul", { class: "menu", role: "listbox", "aria-label": "Cuáles álbumes ver", hidden: true });
     const menu = desplegable(estadoBtn, estadoMenu, v => { estado = v; store.set("descargasEstado", v); pagina = 0; firmaDiscos = null; pintarBiblio(); });
-    const anterior = el("button", { type: "button", "aria-label": "Página anterior", title: "Página anterior", onclick: () => { pagina--; firmaDiscos = null; pintarBiblio(); } }, "‹");
-    const siguiente = el("button", { type: "button", "aria-label": "Página siguiente", title: "Página siguiente", onclick: () => { pagina++; firmaDiscos = null; pintarBiblio(); } }, "›");
+    const anterior = el("button", { type: "button", "aria-label": "Página anterior", title: "Página anterior", onclick: () => { pagina--; firmaDiscos = null; pintarBiblio(); deslizar(armada.lista, -1); } }, "‹");
+    const siguiente = el("button", { type: "button", "aria-label": "Página siguiente", title: "Página siguiente", onclick: () => { pagina++; firmaDiscos = null; pintarBiblio(); deslizar(armada.lista); } }, "›");
     const nPagina = el("span", { class: "n", role: "status" }, "1/1");
     // Alterna: si ya están todos los del filtro elegidos, los suelta (y deja los de otros filtros).
     const todos = el("button", { type: "button", onclick: () => {
@@ -4266,7 +4305,7 @@ const miniRepro = (() => {
     if (on === visible()) return;
     caja.hidden = !on;
     document.body.classList.toggle("con-mini", on);   // (los avisos salen arriba del mini)
-    if (on) alEstado(last);
+    if (on) { alEstado(last); aparecer(caja); }
   }
 
   function alEstado(s) {
@@ -4519,7 +4558,7 @@ const recosVista = (() => {
 
   async function abrirEn(col, tipo, item) {
     const e = { tipo, item, datos: null, error: null };
-    pilas[col].push(e); version++; pintar();
+    pilas[col].push(e); version++; pintar(); deslizar(cols[col]);
     const panel = cols[col].closest(".panel");
     if (panel.getBoundingClientRect().top < $(".top").getBoundingClientRect().bottom) panel.scrollIntoView({ block: "start" });
     cols[col].querySelector("[data-foco^='volver:']")?.focus({ preventScroll: true });
@@ -4534,7 +4573,7 @@ const recosVista = (() => {
 
   function volver(col) {
     const e = pilas[col].pop();
-    version++; pintar();
+    version++; pintar(); deslizar(cols[col], -1);
     // (el foco, a la fila de lo que se cerró, si está; si no, a la columna)
     [...cols[col].querySelectorAll("[data-foco]")].find(f => f.dataset.foco?.endsWith(e.item.browseId))?.focus({ preventScroll: true });
   }
