@@ -229,6 +229,8 @@ Lo más común:
 - `normalizar = true`: iguala el volumen entre canciones, si unas suenan mucho más fuerte que otras.
 - `ip`: si el link o el QR muestran una IP que no es la de la red de la oficina.
 
+La lista completa de opciones está en [Configuración](configuracion.md).
+
 **Pantalla:** el tamaño de la letra y los colores se cambian en `~/.bash_profile`, en la línea
 de `cage … foot --font=monospace:size=14 …`. Para otros colores, agregá al final
 `--tema nord` (o `tokyo-night`, `dracula`, `monokai`, `catppuccin-mocha`). Reiniciá para ver el
